@@ -148,6 +148,7 @@ export class PackedSweepTransferClient {
       });
       const invokeMs = performance.now() - invokeStarted;
       if (!this.active || this.generation !== generation) {
+        await this.releaseAfterFailure(generation);
         throw new TransferClientError(
           "stale_response",
           `generation ${generation} completed after it was superseded`,
@@ -171,6 +172,7 @@ export class PackedSweepTransferClient {
       }
       const parseMs = performance.now() - parseStarted;
       if (!this.active || this.generation !== generation) {
+        await this.releaseAfterFailure(generation);
         throw new TransferClientError(
           "stale_response",
           `generation ${generation} was superseded during parsing`,
@@ -197,14 +199,12 @@ export class PackedSweepTransferClient {
             return;
           }
           released = true;
-          if (this.active && this.generation === generation) {
-            try {
-              await this.invoke<TransferSnapshot>("release_phase2_transfer_credit", {
-                generation,
-              });
-            } catch (error) {
-              throw normalizeInvokeError(error);
-            }
+          try {
+            await this.invoke<TransferSnapshot>("release_phase2_transfer_credit", {
+              generation,
+            });
+          } catch (error) {
+            throw normalizeInvokeError(error);
           }
         },
       };
@@ -214,13 +214,11 @@ export class PackedSweepTransferClient {
   }
 
   private async releaseAfterFailure(generation: number) {
-    if (this.active && this.generation === generation) {
-      try {
-        await this.invoke("release_phase2_transfer_credit", { generation });
-      } catch {
-        // Preserve the original parse/response error. The backend still bounds
-        // the held credit, and a new generation resets the ledger.
-      }
+    try {
+      await this.invoke("release_phase2_transfer_credit", { generation });
+    } catch {
+      // Preserve the original response/parse error. A rejected backend request
+      // never became held; a delivered response remains charged until this ack.
     }
   }
 }

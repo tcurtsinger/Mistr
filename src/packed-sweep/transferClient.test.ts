@@ -30,11 +30,17 @@ function snapshot(generation: number, heldCredits = 0): TransferSnapshot {
 describe("PackedSweepTransferClient", () => {
   it("holds a backend credit until the caller releases the parsed sweep", async () => {
     const calls: string[] = [];
-    const invoke: InvokeFunction = async <T>(command: string) => {
+    const releasedGenerations: number[] = [];
+    const invoke: InvokeFunction = async <T>(command: string, arguments_?: Record<string, unknown>) => {
       calls.push(command);
-      if (command === "begin_phase2_generation") return snapshot(7) as T;
+      if (command === "begin_phase2_generation") {
+        return snapshot(arguments_?.generation as number) as T;
+      }
       if (command === "request_phase2_benchmark_sweep") return goldenBuffer() as T;
-      if (command === "release_phase2_transfer_credit") return snapshot(7) as T;
+      if (command === "release_phase2_transfer_credit") {
+        releasedGenerations.push(arguments_?.generation as number);
+        return snapshot(arguments_?.generation as number) as T;
+      }
       throw new Error(`unexpected command ${command}`);
     };
     const client = new PackedSweepTransferClient(invoke);
@@ -42,13 +48,16 @@ describe("PackedSweepTransferClient", () => {
     const lease = await client.request();
     expect(lease.packed.metadata.generation).toBe(7n);
     expect(calls).not.toContain("release_phase2_transfer_credit");
+    await client.begin(8);
     await lease.release();
     await lease.release();
     expect(calls.filter((call) => call === "release_phase2_transfer_credit")).toHaveLength(1);
+    expect(releasedGenerations).toEqual([7]);
   });
 
   it("drops a response whose generation was superseded while invoke was pending", async () => {
     let resolveRequest: ((value: ArrayBuffer) => void) | undefined;
+    const releasedGenerations: number[] = [];
     const request = new Promise<ArrayBuffer>((resolve) => {
       resolveRequest = resolve;
     });
@@ -57,6 +66,10 @@ describe("PackedSweepTransferClient", () => {
         return snapshot(arguments_?.generation as number) as T;
       }
       if (command === "request_phase2_benchmark_sweep") return request as T;
+      if (command === "release_phase2_transfer_credit") {
+        releasedGenerations.push(arguments_?.generation as number);
+        return snapshot(arguments_?.generation as number) as T;
+      }
       throw new Error(`unexpected command ${command}`);
     };
     const client = new PackedSweepTransferClient(invoke);
@@ -65,6 +78,7 @@ describe("PackedSweepTransferClient", () => {
     await client.begin(8);
     resolveRequest?.(goldenBuffer());
     await expect(pending).rejects.toMatchObject({ code: "stale_response" });
+    expect(releasedGenerations).toEqual([7]);
   });
 
   it("does not deactivate a newer generation when an older begin fails late", async () => {

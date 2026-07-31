@@ -3,6 +3,7 @@ use crate::packed_sweep::{
     validate_packed_sweep,
 };
 use serde::Serialize;
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::ipc::Response;
@@ -42,7 +43,7 @@ pub struct TransferSnapshot {
 struct TransferState {
     generation: u64,
     active: bool,
-    held_credits: u8,
+    held_credits_by_generation: BTreeMap<u64, u8>,
     in_flight_credits: u8,
 }
 
@@ -69,15 +70,8 @@ impl TransferBroker {
                 ),
             ));
         }
-        let in_flight_credits = state.in_flight_credits;
-        *state = TransferState {
-            generation,
-            active: true,
-            held_credits: 0,
-            // Superseding a generation retires already-delivered leases, but
-            // work still running on the blocking pool remains globally charged.
-            in_flight_credits,
-        };
+        state.generation = generation;
+        state.active = true;
         Ok(snapshot(&state))
     }
 
@@ -85,7 +79,6 @@ impl TransferBroker {
         let mut state = self.lock()?;
         ensure_current(&state, generation)?;
         state.active = false;
-        state.held_credits = 0;
         Ok(snapshot(&state))
     }
 
@@ -110,20 +103,16 @@ impl TransferBroker {
 
     fn release(&self, generation: u64) -> Result<TransferSnapshot, TransferError> {
         let mut state = self.lock()?;
-        ensure_current(&state, generation)?;
-        if !state.active {
-            return Err(TransferError::new(
-                "generation_cancelled",
-                format!("generation {generation} is cancelled"),
-            ));
-        }
-        if state.held_credits == 0 {
+        let Some(held) = state.held_credits_by_generation.get_mut(&generation) else {
             return Err(TransferError::new(
                 "credit_not_held",
-                "no transfer credit is held",
+                format!("generation {generation} holds no delivered transfer credit"),
             ));
+        };
+        *held -= 1;
+        if *held == 0 {
+            state.held_credits_by_generation.remove(&generation);
         }
-        state.held_credits -= 1;
         Ok(snapshot(&state))
     }
 
@@ -163,7 +152,10 @@ impl TransferBroker {
         if let Some(error) = publication_error {
             Err(error)
         } else {
-            state.held_credits += 1;
+            *state
+                .held_credits_by_generation
+                .entry(generation)
+                .or_default() += 1;
             Ok(())
         }
     }
@@ -206,14 +198,22 @@ fn snapshot(state: &TransferState) -> TransferSnapshot {
         generation: state.generation,
         active: state.active,
         available_credits,
-        held_credits: state.held_credits,
+        held_credits: held_credit_count(state),
         in_flight_credits: state.in_flight_credits,
         credit_limit: TRANSFER_CREDIT_LIMIT,
     }
 }
 
 fn credits_in_use(state: &TransferState) -> u8 {
-    state.held_credits.saturating_add(state.in_flight_credits)
+    held_credit_count(state).saturating_add(state.in_flight_credits)
+}
+
+fn held_credit_count(state: &TransferState) -> u8 {
+    state
+        .held_credits_by_generation
+        .values()
+        .copied()
+        .fold(0, u8::saturating_add)
 }
 
 #[tauri::command]
@@ -405,7 +405,28 @@ mod tests {
         assert_eq!(broker.snapshot().unwrap().available_credits, 1);
         broker.finish_without_publish();
         assert_eq!(broker.snapshot().unwrap().available_credits, 2);
-        assert_eq!(broker.release(8).unwrap_err().code, "stale_generation");
+        assert_eq!(broker.release(8).unwrap_err().code, "credit_not_held");
+    }
+
+    #[test]
+    fn delivered_old_generation_stays_charged_until_frontend_acknowledges_it() {
+        let broker = TransferBroker::default();
+        broker.begin(8).unwrap();
+        broker.acquire(8).unwrap();
+        broker.complete_for_publish(8).unwrap();
+
+        let current = broker.begin(9).unwrap();
+        assert_eq!(current.held_credits, 1);
+        assert_eq!(current.available_credits, 1);
+        broker.acquire(9).unwrap();
+        assert_eq!(broker.acquire(9).unwrap_err().code, "credit_exhausted");
+
+        let after_old_ack = broker.release(8).unwrap();
+        assert_eq!(after_old_ack.held_credits, 0);
+        assert_eq!(after_old_ack.in_flight_credits, 1);
+        assert_eq!(after_old_ack.available_credits, 1);
+        broker.complete_for_publish(9).unwrap();
+        assert_eq!(broker.release(9).unwrap().available_credits, 2);
     }
 
     #[test]
