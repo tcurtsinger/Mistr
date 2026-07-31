@@ -4,7 +4,7 @@ use super::{
 };
 use bzip2::read::BzDecoder;
 use chrono::{DateTime, Utc};
-use flate2::read::GzDecoder;
+use flate2::read::MultiGzDecoder;
 use nexrad_data::volume::{File as VolumeFile, Header};
 use nexrad_model::data::{DataMoment, MomentData, MomentValue, Scan, Sweep};
 use sha2::{Digest, Sha256};
@@ -174,7 +174,7 @@ fn decompress_outer_gzip(input: &[u8], max_archive_bytes: usize) -> Result<Vec<u
         return Ok(input.to_vec());
     }
 
-    let mut decoder = GzDecoder::new(input);
+    let mut decoder = MultiGzDecoder::new(input);
     let mut bounded = decoder
         .by_ref()
         .take((max_archive_bytes as u64).saturating_add(1));
@@ -740,6 +740,23 @@ mod tests {
             decode_level2_with_limits(&compressed, RadarProduct::Reflectivity, limits),
             Err(DecodeError::ArchiveTooLarge { .. })
         ));
+    }
+
+    #[test]
+    fn concatenated_outer_gzip_members_are_all_decoded() {
+        fn gzip_member(bytes: &[u8]) -> Vec<u8> {
+            let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
+            encoder.write_all(bytes).unwrap();
+            encoder.finish().unwrap()
+        }
+
+        let mut input = gzip_member(b"AR2V0006");
+        input.extend(gzip_member(b"concatenated payload"));
+
+        assert_eq!(
+            decompress_outer_gzip(&input, 1_024).unwrap(),
+            b"AR2V0006concatenated payload"
+        );
     }
 
     #[test]
