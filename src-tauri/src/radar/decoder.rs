@@ -568,6 +568,11 @@ fn validate_finite_radial(
             "radial {radial_index} beam width is outside (0, 2] degrees"
         )));
     }
+    if !(0.0..=90.0).contains(&radial.elevation_angle_degrees()) {
+        return Err(DecodeError::InvalidMetadata(format!(
+            "radial {radial_index} elevation is outside [0, 90] degrees"
+        )));
+    }
     Ok(())
 }
 
@@ -690,6 +695,7 @@ fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
 mod tests {
     use super::*;
     use flate2::{Compression, write::GzEncoder};
+    use nexrad_model::data::{Radial, RadialStatus};
     use proptest::prelude::*;
     use std::io::Write;
 
@@ -757,6 +763,41 @@ mod tests {
             preflight_ldm(&[0; 8], DecodeLimits::default()),
             Err(DecodeError::UnsupportedArchiveVariant(_))
         ));
+    }
+
+    #[test]
+    fn impossible_elevation_is_rejected() {
+        let radial = radial_at_elevation(200.0);
+        assert!(matches!(
+            validate_finite_radial(7, &radial),
+            Err(DecodeError::InvalidMetadata(message))
+                if message == "radial 7 elevation is outside [0, 90] degrees"
+        ));
+    }
+
+    #[test]
+    fn physical_elevation_boundaries_are_accepted() {
+        assert!(validate_finite_radial(0, &radial_at_elevation(0.0)).is_ok());
+        assert!(validate_finite_radial(0, &radial_at_elevation(90.0)).is_ok());
+    }
+
+    fn radial_at_elevation(elevation_degrees: f32) -> Radial {
+        Radial::new(
+            0,
+            1,
+            0.5,
+            0.5,
+            RadialStatus::ScanStart,
+            1,
+            elevation_degrees,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
     }
 
     #[test]
