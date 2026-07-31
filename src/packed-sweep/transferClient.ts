@@ -5,6 +5,7 @@ export interface TransferSnapshot {
   active: boolean;
   availableCredits: number;
   heldCredits: number;
+  inFlightCredits: number;
   creditLimit: number;
 }
 
@@ -239,6 +240,7 @@ export interface PackagedPhase2Benchmark {
   heapAfterBytes: number | null;
   gates: {
     payloadWithin16MiB: boolean;
+    releaseBuild: boolean;
     encoderP95Within100Ms: boolean;
     invokeP95Within250Ms: boolean;
     parseP95Within100Ms: boolean;
@@ -305,6 +307,7 @@ export async function runPackagedPhase2Benchmark(
   const totalMs = distribution(timings.map((timing) => timing.totalMs));
   const gates = {
     payloadWithin16MiB: payloadBytes <= 16 * 1024 * 1024,
+    releaseBuild: encoder.buildProfile === "release",
     encoderP95Within100Ms: encoder.encodeMs.p95 <= 100,
     invokeP95Within250Ms: invokeMs.p95 <= 250,
     parseP95Within100Ms: parseMs.p95 <= 100,
@@ -314,7 +317,8 @@ export async function runPackagedPhase2Benchmark(
       && rejectedCodes[0] === "credit_exhausted"
       && finalTransferState.creditLimit === 2
       && finalTransferState.availableCredits === 2
-      && finalTransferState.heldCredits === 0,
+      && finalTransferState.heldCredits === 0
+      && finalTransferState.inFlightCredits === 0,
     cancellationPassed:
       staleRequestRejected
       && (cancellationCode === "stale_generation" || cancellationCode === "stale_response"),
@@ -404,4 +408,3 @@ function readHeapBytes(): number | null {
   }).memory;
   return typeof memory?.usedJSHeapSize === "number" ? memory.usedJSHeapSize : null;
 }
-

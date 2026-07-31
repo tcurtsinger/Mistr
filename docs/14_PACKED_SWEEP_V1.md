@@ -159,9 +159,9 @@ Both implementations reject, with stable categories where surfaced:
 
 ## IPC and backpressure contract
 
-The frontend starts one generation with exactly two transfer credits. A request consumes one credit before encoding/transfer and the frontend returns it only after parsing/upload ownership is established. A third request is rejected with `credit_exhausted`; it is never queued without a bound.
+The broker has exactly two global transfer credits. A request consumes one before encoding/transfer and moves it from `in_flight` to `held` only when the current generation may publish. The frontend returns a held credit after parsing/upload ownership is established. A third request is rejected with `credit_exhausted`; it is never queued without a bound.
 
-Starting or cancelling a generation invalidates all prior work. Rust checks generation before work and again immediately before returning raw bytes. TypeScript also discards a response if its local generation changed while `invoke` was pending. Thus an uncancellable platform-level response may complete, but stale bytes cannot reach upload.
+Starting or cancelling a generation invalidates all prior publication rights, but it does not refund credits for `spawn_blocking` work that is still executing. Old in-flight tasks remain globally charged until they actually complete, so repeated supersession cannot bypass the two-work-item bound. Rust checks generation before work and again immediately before returning raw bytes. TypeScript also discards a response if its local generation changed while `invoke` was pending. Thus an uncancellable platform-level response may complete, but stale bytes cannot reach upload or create unbounded backend work.
 
 Control calls remain small JSON. The sweep response is `tauri::ipc::Response<Vec<u8>>`, received by TypeScript as an `ArrayBuffer`.
 
@@ -212,10 +212,10 @@ Deferred to a future schema only if renderer evidence justifies it. V1 prioritiz
 - TypeScript parsing of the Rust golden vector.
 - Corrupt/hostile-buffer tests in both languages.
 - Generation, cancellation, and credit-exhaustion tests.
+- A debug/dev run must report non-passing; only the release build profile can satisfy the packaged timing gate.
 - A real raw-byte response in packaged Tauri.
 - Payload, timing, and memory evidence in the Phase 2 report.
 
 ## Primary API reference
 
 - [Tauri: Calling Rust from the Frontend — Returning Array Buffers](https://v2.tauri.app/develop/calling-rust/#returning-array-buffers)
-

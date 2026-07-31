@@ -12,7 +12,7 @@ Phase 2 accepts [`PackedSweep v1`](../14_PACKED_SWEEP_V1.md): a deterministic li
 - Tauri returns `tauri::ipc::Response<Vec<u8>>`; the frontend requires a real `ArrayBuffer`, not a JSON number array.
 - TypeScript validates bounds, canonical offsets, alignment, enums, reserved bytes, dimensions, metadata, SHA-256, radials, and every raw/status/value relationship before exposing zero-copy typed-array views.
 - A monotonic generation exists in both the wire and the control plane. Rust checks it before work and before publication; TypeScript also blocks a response superseded while IPC or parsing was in progress.
-- Each generation has exactly two transfer credits. A third concurrent request fails immediately with `credit_exhausted` instead of creating an unbounded queue.
+- The broker has exactly two global transfer credits. A third concurrent request fails immediately with `credit_exhausted`, and old `spawn_blocking` work stays charged across generation changes until it actually completes.
 
 The implementation uses Tauri's documented raw array-buffer response API. It does not add HTTP, base64, private WebView hooks, or bulk JSON.
 
@@ -72,7 +72,7 @@ The release executable built by `npm run tauri:build -- --no-bundle` was launche
 | TypeScript parse P95 | 18.2 ms | **PASS**, <= 100 ms |
 | Contention | 2 fulfilled, 1 `credit_exhausted` | **PASS**, exactly two credits |
 | Delayed old generation | rejected as stale | **PASS**, no stale upload candidate |
-| Final ledger | 2 available, 0 held | **PASS**, all credits returned |
+| Final ledger | 2 available, 0 held, 0 in flight | **PASS**, all credits returned |
 
 The displayed diagnostic result was `BINARY IPC PASS`. Basemap readiness and radar drawing were not evaluated by this phase; static custom-layer rendering begins in Phase 3.
 
@@ -100,7 +100,7 @@ Automated tests cover:
 - observation-ID and wire-hash disagreement;
 - deterministic encoding and the exact committed Rust golden;
 - parsing the Rust golden in TypeScript without copying gate sections;
-- monotonic generations, cancellation, stale-response blocking, idempotent lease release, and structured errors; and
+- monotonic generations, cancellation, stale-response blocking, cross-generation in-flight charging, idempotent lease release, and structured errors; and
 - two-credit exhaustion and recovery.
 
 The parser's 32 MiB hard limit is exercised before header access in both Rust and TypeScript. The representative 7.564 MiB payload remains below the 16 MiB target.
@@ -111,7 +111,7 @@ The parser's 32 MiB hard limit is exercised before header access in both Rust an
 - [x] Corrupt and hostile offsets, lengths, encodings, hashes, and gate semantics are rejected.
 - [x] Bulk gate data uses raw `ArrayBuffer` IPC, never JSON arrays.
 - [x] Rust and TypeScript generation checks prevent old responses from becoming upload candidates.
-- [x] Backpressure is bounded to two explicit credits and recovers to a clean ledger.
+- [x] Backpressure is globally bounded to two explicit credits across generation changes and recovers to a clean ledger.
 - [x] A real decoded KTLX sweep fits the format and retains its normalized identity.
 - [x] One-sweep payload, release encoding, packaged transfer, and TypeScript parsing pass their declared Phase 2 budgets on the primary workstation.
 - [x] Packaged process memory is recorded without overstating a leak or residency result.

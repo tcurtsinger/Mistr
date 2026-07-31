@@ -22,6 +22,7 @@ function snapshot(generation: number, heldCredits = 0): TransferSnapshot {
     active: true,
     availableCredits: 2 - heldCredits,
     heldCredits,
+    inFlightCredits: 0,
     creditLimit: 2,
   };
 }
@@ -98,4 +99,3 @@ describe("PackedSweepTransferClient", () => {
     await expect(client.begin(7)).rejects.toBeInstanceOf(TransferClientError);
   });
 });
-

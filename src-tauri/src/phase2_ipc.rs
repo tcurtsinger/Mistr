@@ -34,6 +34,7 @@ pub struct TransferSnapshot {
     pub active: bool,
     pub available_credits: u8,
     pub held_credits: u8,
+    pub in_flight_credits: u8,
     pub credit_limit: u8,
 }
 
@@ -41,8 +42,8 @@ pub struct TransferSnapshot {
 struct TransferState {
     generation: u64,
     active: bool,
-    available_credits: u8,
     held_credits: u8,
+    in_flight_credits: u8,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -68,11 +69,14 @@ impl TransferBroker {
                 ),
             ));
         }
+        let in_flight_credits = state.in_flight_credits;
         *state = TransferState {
             generation,
             active: true,
-            available_credits: TRANSFER_CREDIT_LIMIT,
             held_credits: 0,
+            // Superseding a generation retires already-delivered leases, but
+            // work still running on the blocking pool remains globally charged.
+            in_flight_credits,
         };
         Ok(snapshot(&state))
     }
@@ -81,7 +85,6 @@ impl TransferBroker {
         let mut state = self.lock()?;
         ensure_current(&state, generation)?;
         state.active = false;
-        state.available_credits = 0;
         state.held_credits = 0;
         Ok(snapshot(&state))
     }
@@ -95,14 +98,13 @@ impl TransferBroker {
                 format!("generation {generation} is cancelled"),
             ));
         }
-        if state.available_credits == 0 {
+        if credits_in_use(&state) >= TRANSFER_CREDIT_LIMIT {
             return Err(TransferError::new(
                 "credit_exhausted",
-                "both renderer transfer credits are already held",
+                "both renderer transfer credits are already in use",
             ));
         }
-        state.available_credits -= 1;
-        state.held_credits += 1;
+        state.in_flight_credits += 1;
         Ok(())
     }
 
@@ -122,31 +124,48 @@ impl TransferBroker {
             ));
         }
         state.held_credits -= 1;
-        state.available_credits += 1;
         Ok(snapshot(&state))
     }
 
-    fn restore_after_failure(&self, generation: u64) {
+    fn finish_without_publish(&self) {
         if let Ok(mut state) = self.inner.lock()
-            && state.generation == generation
-            && state.active
-            && state.held_credits > 0
+            && state.in_flight_credits > 0
         {
-            state.held_credits -= 1;
-            state.available_credits += 1;
+            state.in_flight_credits -= 1;
         }
     }
 
-    fn can_publish(&self, generation: u64) -> Result<(), TransferError> {
-        let state = self.lock()?;
-        ensure_current(&state, generation)?;
-        if !state.active {
-            return Err(TransferError::new(
+    fn complete_for_publish(&self, generation: u64) -> Result<(), TransferError> {
+        let mut state = self.lock()?;
+        let publication_error = if generation != state.generation {
+            Some(TransferError::new(
+                "stale_generation",
+                format!(
+                    "generation {generation} is stale; current generation is {}",
+                    state.generation
+                ),
+            ))
+        } else if !state.active {
+            Some(TransferError::new(
                 "generation_cancelled",
                 format!("generation {generation} is cancelled"),
+            ))
+        } else {
+            None
+        };
+        if state.in_flight_credits == 0 {
+            return Err(TransferError::new(
+                "transfer_state_invalid",
+                "completed work did not hold an in-flight credit",
             ));
         }
-        Ok(())
+        state.in_flight_credits -= 1;
+        if let Some(error) = publication_error {
+            Err(error)
+        } else {
+            state.held_credits += 1;
+            Ok(())
+        }
     }
 
     fn snapshot(&self) -> Result<TransferSnapshot, TransferError> {
@@ -178,13 +197,23 @@ fn ensure_current(state: &TransferState, generation: u64) -> Result<(), Transfer
 }
 
 fn snapshot(state: &TransferState) -> TransferSnapshot {
+    let available_credits = if state.active {
+        TRANSFER_CREDIT_LIMIT.saturating_sub(credits_in_use(state))
+    } else {
+        0
+    };
     TransferSnapshot {
         generation: state.generation,
         active: state.active,
-        available_credits: state.available_credits,
+        available_credits,
         held_credits: state.held_credits,
+        in_flight_credits: state.in_flight_credits,
         credit_limit: TRANSFER_CREDIT_LIMIT,
     }
+}
+
+fn credits_in_use(state: &TransferState) -> u8 {
+    state.held_credits.saturating_add(state.in_flight_credits)
 }
 
 #[tauri::command]
@@ -241,7 +270,7 @@ pub async fn request_phase2_benchmark_sweep(
     let encoded = match task {
         Ok(encoded) => encoded,
         Err(error) => {
-            broker.restore_after_failure(generation);
+            broker.finish_without_publish();
             return Err(TransferError::new("backend_task_failed", error.to_string()));
         }
     };
@@ -249,14 +278,11 @@ pub async fn request_phase2_benchmark_sweep(
     let bytes = match encoded {
         Ok(bytes) => bytes,
         Err(error) => {
-            broker.restore_after_failure(generation);
+            broker.finish_without_publish();
             return Err(error);
         }
     };
-    if let Err(error) = broker.can_publish(generation) {
-        broker.restore_after_failure(generation);
-        return Err(error);
-    }
+    broker.complete_for_publish(generation)?;
     Ok(Response::new(bytes))
 }
 
@@ -354,21 +380,31 @@ mod tests {
         assert_eq!(broker.begin(1).unwrap().available_credits, 2);
         broker.acquire(1).unwrap();
         broker.acquire(1).unwrap();
-        assert_eq!(broker.snapshot().unwrap().held_credits, 2);
+        assert_eq!(broker.snapshot().unwrap().in_flight_credits, 2);
         assert_eq!(broker.acquire(1).unwrap_err().code, "credit_exhausted");
+        broker.complete_for_publish(1).unwrap();
         assert_eq!(broker.release(1).unwrap().available_credits, 1);
         broker.acquire(1).unwrap();
     }
 
     #[test]
-    fn new_generation_invalidates_old_publication_and_credits() {
+    fn new_generation_keeps_old_work_globally_charged_until_completion() {
         let broker = TransferBroker::default();
         broker.begin(8).unwrap();
         broker.acquire(8).unwrap();
+        broker.acquire(8).unwrap();
         let current = broker.begin(9).unwrap();
-        assert_eq!(current.available_credits, 2);
+        assert_eq!(current.available_credits, 0);
         assert_eq!(current.held_credits, 0);
-        assert_eq!(broker.can_publish(8).unwrap_err().code, "stale_generation");
+        assert_eq!(current.in_flight_credits, 2);
+        assert_eq!(broker.acquire(9).unwrap_err().code, "credit_exhausted");
+        assert_eq!(
+            broker.complete_for_publish(8).unwrap_err().code,
+            "stale_generation"
+        );
+        assert_eq!(broker.snapshot().unwrap().available_credits, 1);
+        broker.finish_without_publish();
+        assert_eq!(broker.snapshot().unwrap().available_credits, 2);
         assert_eq!(broker.release(8).unwrap_err().code, "stale_generation");
     }
 
@@ -382,9 +418,10 @@ mod tests {
         assert_eq!(cancelled.available_credits, 0);
         assert_eq!(cancelled.held_credits, 0);
         assert_eq!(
-            broker.can_publish(3).unwrap_err().code,
+            broker.complete_for_publish(3).unwrap_err().code,
             "generation_cancelled"
         );
+        assert_eq!(broker.snapshot().unwrap().in_flight_credits, 0);
     }
 
     #[test]
