@@ -1,0 +1,74 @@
+:root {
+  font-family: Bahnschrift, "Arial Narrow", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  color: #dce9ed;
+  background: #05090b;
+  font-synthesis: none;
+  text-rendering: geometricPrecision;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+button, input { font: inherit; }
+
+.app-shell { position: relative; width: 100%; height: 100%; background: #05090b; }
+.map-surface { position: absolute; inset: 0; }
+.map-surface::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(2, 8, 10, .48), transparent 24%, transparent 74%, rgba(2, 8, 10, .62));
+}
+
+.top-rail, .bottom-rail, .checkpoint {
+  position: absolute;
+  z-index: 2;
+  border: 1px solid rgba(112, 208, 225, .16);
+  background: rgba(5, 12, 15, .92);
+  box-shadow: 0 16px 50px rgba(0, 0, 0, .35);
+  backdrop-filter: blur(14px);
+}
+
+.top-rail {
+  top: 16px;
+  left: 16px;
+  right: 16px;
+  min-height: 76px;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.eyebrow, .status span, .checkpoint dt, .bottom-rail {
+  margin: 0;
+  color: #67c9da;
+  font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: .14em;
+}
+
+h1 { margin: 3px 0 0; font-size: 25px; letter-spacing: .045em; }
+h1 span { color: #83979d; font-size: 12px; font-weight: 550; letter-spacing: .12em; }
+.status-cluster { display: flex; gap: 24px; }
+.status { display: grid; gap: 4px; min-width: 92px; }
+.status strong { color: #e3eff2; font-family: "Cascadia Mono", Consolas, monospace; font-size: 12px; font-weight: 550; }
+
+.checkpoint { left: 16px; top: 112px; width: min(360px, calc(100vw - 32px)); padding: 18px; }
+.checkpoint h2 { margin: 5px 0 10px; font-size: 18px; }
+.checkpoint > p:not(.eyebrow) { color: #a7b9be; font-size: 13px; line-height: 1.55; }
+.checkpoint dl { margin: 18px 0 0; display: grid; gap: 10px; }
+.checkpoint dl div { display: flex; justify-content: space-between; gap: 16px; border-top: 1px solid rgba(112, 208, 225, .1); padding-top: 10px; }
+.checkpoint dd { margin: 0; color: #d6e4e8; font-family: "Cascadia Mono", Consolas, monospace; font-size: 11px; }
+
+.bottom-rail { left: 16px; right: 16px; bottom: 16px; min-height: 42px; padding: 0 14px; display: flex; align-items: center; justify-content: space-between; }
+.truth-label { color: #9fb0b5; }
+
+@media (max-width: 760px) {
+  .top-rail { align-items: flex-start; }
+  .status-cluster { gap: 10px; flex-direction: column; }
+  .status { display: flex; gap: 8px; min-width: 0; }
+  .checkpoint { top: 168px; }
+}

@@ -1,0 +1,19 @@
+{
+  "$schema": "./manifest.schema.json",
+  "schemaVersion": 1,
+  "fixtures": [
+    {
+      "id": "ktlx-2024-05-20-230512-v06",
+      "source": "AWS Open Data / Unidata NEXRAD Level II",
+      "bucket": "unidata-nexrad-level2",
+      "key": "2024/05/20/KTLX/KTLX20240520_230512_V06",
+      "url": "https://unidata-nexrad-level2.s3.amazonaws.com/2024/05/20/KTLX/KTLX20240520_230512_V06",
+      "station": "KTLX",
+      "observedAt": "2024-05-20T23:05:12Z",
+      "sizeBytes": 7936679,
+      "sha256": "99c189c327307da6a26a9f265ee84bf9fc690dc1a7358db941949805afa4a0d3",
+      "etag": "6582bb873105982fe323a3ada35df602",
+      "localPath": "cache/KTLX20240520_230512_V06"
+    }
+  ]
+}

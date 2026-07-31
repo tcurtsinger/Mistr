@@ -1,0 +1,369 @@
+# Test and Validation Plan
+
+## 1. Test philosophy
+
+Mistr is an evidence project. A visually convincing demo is necessary but insufficient.
+
+Every material defect should be captured as a deterministic failing test before repair when technically possible. No fix is accepted because it “seems smoother” or because one live storm stopped reproducing.
+
+Required validation layers:
+
+1. Source-object integrity.
+2. Decoder numeric correctness.
+3. Normalization and wire correctness.
+4. GPU rendering and geospatial correctness.
+5. State-machine correctness.
+6. Resource and performance bounds.
+7. Live latency/reliability.
+8. Packaged Windows lifecycle behavior.
+9. GustAVO integration regression safety.
+
+## 2. Fixture corpus
+
+### 2.1 Manifest requirements
+
+Every fixture has a manifest entry containing:
+
+- Stable fixture ID.
+- Source bucket and object key or documented alternate source.
+- Acquisition timestamp.
+- SHA-256.
+- Compressed byte length.
+- Radar site.
+- Measurement/volume time.
+- VCP and relevant metadata.
+- Expected products/moments.
+- Why the fixture exists.
+- Independent decoder/tool versions used for expected results.
+- Whether redistribution in the repository is permitted/appropriate.
+
+Expected numeric samples are stored separately from the decoder under test.
+
+### 2.2 Minimum Level II corpus
+
+Include current-format examples covering:
+
+- Quiet/clear-air scan.
+- Widespread precipitation.
+- Severe convection with high reflectivity gradients.
+- Strong aliased velocity.
+- Significant missing/no-data areas.
+- Range-folded values.
+- Multiple VCPs.
+- Different lowest-elevation structures or split cuts.
+- Eight-bit and sixteen-bit moment encodings if observed/currently relevant.
+- Non-CONUS sites: Alaska, Hawaii, Puerto Rico, and Guam.
+- Antimeridian/high-latitude stress where applicable.
+- A volume with incomplete/corrupt data for negative testing.
+- Real-time chunks captured from start through end.
+- A chunk sequence with an intentional gap/duplicate/out-of-order delivery in the test harness.
+
+### 2.3 Minimum Level III corpus
+
+Include `N0S` fixtures for:
+
+- Several CONUS sites.
+- Quiet and severe-weather velocity fields.
+- Missing/range-folded values.
+- A timestamp with a matching IEM RIDGE product.
+- At least one non-CONUS site if the product is present.
+- Malformed/truncated negative cases.
+
+### 2.4 Corpus immutability
+
+- Fixture source bytes never change under an existing fixture ID.
+- Expected-output changes require explanation and reviewer approval.
+- Hash mismatch fails tests before decoding.
+- New decoder versions run against the full corpus before adoption.
+
+## 3. Decoder tests
+
+### Unit tests
+
+- Volume header parsing.
+- Endianness.
+- Compressed-record lengths.
+- Message type recognition.
+- Radial/elevation/volume boundaries.
+- Moment block offsets.
+- Scale/offset conversion.
+- Missing/range-folded markers.
+- Gate count and spacing.
+- Azimuth/elevation normalization.
+- Timestamp conversion.
+- Bounds checking and decompression ceilings.
+
+### Golden tests
+
+For each accepted fixture:
+
+- Radar identity and coordinates.
+- Volume/sweep times.
+- VCP/elevation metadata.
+- Radial and gate counts.
+- Selected radial azimuths.
+- Selected raw gate codes.
+- Selected physical values.
+- Product extents.
+- Stable normalized content hash.
+
+### Differential tests
+
+Compare Mistr output with an independent decoder for all common fields. Any disagreement must be categorized:
+
+- Mistr defect.
+- Oracle defect.
+- Format ambiguity.
+- Expected normalization difference.
+- Unsupported source variant.
+
+“Looks plausible” is not an allowed resolution.
+
+### Robustness tests
+
+- Truncated file at every major boundary.
+- Oversized declared message.
+- Integer overflow in offsets/counts.
+- Invalid compression block.
+- Duplicate radials.
+- Missing end-of-elevation/end-of-volume.
+- Inconsistent word sizes.
+- Unexpected product/moment.
+- Allocation limits.
+- Decoder panic containment.
+
+Use fuzzing/property testing where practical, seeded for reproducibility in CI.
+
+## 4. Wire and IPC tests
+
+- Rust golden encoder output parsed by TypeScript.
+- TypeScript-produced negative buffers rejected consistently.
+- Schema version mismatch.
+- Wrong magic/endian marker.
+- Overlapping sections.
+- Unaligned offsets.
+- Section beyond total length.
+- Invalid enum and incompatible flags.
+- Hash mismatch.
+- Cancelled/stale generation.
+- Payload at maximum accepted size.
+- Backpressure when renderer credits are exhausted.
+- Rapid cancellation during transfer.
+- Packaged WebView2 transfer benchmark and memory snapshot.
+
+## 5. Renderer correctness tests
+
+### Static visual tests
+
+For pinned fixtures and camera configurations, capture:
+
+- Full radar range.
+- Near-radar gates.
+- Far-range gates.
+- Cardinal directions.
+- Screen edges.
+- Several map zoom levels.
+- High-DPI scaling.
+- Non-CONUS sites.
+- Transparent/missing/range-folded cases.
+
+Use golden screenshots only after numeric and geospatial truth is established. Image diffs have explicit thresholds and require human review when updated.
+
+### Geospatial tests
+
+- CPU-compute selected gate centers independently.
+- Place diagnostic markers at those coordinates.
+- Measure pixel separation from rendered gate centers/regions.
+- Repeat after pan, zoom, resize, device-scale change, and style reload.
+- Verify operational range boundary.
+- Verify no radial wrap seam or missing-radial bridge.
+
+### Palette tests
+
+- Every raw code/sample maps to expected color/alpha.
+- Missing and range-folded policies are distinct.
+- Palette replacement changes colors without changing values or re-uploading the observation texture.
+- CPU point interrogation and rendered palette agree.
+
+### GL coexistence tests
+
+- Basemap labels remain correct.
+- Warning polygons and other reference layers retain z-order.
+- Radar does not corrupt MapLibre state.
+- Style reload removes/re-adds resources correctly.
+- Layer disable/removal releases resources.
+
+## 6. State-machine tests
+
+Use a deterministic fake clock and scripted acquisition/decoder/upload stages.
+
+Required sequences:
+
+- Normal archive load to paint.
+- Real-time chunks to complete sweep.
+- Decode failure.
+- Upload failure.
+- Next frame delayed while current remains visible.
+- Rapid site change during download, decode, transfer, and upload.
+- Product change during paint.
+- Old generation completes late.
+- Duplicate observation.
+- Out-of-order measurement times.
+- Playback reaches newest frame.
+- Scrub to resident and non-resident frames.
+- Pause/resume.
+- WebGL context loss while playing and while uploading.
+- National/selected-site handoff during playback.
+- Raw failure activates tile fallback.
+
+Invariant assertions:
+
+- UI playhead equals the last accepted paint receipt.
+- No observation from an old generation becomes selected.
+- At most one observation is authoritative for selected-site display.
+- Resident implies current-context resources exist.
+- Context epoch mismatch prevents draw.
+- Failure never marks data fresh.
+- Resource counts remain within budget.
+
+## 7. Performance plan
+
+### Test scenarios
+
+1. Stationary 20-frame playback.
+2. Continuous pan during playback.
+3. Repeated zoom across the handoff threshold.
+4. Rapid scrub.
+5. Site switch with old loop visible.
+6. Palette change.
+7. Four-hour synthetic long session.
+8. Context loss and rehydration.
+9. Lower-capability GPU.
+10. Map with representative GustAVO overlays enabled during integration rehearsal.
+
+### Mandatory measurements
+
+- Initial raw bytes downloaded.
+- Decode and normalize duration per observation.
+- Packed bytes per observation.
+- IPC duration and peak queued bytes.
+- GPU upload duration.
+- First paint latency.
+- Resident frame switch to paint latency.
+- Browser main-thread long tasks.
+- P50/P95/P99 frame duration.
+- Total process CPU and memory.
+- Renderer CPU memory.
+- Estimated GPU allocations.
+- Network/disk/decode/IPC counters during resident playback.
+
+### Core performance gates
+
+- P95 frame duration below 16.7 ms in the representative 4K playback/interaction scenario.
+- No recurring main-thread task over 50 ms caused by Mistr during resident playback.
+- Zero network, disk, decode, normalization, and bulk IPC activity during resident loop playback.
+- GPU radar allocations at or below 200 MiB target and never above 256 MiB hard ceiling for the initial 20-frame product loop.
+- No positive memory trend after stabilization in repeated transition/site-switch tests.
+
+If a machine cannot meet the 60 FPS target, report the exact bottleneck and fallback behavior rather than hiding the result.
+
+## 8. Latency and source comparison
+
+Measure a sufficiently broad live sample across multiple sites and weather regimes.
+
+For each comparable observation:
+
+- Radar measurement time.
+- First chunk seen.
+- Safe lowest-sweep completion.
+- First Mistr paint.
+- NOAA WMS comparable timestamp appearance.
+- IEM comparable timestamp appearance.
+- Complete archive-object appearance.
+- Retries/errors/gaps.
+
+Report:
+
+- Count and coverage period.
+- P50/P95/worst latency for each path.
+- Percentage raw path wins/ties/loses.
+- Gap/failure rate.
+- Difference between quiet and active weather.
+- Any site/VCP pattern.
+
+The prototype succeeds on architecture even if raw latency is not always faster, but the result affects product/fallback policy.
+
+## 9. Fault injection
+
+The harness must inject:
+
+- Slow listing/download.
+- HTTP timeout and connection reset.
+- Non-success status.
+- Oversized response.
+- Duplicate/out-of-order/missing chunks.
+- Corrupt compression.
+- Decoder panic/error.
+- Slow decode.
+- Stale generation completion.
+- IPC cancellation and renderer backpressure.
+- GPU allocation/upload failure simulation.
+- WebGL context loss.
+- Style reload.
+- Window resize and device-scale change.
+- Sleep/wake and offline/online transitions.
+- Raw-source failure with tile fallback available/unavailable.
+
+Every injection has an expected visible state, log sequence, resource outcome, and recovery path.
+
+## 10. Packaged Windows matrix
+
+Minimum packaged verification:
+
+| Dimension | Coverage |
+|---|---|
+| Windows | Windows 11 primary; supported Windows 10 if GustAVO continues to support it |
+| WebView2 | Current installed stable; record exact version |
+| GPU | Primary discrete/integrated GPU plus one materially different vendor/capability where available |
+| Display | 1080p and 4K; 100% and high-DPI scaling |
+| Window | Maximized, restored, resized, minimized/restored |
+| Power | Normal session and sleep/wake |
+| Network | Normal, throttled, disconnected/reconnected |
+
+Browser-only Playwright tests remain useful for deterministic custom-layer logic but cannot satisfy the packaged-runtime gate.
+
+## 11. Adoption gates
+
+All are mandatory unless explicitly reclassified through a documented decision:
+
+1. **L2 numeric correctness:** trusted-reference agreement.
+2. **L3 `N0S` parity:** no product substitution or mislabeled base velocity.
+3. **Geospatial correctness:** tested gate alignment across representative sites/zooms.
+4. **Resident playback:** no hot-path I/O/decode/bulk IPC.
+5. **Performance:** frame-time and long-task budgets pass.
+6. **Memory:** CPU/GPU resources are bounded and leak-free in long-run tests.
+7. **State truth:** playhead follows actual paint receipts.
+8. **Real-time robustness:** gaps, rollover, cancellation, and fallback pass.
+9. **Context recovery:** WebGL loss/restoration passes.
+10. **Packaged WebView2:** deterministic results and performance pass outside browser dev.
+11. **Latency measured:** comparison report exists; no unverified speed claim.
+12. **Fixture corpus pinned:** provenance, hashes, numeric expectations, and negative cases exist.
+13. **Debuggability:** one command produces a sufficient diagnostic bundle.
+14. **Integration safety:** GustAVO non-radar regressions pass.
+15. **Rollback:** tiled radar restoration is rehearsed.
+
+## 12. Go/no-go report format
+
+The final report must state:
+
+- Exact commit/build and environment.
+- Each gate: pass, fail, or unavailable.
+- Evidence artifact for every pass.
+- Demonstrated defects and their visible consequence.
+- Performance and memory tables.
+- Latency tables.
+- Unsupported cases.
+- Remaining risks.
+- Recommendation: integrate, extend prototype, redesign, or stop.
+
+Unavailable evidence is uncertainty, not a pass.

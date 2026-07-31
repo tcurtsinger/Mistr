@@ -1,0 +1,46 @@
+# JavaScript
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Rust / Tauri
+target/
+src-tauri/target/
+
+# Downloaded radar fixtures are reproducible and must not enter Git history.
+fixtures/cache/**
+!fixtures/cache/.gitkeep
+
+# Generated diagnostics and benchmark output may contain local machine details.
+artifacts/
+diagnostics/
+benchmark-results/
+debug-bundles/
+output/
+.playwright-cli/
+
+# Generated Tauri schemas and non-Windows icon variants.
+src-tauri/gen/schemas/
+src-tauri/icons/android/
+src-tauri/icons/ios/
+src-tauri/icons/icon.icns
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+*.cer
+*.crt
+*.mobileprovision
+
+# Editors / operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.log
