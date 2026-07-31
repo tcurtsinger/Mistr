@@ -4,7 +4,7 @@ use crate::packed_sweep::{
 };
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 use tauri::ipc::Response;
 
@@ -463,6 +463,38 @@ pub struct TimingDistribution {
     pub max: f64,
 }
 
+#[derive(Debug, Default)]
+struct EncoderBenchmarkCache {
+    reports: Mutex<BTreeMap<u8, EncoderBenchmarkReport>>,
+}
+
+impl EncoderBenchmarkCache {
+    fn get_or_compute(
+        &self,
+        iterations: u8,
+        compute: impl FnOnce() -> Result<EncoderBenchmarkReport, TransferError>,
+    ) -> Result<EncoderBenchmarkReport, TransferError> {
+        // Intentionally hold the mutex through the first computation. Reloaded
+        // documents may enqueue another small blocking task, but only one task
+        // can allocate and encode the representative multi-megabyte sweep.
+        let mut reports = self.reports.lock().map_err(|_| {
+            TransferError::new(
+                "benchmark_cache_poisoned",
+                "encoder benchmark cache is unavailable after an internal panic",
+            )
+        })?;
+        if let Some(report) = reports.get(&iterations) {
+            return Ok(report.clone());
+        }
+        let report = compute()?;
+        reports.insert(iterations, report.clone());
+        Ok(report)
+    }
+}
+
+static ENCODER_BENCHMARK_CACHE: LazyLock<EncoderBenchmarkCache> =
+    LazyLock::new(EncoderBenchmarkCache::default);
+
 #[tauri::command]
 pub async fn benchmark_phase2_encoder(
     iterations: u8,
@@ -474,42 +506,47 @@ pub async fn benchmark_phase2_encoder(
         ));
     }
     tauri::async_runtime::spawn_blocking(move || {
-        let sweep = phase2_benchmark_sweep();
-        let mut encode_ms = Vec::with_capacity(iterations as usize);
-        let mut validate_ms = Vec::with_capacity(iterations as usize);
-        let mut payload = None;
-        for generation in 1..=iterations {
-            let started = Instant::now();
-            let bytes = encode_packed_sweep(
-                &sweep,
-                PackedSweepIdentity {
-                    generation: generation as u64,
-                },
-            )
-            .map_err(|error| TransferError::new("wire_encode_failed", error.to_string()))?;
-            encode_ms.push(started.elapsed().as_secs_f64() * 1_000.0);
-
-            let started = Instant::now();
-            payload = Some(validate_packed_sweep(&bytes).map_err(|error| {
-                TransferError::new("wire_validation_failed", error.to_string())
-            })?);
-            validate_ms.push(started.elapsed().as_secs_f64() * 1_000.0);
-        }
-        Ok(EncoderBenchmarkReport {
-            mode: "phase2_synthetic_720x1832",
-            build_profile: if cfg!(debug_assertions) {
-                "debug"
-            } else {
-                "release"
-            },
-            iterations,
-            payload: payload.expect("positive iteration count"),
-            encode_ms: distribution(&encode_ms),
-            validate_ms: distribution(&validate_ms),
-        })
+        ENCODER_BENCHMARK_CACHE.get_or_compute(iterations, || run_encoder_benchmark(iterations))
     })
     .await
     .map_err(|error| TransferError::new("backend_task_failed", error.to_string()))?
+}
+
+fn run_encoder_benchmark(iterations: u8) -> Result<EncoderBenchmarkReport, TransferError> {
+    let sweep = phase2_benchmark_sweep();
+    let mut encode_ms = Vec::with_capacity(iterations as usize);
+    let mut validate_ms = Vec::with_capacity(iterations as usize);
+    let mut payload = None;
+    for generation in 1..=iterations {
+        let started = Instant::now();
+        let bytes = encode_packed_sweep(
+            &sweep,
+            PackedSweepIdentity {
+                generation: generation as u64,
+            },
+        )
+        .map_err(|error| TransferError::new("wire_encode_failed", error.to_string()))?;
+        encode_ms.push(started.elapsed().as_secs_f64() * 1_000.0);
+
+        let started = Instant::now();
+        payload =
+            Some(validate_packed_sweep(&bytes).map_err(|error| {
+                TransferError::new("wire_validation_failed", error.to_string())
+            })?);
+        validate_ms.push(started.elapsed().as_secs_f64() * 1_000.0);
+    }
+    Ok(EncoderBenchmarkReport {
+        mode: "phase2_synthetic_720x1832",
+        build_profile: if cfg!(debug_assertions) {
+            "debug"
+        } else {
+            "release"
+        },
+        iterations,
+        payload: payload.expect("positive iteration count"),
+        encode_ms: distribution(&encode_ms),
+        validate_ms: distribution(&validate_ms),
+    })
 }
 
 fn distribution(samples: &[f64]) -> TimingDistribution {
@@ -531,6 +568,10 @@ fn percentile(sorted: &[f64], fraction: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{
+        Barrier,
+        atomic::{AtomicUsize, Ordering},
+    };
 
     fn opened(broker: &TransferBroker) -> u64 {
         broker.open_session().expect("open session").session
@@ -538,6 +579,39 @@ mod tests {
 
     fn release_id(index: u8) -> String {
         format!("phase2-release-{index:02}")
+    }
+
+    #[test]
+    fn overlapping_encoder_probes_share_one_heavy_computation() {
+        let cache = Arc::new(EncoderBenchmarkCache::default());
+        let barrier = Arc::new(Barrier::new(3));
+        let computations = Arc::new(AtomicUsize::new(0));
+        let mut workers = Vec::new();
+
+        for _ in 0..2 {
+            let cache = Arc::clone(&cache);
+            let barrier = Arc::clone(&barrier);
+            let computations = Arc::clone(&computations);
+            workers.push(std::thread::spawn(move || {
+                barrier.wait();
+                cache
+                    .get_or_compute(1, || {
+                        computations.fetch_add(1, Ordering::SeqCst);
+                        std::thread::sleep(Duration::from_millis(25));
+                        run_encoder_benchmark(1)
+                    })
+                    .expect("benchmark report")
+            }));
+        }
+
+        barrier.wait();
+        let reports: Vec<_> = workers
+            .into_iter()
+            .map(|worker| worker.join().expect("benchmark worker"))
+            .collect();
+        assert_eq!(computations.load(Ordering::SeqCst), 1);
+        assert_eq!(reports[0].payload, reports[1].payload);
+        assert_eq!(reports[0].iterations, 1);
     }
 
     #[test]

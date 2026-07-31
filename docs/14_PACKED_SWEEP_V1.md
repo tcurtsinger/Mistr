@@ -167,6 +167,8 @@ Starting or cancelling a generation invalidates prior publication rights, but it
 
 Each release carries a random 16-64 character acknowledgement ID. Rust retains every acknowledged ID for the lifetime of that frontend session and treats a repeated ID as success, so a control response lost for arbitrarily long can be retried without releasing a newer buffer. The set is discarded only after the native page-load hook confirms replacement of the prior document, or after a same-document session becomes quiescent. A lease is marked released only after acknowledgement. Failed automatic stale/error acknowledgements remain queued and must flush before that client begins or requests more work; a native document replacement is the owner-loss recovery path.
 
+The packaged encoder probe is separate from scan delivery, so it is protected independently: Rust serializes probe computation and caches one report for each allowed iteration count for the lifetime of the native process. Overlapping documents can enqueue only small waiters; they cannot run duplicate multi-megabyte encoders. A reload receives the completed report for the same probe configuration.
+
 Control calls remain small JSON. The sweep response is `tauri::ipc::Response<Vec<u8>>`, received by TypeScript as an `ArrayBuffer`.
 
 ## Budgets and Phase 2 gate
