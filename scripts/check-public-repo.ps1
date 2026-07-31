@@ -36,13 +36,15 @@ $secretPatterns = @(
   "-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----",
   "AKIA[0-9A-Z]{16}",
   "gh[pousr]_[A-Za-z0-9_]{20,}",
-  '(?i)(password|secret|api[_-]?key|access[_-]?token)\s*[:=]\s*["''][^"''\r\n]{8,}["'']'
+  "npm_[A-Za-z0-9]{20,}",
+  '(?i)(password|secret|api[_-]?key|access[_-]?token|_authToken)\s*[:=]\s*["''][^"''\r\n]{8,}["'']',
+  '(?i)(password|secret|api[_-]?key|access[_-]?token|_authToken)\s*[:=]\s*(?!\$\{)[A-Za-z0-9_./+=-]{8,}'
 )
 
-$textExtensions = @(".css", ".html", ".js", ".json", ".md", ".mjs", ".ps1", ".rs", ".toml", ".ts", ".tsx", ".yml", ".yaml")
+$binaryExtensions = @(".7z", ".dll", ".exe", ".gif", ".gz", ".ico", ".icns", ".jpeg", ".jpg", ".msi", ".nexrad", ".pdf", ".png", ".webp", ".zip")
 foreach ($file in $candidateFiles) {
   if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { continue }
-  if ($textExtensions -notcontains [IO.Path]::GetExtension($file).ToLowerInvariant()) { continue }
+  if ($binaryExtensions -contains [IO.Path]::GetExtension($file).ToLowerInvariant()) { continue }
   $content = Get-Content -LiteralPath $file -Raw
   foreach ($pattern in $secretPatterns) {
     if ($content -match $pattern) {

@@ -10,11 +10,17 @@ const fixtureRoot = join(root, "fixtures");
 const manifest = JSON.parse(await readFile(join(fixtureRoot, "manifest.json"), "utf8"));
 const shouldDownload = process.argv.includes("--download");
 
-if (manifest.schemaVersion !== 1 || !Array.isArray(manifest.fixtures)) {
+if (
+  manifest.schemaVersion !== 1 ||
+  !Array.isArray(manifest.fixtures) ||
+  manifest.fixtures.length === 0
+) {
   throw new Error("Unsupported or invalid fixture manifest");
 }
 
+const fixtureIds = new Set();
 for (const fixture of manifest.fixtures) {
+  validateFixture(fixture, fixtureIds);
   const destination = resolve(fixtureRoot, fixture.localPath);
   const allowedRoot = resolve(fixtureRoot, "cache") + sep;
   if (!destination.startsWith(allowedRoot)) {
@@ -29,6 +35,39 @@ for (const fixture of manifest.fixtures) {
 }
 
 console.log(`Verified ${manifest.fixtures.length} fixture(s).`);
+
+function validateFixture(fixture, knownIds) {
+  if (
+    typeof fixture?.id !== "string" ||
+    !/^[a-z0-9-]+$/.test(fixture.id) ||
+    knownIds.has(fixture.id)
+  ) {
+    throw new Error("Fixture IDs must be unique lowercase slugs");
+  }
+  knownIds.add(fixture.id);
+
+  if (
+    fixture.bucket !== "unidata-nexrad-level2" ||
+    typeof fixture.key !== "string" ||
+    !fixture.key ||
+    !Number.isSafeInteger(fixture.sizeBytes) ||
+    fixture.sizeBytes < 1 ||
+    typeof fixture.sha256 !== "string" ||
+    !/^[a-f0-9]{64}$/.test(fixture.sha256) ||
+    typeof fixture.localPath !== "string"
+  ) {
+    throw new Error(`${fixture.id}: invalid fixture metadata`);
+  }
+
+  const url = new URL(fixture.url);
+  if (
+    url.protocol !== "https:" ||
+    url.hostname !== "unidata-nexrad-level2.s3.amazonaws.com" ||
+    url.pathname.slice(1) !== fixture.key
+  ) {
+    throw new Error(`${fixture.id}: source URL does not match its fixed bucket key`);
+  }
+}
 
 async function downloadIfNeeded(fixture, destination) {
   try {
