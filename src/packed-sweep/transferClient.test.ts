@@ -67,6 +67,34 @@ describe("PackedSweepTransferClient", () => {
     await expect(pending).rejects.toMatchObject({ code: "stale_response" });
   });
 
+  it("does not deactivate a newer generation when an older begin fails late", async () => {
+    let rejectOlder: ((reason: Error) => void) | undefined;
+    const olderBackendBegin = new Promise<TransferSnapshot>((_, reject) => {
+      rejectOlder = reject;
+    });
+    const invoke: InvokeFunction = async <T>(command: string, arguments_?: Record<string, unknown>) => {
+      const generation = arguments_?.generation as number;
+      if (command === "begin_phase2_generation" && generation === 7) {
+        return olderBackendBegin as T;
+      }
+      if (command === "begin_phase2_generation" && generation === 8) {
+        return snapshot(8) as T;
+      }
+      if (command === "cancel_phase2_generation" && generation === 8) {
+        return { ...snapshot(8), active: false, availableCredits: 0 } as T;
+      }
+      throw new Error(`unexpected command ${command}`);
+    };
+
+    const client = new PackedSweepTransferClient(invoke);
+    const older = client.begin(7);
+    const olderAssertion = expect(older).rejects.toThrow("older begin failed");
+    await client.begin(8);
+    rejectOlder?.(new Error("older begin failed"));
+    await olderAssertion;
+    await expect(client.cancel()).resolves.toMatchObject({ generation: 8 });
+  });
+
   it("requires a real raw ArrayBuffer response", async () => {
     const invoke: InvokeFunction = async <T>(command: string) => {
       if (command === "begin_phase2_generation") return snapshot(7) as T;

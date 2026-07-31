@@ -92,6 +92,12 @@ export class PackedSweepTransferClient {
       const snapshot = await this.invoke<TransferSnapshot>("begin_phase2_generation", {
         generation,
       });
+      if (this.generation !== generation) {
+        throw new TransferClientError(
+          "stale_response",
+          `generation ${generation} begin completed after it was superseded`,
+        );
+      }
       if (snapshot.generation !== generation || !snapshot.active) {
         throw new TransferClientError(
           "invoke_failed",
@@ -101,7 +107,9 @@ export class PackedSweepTransferClient {
       this.active = true;
       return snapshot;
     } catch (error) {
-      this.active = false;
+      if (this.generation === generation) {
+        this.active = false;
+      }
       throw normalizeInvokeError(error);
     }
   }
