@@ -16,11 +16,12 @@ function goldenBuffer(): ArrayBuffer {
   return Uint8Array.from(readFileSync(GOLDEN_PATH)).buffer;
 }
 
-function snapshot(generation: number, heldCredits = 0): TransferSnapshot {
+function snapshot(generation: number, heldCredits = 0, session = 1): TransferSnapshot {
   return {
+    session,
     generation,
-    active: true,
-    availableCredits: 2 - heldCredits,
+    active: generation !== 0,
+    availableCredits: generation === 0 ? 0 : 2 - heldCredits,
     heldCredits,
     inFlightCredits: 0,
     creditLimit: 2,
@@ -33,6 +34,7 @@ describe("PackedSweepTransferClient", () => {
     const releasedGenerations: number[] = [];
     const invoke: InvokeFunction = async <T>(command: string, arguments_?: Record<string, unknown>) => {
       calls.push(command);
+      if (command === "open_phase2_transfer_session") return snapshot(0) as T;
       if (command === "begin_phase2_generation") {
         return snapshot(arguments_?.generation as number) as T;
       }
@@ -44,6 +46,7 @@ describe("PackedSweepTransferClient", () => {
       throw new Error(`unexpected command ${command}`);
     };
     const client = new PackedSweepTransferClient(invoke);
+    await client.open();
     await client.begin(7);
     const lease = await client.request();
     expect(lease.packed.metadata.generation).toBe(7n);
@@ -62,6 +65,7 @@ describe("PackedSweepTransferClient", () => {
       resolveRequest = resolve;
     });
     const invoke: InvokeFunction = async <T>(command: string, arguments_?: Record<string, unknown>) => {
+      if (command === "open_phase2_transfer_session") return snapshot(0) as T;
       if (command === "begin_phase2_generation") {
         return snapshot(arguments_?.generation as number) as T;
       }
@@ -73,6 +77,7 @@ describe("PackedSweepTransferClient", () => {
       throw new Error(`unexpected command ${command}`);
     };
     const client = new PackedSweepTransferClient(invoke);
+    await client.open();
     await client.begin(7);
     const pending = client.request();
     await client.begin(8);
@@ -88,6 +93,7 @@ describe("PackedSweepTransferClient", () => {
     });
     const invoke: InvokeFunction = async <T>(command: string, arguments_?: Record<string, unknown>) => {
       const generation = arguments_?.generation as number;
+      if (command === "open_phase2_transfer_session") return snapshot(0) as T;
       if (command === "begin_phase2_generation" && generation === 7) {
         return olderBackendBegin as T;
       }
@@ -101,6 +107,7 @@ describe("PackedSweepTransferClient", () => {
     };
 
     const client = new PackedSweepTransferClient(invoke);
+    await client.open();
     const older = client.begin(7);
     const olderAssertion = expect(older).rejects.toThrow("older begin failed");
     await client.begin(8);
@@ -111,22 +118,26 @@ describe("PackedSweepTransferClient", () => {
 
   it("requires a real raw ArrayBuffer response", async () => {
     const invoke: InvokeFunction = async <T>(command: string) => {
+      if (command === "open_phase2_transfer_session") return snapshot(0) as T;
       if (command === "begin_phase2_generation") return snapshot(7) as T;
       if (command === "request_phase2_benchmark_sweep") return [1, 2, 3] as T;
       if (command === "release_phase2_transfer_credit") return snapshot(7) as T;
       throw new Error(`unexpected command ${command}`);
     };
     const client = new PackedSweepTransferClient(invoke);
+    await client.open();
     await client.begin(7);
     await expect(client.request()).rejects.toMatchObject({ code: "invalid_raw_response" });
   });
 
   it("preserves structured backend credit errors", async () => {
     const invoke: InvokeFunction = async <T>(command: string) => {
+      if (command === "open_phase2_transfer_session") return snapshot(0) as T;
       if (command === "begin_phase2_generation") return snapshot(7) as T;
       throw { code: "credit_exhausted", message: "both credits held" };
     };
     const client = new PackedSweepTransferClient(invoke);
+    await client.open();
     await client.begin(7);
     await expect(client.request()).rejects.toMatchObject({
       code: "credit_exhausted",
@@ -134,9 +145,62 @@ describe("PackedSweepTransferClient", () => {
     });
   });
 
-  it("rejects non-monotonic local generations", async () => {
-    const invoke: InvokeFunction = async <T>() => snapshot(7) as T;
+  it("keeps a lease release retryable until the backend acknowledges it", async () => {
+    let releaseAttempts = 0;
+    const invoke: InvokeFunction = async <T>(command: string, arguments_?: Record<string, unknown>) => {
+      if (command === "open_phase2_transfer_session") return snapshot(0) as T;
+      if (command === "begin_phase2_generation") return snapshot(7) as T;
+      if (command === "request_phase2_benchmark_sweep") return goldenBuffer() as T;
+      if (command === "release_phase2_transfer_credit") {
+        releaseAttempts += 1;
+        if (releaseAttempts <= 3) {
+          throw new Error("temporary acknowledgement failure");
+        }
+        expect(arguments_?.releaseId).toEqual(expect.any(String));
+        return snapshot(7) as T;
+      }
+      throw new Error(`unexpected command ${command}`);
+    };
     const client = new PackedSweepTransferClient(invoke);
+    await client.open();
+    await client.begin(7);
+    const lease = await client.request();
+    await expect(lease.release()).rejects.toThrow("temporary acknowledgement failure");
+    await expect(lease.release()).resolves.toBeUndefined();
+    await lease.release();
+    expect(releaseAttempts).toBe(4);
+  });
+
+  it("flushes a failed stale-response acknowledgement before more work", async () => {
+    let releaseAttempts = 0;
+    const invoke: InvokeFunction = async <T>(command: string, arguments_?: Record<string, unknown>) => {
+      if (command === "open_phase2_transfer_session") return snapshot(0) as T;
+      if (command === "begin_phase2_generation") {
+        return snapshot(arguments_?.generation as number) as T;
+      }
+      if (command === "request_phase2_benchmark_sweep") return [1, 2, 3] as T;
+      if (command === "release_phase2_transfer_credit") {
+        releaseAttempts += 1;
+        if (releaseAttempts <= 3) {
+          throw new Error("temporary acknowledgement failure");
+        }
+        return snapshot(arguments_?.generation as number) as T;
+      }
+      throw new Error(`unexpected command ${command}`);
+    };
+    const client = new PackedSweepTransferClient(invoke);
+    await client.open();
+    await client.begin(7);
+    await expect(client.request()).rejects.toMatchObject({ code: "invalid_raw_response" });
+    await client.begin(8);
+    expect(releaseAttempts).toBe(4);
+  });
+
+  it("rejects non-monotonic local generations", async () => {
+    const invoke: InvokeFunction = async <T>(command: string) =>
+      (command === "open_phase2_transfer_session" ? snapshot(0) : snapshot(7)) as T;
+    const client = new PackedSweepTransferClient(invoke);
+    await client.open();
     await client.begin(7);
     await expect(client.begin(7)).rejects.toBeInstanceOf(TransferClientError);
   });

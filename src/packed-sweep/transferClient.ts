@@ -1,6 +1,7 @@
 import { parsePackedSweep, type PackedSweep } from "./packedSweep";
 
 export interface TransferSnapshot {
+  session: number;
   generation: number;
   active: boolean;
   availableCredits: number;
@@ -45,6 +46,8 @@ export interface PackedSweepLease {
 
 export type TransferClientErrorCode =
   | "invalid_generation"
+  | "session_not_open"
+  | "stale_session"
   | "generation_not_active"
   | "stale_response"
   | "invalid_raw_response"
@@ -70,14 +73,43 @@ export type InvokeFunction = <T>(
 
 export class PackedSweepTransferClient {
   private readonly invoke: InvokeFunction;
+  private session = 0;
   private generation = 0;
   private active = false;
+  private readonly pendingReleaseAcks = new Map<string, ReleaseAck>();
 
   constructor(invoke: InvokeFunction) {
     this.invoke = invoke;
   }
 
+  async open(): Promise<TransferSnapshot> {
+    try {
+      const snapshot = await this.invoke<TransferSnapshot>("open_phase2_transfer_session");
+      if (
+        !Number.isSafeInteger(snapshot.session)
+        || snapshot.session <= 0
+        || snapshot.generation !== 0
+        || snapshot.active
+      ) {
+        throw new TransferClientError(
+          "invoke_failed",
+          "backend returned an invalid frontend session",
+        );
+      }
+      this.session = snapshot.session;
+      this.generation = 0;
+      this.active = false;
+      this.pendingReleaseAcks.clear();
+      return snapshot;
+    } catch (error) {
+      throw normalizeInvokeError(error);
+    }
+  }
+
   async begin(generation: number): Promise<TransferSnapshot> {
+    this.assertSessionOpen();
+    await this.flushPendingReleaseAcks();
+    const session = this.session;
     assertGeneration(generation);
     if (generation <= this.generation) {
       throw new TransferClientError(
@@ -90,15 +122,20 @@ export class PackedSweepTransferClient {
     this.active = false;
     try {
       const snapshot = await this.invoke<TransferSnapshot>("begin_phase2_generation", {
+        session,
         generation,
       });
-      if (this.generation !== generation) {
+      if (this.session !== session || this.generation !== generation) {
         throw new TransferClientError(
           "stale_response",
           `generation ${generation} begin completed after it was superseded`,
         );
       }
-      if (snapshot.generation !== generation || !snapshot.active) {
+      if (
+        snapshot.session !== session
+        || snapshot.generation !== generation
+        || !snapshot.active
+      ) {
         throw new TransferClientError(
           "invoke_failed",
           "backend returned an inconsistent generation snapshot",
@@ -107,7 +144,7 @@ export class PackedSweepTransferClient {
       this.active = true;
       return snapshot;
     } catch (error) {
-      if (this.generation === generation) {
+      if (this.session === session && this.generation === generation) {
         this.active = false;
       }
       throw normalizeInvokeError(error);
@@ -115,6 +152,7 @@ export class PackedSweepTransferClient {
   }
 
   async cancel(): Promise<TransferSnapshot> {
+    this.assertSessionOpen();
     const generation = this.generation;
     if (!this.active || generation === 0) {
       throw new TransferClientError("generation_not_active", "no generation is active");
@@ -122,6 +160,7 @@ export class PackedSweepTransferClient {
     this.active = false;
     try {
       return await this.invoke<TransferSnapshot>("cancel_phase2_generation", {
+        session: this.session,
         generation,
       });
     } catch (error) {
@@ -130,6 +169,9 @@ export class PackedSweepTransferClient {
   }
 
   async request(holdMs = 0): Promise<PackedSweepLease> {
+    this.assertSessionOpen();
+    await this.flushPendingReleaseAcks();
+    const session = this.session;
     const generation = this.generation;
     if (!this.active || generation === 0) {
       throw new TransferClientError("generation_not_active", "no generation is active");
@@ -143,19 +185,20 @@ export class PackedSweepTransferClient {
     try {
       const invokeStarted = performance.now();
       response = await this.invoke<ArrayBuffer>("request_phase2_benchmark_sweep", {
+        session,
         generation,
         holdMs,
       });
       const invokeMs = performance.now() - invokeStarted;
-      if (!this.active || this.generation !== generation) {
-        await this.releaseAfterFailure(generation);
+      if (!this.active || this.session !== session || this.generation !== generation) {
+        await this.releaseAfterFailure(session, generation);
         throw new TransferClientError(
           "stale_response",
           `generation ${generation} completed after it was superseded`,
         );
       }
       if (!(response instanceof ArrayBuffer)) {
-        await this.releaseAfterFailure(generation);
+        await this.releaseAfterFailure(session, generation);
         throw new TransferClientError(
           "invalid_raw_response",
           "Tauri command did not return an ArrayBuffer",
@@ -167,19 +210,19 @@ export class PackedSweepTransferClient {
       try {
         packed = await parsePackedSweep(response);
       } catch (error) {
-        await this.releaseAfterFailure(generation);
+        await this.releaseAfterFailure(session, generation);
         throw error;
       }
       const parseMs = performance.now() - parseStarted;
-      if (!this.active || this.generation !== generation) {
-        await this.releaseAfterFailure(generation);
+      if (!this.active || this.session !== session || this.generation !== generation) {
+        await this.releaseAfterFailure(session, generation);
         throw new TransferClientError(
           "stale_response",
           `generation ${generation} was superseded during parsing`,
         );
       }
       if (packed.metadata.generation !== BigInt(generation)) {
-        await this.releaseAfterFailure(generation);
+        await this.releaseAfterFailure(session, generation);
         throw new TransferClientError(
           "stale_response",
           `wire generation ${packed.metadata.generation} does not match ${generation}`,
@@ -187,6 +230,12 @@ export class PackedSweepTransferClient {
       }
 
       let released = false;
+      let releasePromise: Promise<void> | null = null;
+      const releaseAck: ReleaseAck = {
+        session,
+        generation,
+        releaseId: createReleaseId(),
+      };
       return {
         packed,
         timing: {
@@ -194,18 +243,21 @@ export class PackedSweepTransferClient {
           parseMs,
           totalMs: performance.now() - totalStarted,
         },
-        release: async () => {
+        release: () => {
           if (released) {
-            return;
+            return Promise.resolve();
           }
-          released = true;
-          try {
-            await this.invoke<TransferSnapshot>("release_phase2_transfer_credit", {
-              generation,
+          if (releasePromise !== null) {
+            return releasePromise;
+          }
+          releasePromise = this.acknowledgeRelease(releaseAck)
+            .then(() => {
+              released = true;
+            })
+            .finally(() => {
+              releasePromise = null;
             });
-          } catch (error) {
-            throw normalizeInvokeError(error);
-          }
+          return releasePromise;
         },
       };
     } catch (error) {
@@ -213,14 +265,65 @@ export class PackedSweepTransferClient {
     }
   }
 
-  private async releaseAfterFailure(generation: number) {
+  private async releaseAfterFailure(session: number, generation: number) {
+    const acknowledgement: ReleaseAck = {
+      session,
+      generation,
+      releaseId: createReleaseId(),
+    };
     try {
-      await this.invoke("release_phase2_transfer_credit", { generation });
+      await this.acknowledgeRelease(acknowledgement);
     } catch {
-      // Preserve the original response/parse error. A rejected backend request
-      // never became held; a delivered response remains charged until this ack.
+      // Preserve the original response/parse error. The acknowledgement stays
+      // queued and must flush before this client can begin or request again.
     }
   }
+
+  private async acknowledgeRelease(acknowledgement: ReleaseAck): Promise<void> {
+    this.pendingReleaseAcks.set(acknowledgement.releaseId, acknowledgement);
+    let lastError: Error = new TransferClientError(
+      "invoke_failed",
+      "release acknowledgement did not run",
+    );
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        await this.invoke<TransferSnapshot>("release_phase2_transfer_credit", {
+          session: acknowledgement.session,
+          generation: acknowledgement.generation,
+          releaseId: acknowledgement.releaseId,
+        });
+        this.pendingReleaseAcks.delete(acknowledgement.releaseId);
+        return;
+      } catch (error) {
+        lastError = normalizeInvokeError(error);
+        if (attempt < 2) {
+          await delay(10 * (attempt + 1));
+        }
+      }
+    }
+    throw lastError;
+  }
+
+  private async flushPendingReleaseAcks(): Promise<void> {
+    for (const acknowledgement of [...this.pendingReleaseAcks.values()]) {
+      await this.acknowledgeRelease(acknowledgement);
+    }
+  }
+
+  private assertSessionOpen() {
+    if (this.session === 0) {
+      throw new TransferClientError(
+        "session_not_open",
+        "open a frontend transfer session before beginning a generation",
+      );
+    }
+  }
+}
+
+interface ReleaseAck {
+  session: number;
+  generation: number;
+  releaseId: string;
 }
 
 export interface PackagedPhase2Benchmark {
@@ -267,6 +370,7 @@ export async function runPackagedPhase2Benchmark(
     iterations,
   });
   const client = new PackedSweepTransferClient(invoke);
+  await client.open();
   await client.begin(1);
 
   const timings: TransferTiming[] = [];
@@ -406,6 +510,10 @@ function percentile(sorted: number[], fraction: number): number {
 
 function delay(milliseconds: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function createReleaseId(): string {
+  return globalThis.crypto.randomUUID();
 }
 
 function readHeapBytes(): number | null {
