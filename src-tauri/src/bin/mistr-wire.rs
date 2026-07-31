@@ -285,7 +285,7 @@ impl Options {
 
 fn set_mode(mode: &mut Option<Mode>, next: Mode) -> Result<(), String> {
     if mode.is_some() {
-        return Err("choose exactly one of --golden or --benchmark".into());
+        return Err("choose exactly one of --golden, --benchmark, or --archive".into());
     }
     *mode = Some(next);
     Ok(())
