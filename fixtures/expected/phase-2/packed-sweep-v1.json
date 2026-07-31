@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "generation": 7,
+  "observationId": "a92d9790232a3941f429fb80f192bbea",
+  "siteIcao": "KTLX",
+  "product": "reflectivity",
+  "sourceKind": "mistr_phase2_synthetic",
+  "radialCount": 2,
+  "gateCount": 3,
+  "cellCount": 6,
+  "dataWordSizeBits": 8,
+  "totalBytes": 408,
+  "normalizedSha256": "a92d9790232a3941f429fb80f192bbea152b1ac6282756f6b1cf5e78df93d058",
+  "wireSha256": "cbf7165bbc718ed590354d2ca299c11d83488bebc706ef37ef294125164787ed"
+}
