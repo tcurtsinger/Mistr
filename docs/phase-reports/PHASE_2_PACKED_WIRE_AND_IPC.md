@@ -67,9 +67,9 @@ The release executable built by `npm run tauri:build -- --no-bundle` was launche
 |---|---:|---|
 | Response type | `ArrayBuffer` | **PASS**, no bulk JSON |
 | Payload | 7.56 MiB | **PASS**, <= 16 MiB target |
-| Encoder P95 | 15.7 ms | **PASS**, <= 100 ms |
-| Raw invoke P95 | 56.7 ms | **PASS**, <= 250 ms |
-| TypeScript parse P95 | 18.2 ms | **PASS**, <= 100 ms |
+| Encoder P95 | 18.1 ms | **PASS**, <= 100 ms |
+| Raw invoke P95 | 62.5 ms | **PASS**, <= 250 ms |
+| TypeScript parse P95 | 15.9 ms | **PASS**, <= 100 ms |
 | Contention | 2 fulfilled, 1 `credit_exhausted` | **PASS**, exactly two credits |
 | Delayed old generation | rejected as stale | **PASS**, no stale upload candidate |
 | Final ledger | 2 available, 0 held, 0 in flight | **PASS**, all credits returned |
