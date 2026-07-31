@@ -24,26 +24,33 @@ export function App() {
       return;
     }
 
-    const instance = new maplibregl.Map({
-      container: mapContainer.current,
-      style: MAP_STYLE,
-      center: [-97.5, 35.4],
-      zoom: 5.2,
-      attributionControl: false,
-      maxPitch: 0,
-    });
+    let instance: MapLibreMap | undefined;
+    try {
+      instance = new maplibregl.Map({
+        container: mapContainer.current,
+        style: MAP_STYLE,
+        center: [-97.5, 35.4],
+        zoom: 5.2,
+        attributionControl: false,
+        maxPitch: 0,
+      });
 
-    instance.addControl(
-      new maplibregl.AttributionControl({ compact: true }),
-      "bottom-right",
-    );
-    instance.once("load", () => {
-      setMapState((current) => updateMapReadiness(current, "load"));
-    });
-    instance.on("error", () => {
+      instance.addControl(
+        new maplibregl.AttributionControl({ compact: true }),
+        "bottom-right",
+      );
+      instance.once("load", () => {
+        setMapState((current) => updateMapReadiness(current, "load"));
+      });
+      instance.on("error", () => {
+        setMapState((current) => updateMapReadiness(current, "error"));
+      });
+      map.current = instance;
+    } catch {
+      instance?.remove();
       setMapState((current) => updateMapReadiness(current, "error"));
-    });
-    map.current = instance;
+      return;
+    }
 
     return () => {
       instance.remove();

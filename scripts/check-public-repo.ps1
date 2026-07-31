@@ -8,6 +8,8 @@ Set-Location -LiteralPath $root
 $forbiddenTrackedPatterns = @(
   "(^|/)\.env($|\.)",
   "\.(pem|key|pfx|p12|cer|crt)$",
+  "\.(nexrad|ar2v)$",
+  "(^|/)K[A-Z0-9]{3}[0-9]{8}_[0-9]{6}_V[0-9]{2}(\.gz)?$",
   "(^|/)(diagnostics|artifacts|benchmark-results|debug-bundles)/",
   "^fixtures/cache/.+"
 )
@@ -33,7 +35,8 @@ foreach ($file in $candidateFiles) {
 }
 
 $secretPatterns = @(
-  "-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----",
+  ("-----BEGIN (RSA |EC |OPENSSH |ENCRYPTED )?" + "PRIVATE KEY-----"),
+  ("-----BEGIN PGP " + "PRIVATE KEY BLOCK-----"),
   "AKIA[0-9A-Z]{16}",
   "gh[pousr]_[A-Za-z0-9_]{20,}",
   "github_pat_[A-Za-z0-9_]{20,}",
