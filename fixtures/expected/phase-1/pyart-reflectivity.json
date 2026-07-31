@@ -23,9 +23,12 @@
   "scale": 2.0,
   "offset": 66.0,
   "validCount": 285021,
+  "belowThresholdCount": 1034019,
+  "rangeFoldedCount": 0,
   "maskedCount": 1034019,
   "azimuthSha256": "b3c63d60fc4ceedfa56018edff5a4d8f99a831dcbb43b62a24169def9db7d794",
   "oracleFieldSha256": "b88ff2738cb8c64d4572a2cb5623486a1603681cdeaf27f71e59bbac015261fd",
+  "gateStatusSha256": "e79562f06bcf793c41ff1c3820e48e0da7162c989a54c27ed2d7ac39d6b961aa",
   "rawCodesSha256": "dca2af0bc4844389d73b8efa14db8232c6039e7814fbc4fddc8b0f10d8b4a534",
   "samples": [
     {
@@ -58,7 +61,7 @@
       "collectedAtUtc": "2024-05-20T23:06:06.253Z",
       "rangeM": 116625,
       "rawCode": 0,
-      "status": "masked",
+      "status": "below_threshold",
       "value": null
     },
     {
@@ -69,7 +72,7 @@
       "collectedAtUtc": "2024-05-20T23:06:06.253Z",
       "rangeM": 231125,
       "rawCode": 0,
-      "status": "masked",
+      "status": "below_threshold",
       "value": null
     },
     {
@@ -80,7 +83,7 @@
       "collectedAtUtc": "2024-05-20T23:06:06.253Z",
       "rangeM": 345625,
       "rawCode": 0,
-      "status": "masked",
+      "status": "below_threshold",
       "value": null
     },
     {
@@ -91,7 +94,7 @@
       "collectedAtUtc": "2024-05-20T23:06:06.253Z",
       "rangeM": 459875,
       "rawCode": 0,
-      "status": "masked",
+      "status": "below_threshold",
       "value": null
     },
     {
@@ -113,7 +116,7 @@
       "collectedAtUtc": "2024-05-20T23:06:06.350Z",
       "rangeM": 2375,
       "rawCode": 0,
-      "status": "masked",
+      "status": "below_threshold",
       "value": null
     },
     {
@@ -124,7 +127,7 @@
       "collectedAtUtc": "2024-05-20T23:06:06.350Z",
       "rangeM": 116625,
       "rawCode": 0,
-      "status": "masked",
+      "status": "below_threshold",
       "value": null
     },
     {
@@ -135,7 +138,7 @@
       "collectedAtUtc": "2024-05-20T23:06:06.350Z",
       "rangeM": 231125,
       "rawCode": 0,
-      "status": "masked",
+      "status": "below_threshold",
       "value": null
     },
     {
@@ -146,7 +149,7 @@
       "collectedAtUtc": "2024-05-20T23:06:06.350Z",
       "rangeM": 345625,
       "rawCode": 0,
-      "status": "masked",
+      "status": "below_threshold",
       "value": null
     },
     {
@@ -157,7 +160,7 @@
       "collectedAtUtc": "2024-05-20T23:06:06.350Z",
       "rangeM": 459875,
       "rawCode": 0,
-      "status": "masked",
+      "status": "below_threshold",
       "value": null
     },
     {
@@ -190,7 +193,7 @@
       "collectedAtUtc": "2024-05-20T23:06:24.120Z",
       "rangeM": 116625,
       "rawCode": 0,
-      "status": "masked",
+      "status": "below_threshold",
       "value": null
     },
     {
@@ -201,7 +204,7 @@
       "collectedAtUtc": "2024-05-20T23:06:24.120Z",
       "rangeM": 231125,
       "rawCode": 0,
-      "status": "masked",
+      "status": "below_threshold",
       "value": null
     },
     {
@@ -212,7 +215,7 @@
       "collectedAtUtc": "2024-05-20T23:06:24.120Z",
       "rangeM": 345625,
       "rawCode": 0,
-      "status": "masked",
+      "status": "below_threshold",
       "value": null
     },
     {
@@ -223,7 +226,7 @@
       "collectedAtUtc": "2024-05-20T23:06:24.120Z",
       "rangeM": 459875,
       "rawCode": 0,
-      "status": "masked",
+      "status": "below_threshold",
       "value": null
     },
     {
@@ -256,7 +259,7 @@
       "collectedAtUtc": "2024-05-20T23:05:30.511Z",
       "rangeM": 116625,
       "rawCode": 0,
-      "status": "masked",
+      "status": "below_threshold",
       "value": null
     },
     {
@@ -267,7 +270,7 @@
       "collectedAtUtc": "2024-05-20T23:05:30.511Z",
       "rangeM": 231125,
       "rawCode": 0,
-      "status": "masked",
+      "status": "below_threshold",
       "value": null
     },
     {
@@ -278,7 +281,7 @@
       "collectedAtUtc": "2024-05-20T23:05:30.511Z",
       "rangeM": 345625,
       "rawCode": 0,
-      "status": "masked",
+      "status": "below_threshold",
       "value": null
     },
     {
@@ -289,7 +292,7 @@
       "collectedAtUtc": "2024-05-20T23:05:30.511Z",
       "rangeM": 459875,
       "rawCode": 0,
-      "status": "masked",
+      "status": "below_threshold",
       "value": null
     },
     {
@@ -322,7 +325,7 @@
       "collectedAtUtc": "2024-05-20T23:05:48.375Z",
       "rangeM": 116625,
       "rawCode": 0,
-      "status": "masked",
+      "status": "below_threshold",
       "value": null
     },
     {
@@ -333,7 +336,7 @@
       "collectedAtUtc": "2024-05-20T23:05:48.375Z",
       "rangeM": 231125,
       "rawCode": 0,
-      "status": "masked",
+      "status": "below_threshold",
       "value": null
     },
     {
@@ -344,7 +347,7 @@
       "collectedAtUtc": "2024-05-20T23:05:48.375Z",
       "rangeM": 345625,
       "rawCode": 0,
-      "status": "masked",
+      "status": "below_threshold",
       "value": null
     },
     {
@@ -355,7 +358,7 @@
       "collectedAtUtc": "2024-05-20T23:05:48.375Z",
       "rangeM": 459875,
       "rawCode": 0,
-      "status": "masked",
+      "status": "below_threshold",
       "value": null
     },
     {
@@ -388,7 +391,7 @@
       "collectedAtUtc": "2024-05-20T23:06:06.151Z",
       "rangeM": 116625,
       "rawCode": 0,
-      "status": "masked",
+      "status": "below_threshold",
       "value": null
     },
     {
@@ -399,7 +402,7 @@
       "collectedAtUtc": "2024-05-20T23:06:06.151Z",
       "rangeM": 231125,
       "rawCode": 0,
-      "status": "masked",
+      "status": "below_threshold",
       "value": null
     },
     {
@@ -410,7 +413,7 @@
       "collectedAtUtc": "2024-05-20T23:06:06.151Z",
       "rangeM": 345625,
       "rawCode": 0,
-      "status": "masked",
+      "status": "below_threshold",
       "value": null
     },
     {
@@ -421,7 +424,7 @@
       "collectedAtUtc": "2024-05-20T23:06:06.151Z",
       "rangeM": 459875,
       "rawCode": 0,
-      "status": "masked",
+      "status": "below_threshold",
       "value": null
     }
   ]

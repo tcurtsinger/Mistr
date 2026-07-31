@@ -22,5 +22,5 @@ The virtual environment, downloaded radar bytes, and generated reports are inten
 
 - Py-ART `2.2.5` is version-pinned here. Its installed dependency graph can be captured with `pip freeze` in an evidence bundle when needed.
 - The oracle sorts the selected sweep by azimuth to match Mistr's renderer-independent normalization order.
-- Py-ART's high-level field exposes one mask for unavailable gates. The oracle also reads Py-ART's independent low-level moment records, so the comparison covers every raw code and can verify Mistr's below-threshold/range-folded derivation without relying on that high-level mask alone.
+- Py-ART's high-level field exposes one mask for unavailable gates. The oracle also reads Py-ART's independent low-level moment records, derives a full-array detailed-status digest (`valid`, `below_threshold`, `range_folded`) from every raw code, and verifies that the high-level mask agrees. The current public fixture contains no range-folded reflectivity gates, so a Rust synthetic adapter test separately exercises raw codes `0`, `1`, and `2+`.
 - This Phase 1 oracle validates base reflectivity only. Level II base velocity is decoded by the same adapter for later renderer work, but it is not mislabeled as storm-relative velocity and is not accepted by this report.

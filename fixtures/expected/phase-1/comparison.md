@@ -5,6 +5,6 @@
 **Oracle:** `arm_pyart=2.2.5`
 **Fixture SHA-256:** `99c189c327307da6a26a9f265ee84bf9fc690dc1a7358db941949805afa4a0d3`
 **Normalized SHA-256:** `f3c4ced03212402d921c9880b485db5bd95e5c28a1c752b2cae86a9e7bf27bf6`
-**Checks:** 265 passed / 0 failed / 265 total
+**Checks:** 268 passed / 0 failed / 268 total
 
-The comparison covers source identity, site and antenna location, product and units, volume and sweep times, VCP, dimensions, gate geometry and encoding, all sorted azimuths, every raw gate code, every gate's validity and decoded value, and representative radial/gate values.
+The comparison covers source identity, site and antenna location, product and units, volume and sweep times, VCP, dimensions, gate geometry and encoding, all sorted azimuths, every raw gate code, every detailed gate status and decoded value, and representative radial/gate values.

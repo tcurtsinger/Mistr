@@ -6,6 +6,7 @@
   "normalizedSha256": "f3c4ced03212402d921c9880b485db5bd95e5c28a1c752b2cae86a9e7bf27bf6",
   "azimuthSha256": "b3c63d60fc4ceedfa56018edff5a4d8f99a831dcbb43b62a24169def9db7d794",
   "oracleFieldSha256": "b88ff2738cb8c64d4572a2cb5623486a1603681cdeaf27f71e59bbac015261fd",
+  "gateStatusSha256": "e79562f06bcf793c41ff1c3820e48e0da7162c989a54c27ed2d7ac39d6b961aa",
   "rawCodesSha256": "dca2af0bc4844389d73b8efa14db8232c6039e7814fbc4fddc8b0f10d8b4a534",
   "siteIcao": "KTLX",
   "radarLatitudeDegrees": 35.333363,

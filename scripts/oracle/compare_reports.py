@@ -57,8 +57,11 @@ def main() -> int:
         "scale",
         "offset",
         "validCount",
+        "belowThresholdCount",
+        "rangeFoldedCount",
         "azimuthSha256",
         "oracleFieldSha256",
+        "gateStatusSha256",
         "rawCodesSha256",
         "antennaAltitudeM",
     ):
@@ -84,7 +87,7 @@ def main() -> int:
         exact(f"{prefix}.collectedAtUtc", rust_sample["collectedAtUtc"], oracle_sample["collectedAtUtc"])
         exact(f"{prefix}.rangeM", rust_sample["rangeM"], oracle_sample["rangeM"])
         exact(f"{prefix}.rawCode", rust_sample["rawCode"], oracle_sample["rawCode"])
-        exact(f"{prefix}.valid", rust_sample["status"] == "valid", oracle_sample["status"] == "valid")
+        exact(f"{prefix}.status", rust_sample["status"], oracle_sample["status"])
         if rust_sample["status"] == "valid" and oracle_sample["status"] == "valid":
             close(f"{prefix}.value", rust_sample["value"], oracle_sample["value"], 1e-6)
             decoded_from_raw = (rust_sample["rawCode"] - rust["offset"]) / rust["scale"]
@@ -116,7 +119,7 @@ def main() -> int:
         f"**Normalized SHA-256:** `{result['normalizedSha256']}`",
         f"**Checks:** {result['passedCount']} passed / {result['failedCount']} failed / {result['checkCount']} total",
         "",
-        "The comparison covers source identity, site and antenna location, product and units, volume and sweep times, VCP, dimensions, gate geometry and encoding, all sorted azimuths, every raw gate code, every gate's validity and decoded value, and representative radial/gate values.",
+        "The comparison covers source identity, site and antenna location, product and units, volume and sweep times, VCP, dimensions, gate geometry and encoding, all sorted azimuths, every raw gate code, every detailed gate status and decoded value, and representative radial/gate values.",
     ]
     if failed:
         lines.extend(["", "## Failures", ""])

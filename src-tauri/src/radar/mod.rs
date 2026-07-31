@@ -202,6 +202,17 @@ impl NormalizedSweep {
         format!("{:x}", hash.finalize())
     }
 
+    /// Cross-implementation digest of every detailed gate status in
+    /// radial-major order. Codes are stable and intentionally distinct:
+    /// valid = 0, below threshold = 1, and range folded = 2.
+    pub fn gate_status_sha256(&self) -> String {
+        let mut hash = Sha256::new();
+        for status in &self.statuses {
+            hash.update([status.code()]);
+        }
+        format!("{:x}", hash.finalize())
+    }
+
     /// Cross-implementation digest of every raw moment code in normalized
     /// radial-major order, encoded as little-endian `u16` values.
     pub fn raw_codes_sha256(&self) -> String {

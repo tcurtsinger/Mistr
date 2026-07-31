@@ -53,6 +53,14 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def status_from_raw(raw_code: int) -> str:
+    if raw_code == 0:
+        return "below_threshold"
+    if raw_code == 1:
+        return "range_folded"
+    return "valid"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("archive", type=Path)
@@ -130,6 +138,10 @@ def main() -> int:
     raw_codes = np.stack(
         [np.asarray(radial["REF"]["data"], dtype=np.uint16) for radial in low_level_radials]
     )
+    detailed_statuses = np.where(raw_codes == 0, 1, np.where(raw_codes == 1, 2, 0)).astype(np.uint8)
+    raw_validity = detailed_statuses == 0
+    if not np.array_equal(validity, raw_validity):
+        raise RuntimeError("Py-ART high-level validity and raw-code status semantics disagree")
 
     azimuth_le = np.asarray(azimuth, dtype="<f4")
     packed_field = np.empty(values.shape, dtype=np.dtype([("valid", "u1"), ("value", "<f4")]))
@@ -144,7 +156,9 @@ def main() -> int:
     samples = []
     for radial_index in sample_indices(len(azimuth)):
         for gate_index in sample_indices(gate_count):
-            valid = bool(validity[radial_index, gate_index])
+            raw_code = int(raw_codes[radial_index, gate_index])
+            status = status_from_raw(raw_code)
+            valid = status == "valid"
             samples.append(
                 {
                     "radialIndex": radial_index,
@@ -153,8 +167,8 @@ def main() -> int:
                     "elevationDegrees": float(elevation[radial_index]),
                     "collectedAtUtc": timestamp(origin, time_seconds[radial_index]),
                     "rangeM": first_gate_m + gate_index * gate_spacing_m,
-                    "rawCode": int(raw_codes[radial_index, gate_index]),
-                    "status": "valid" if valid else "masked",
+                    "rawCode": raw_code,
+                    "status": status,
                     "value": float(values[radial_index, gate_index]) if valid else None,
                 }
             )
@@ -184,9 +198,12 @@ def main() -> int:
         "scale": scale,
         "offset": offset,
         "validCount": int(validity.sum()),
+        "belowThresholdCount": int((detailed_statuses == 1).sum()),
+        "rangeFoldedCount": int((detailed_statuses == 2).sum()),
         "maskedCount": int(validity.size - validity.sum()),
         "azimuthSha256": hashlib.sha256(azimuth_le.tobytes(order="C")).hexdigest(),
         "oracleFieldSha256": hashlib.sha256(packed_field.tobytes(order="C")).hexdigest(),
+        "gateStatusSha256": hashlib.sha256(detailed_statuses.tobytes(order="C")).hexdigest(),
         "rawCodesSha256": hashlib.sha256(
             np.asarray(raw_codes, dtype="<u2").tobytes(order="C")
         ).hexdigest(),

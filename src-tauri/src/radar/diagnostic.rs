@@ -12,6 +12,7 @@ pub struct DiagnosticReport {
     pub normalized_sha256: String,
     pub azimuth_sha256: String,
     pub oracle_field_sha256: String,
+    pub gate_status_sha256: String,
     pub raw_codes_sha256: String,
     pub site_icao: String,
     pub radar_latitude_degrees: f32,
@@ -112,6 +113,7 @@ impl DiagnosticReport {
             normalized_sha256: sweep.normalized_sha256(),
             azimuth_sha256: sweep.azimuth_sha256(),
             oracle_field_sha256: sweep.oracle_field_sha256(),
+            gate_status_sha256: sweep.gate_status_sha256(),
             raw_codes_sha256: sweep.raw_codes_sha256(),
             site_icao: sweep.site.icao.clone(),
             radar_latitude_degrees: sweep.site.latitude_degrees,
@@ -156,6 +158,7 @@ impl DiagnosticReport {
              normalized_sha256: {}\n\
              azimuth_sha256: {}\n\
              oracle_field_sha256: {}\n\
+             gate_status_sha256: {}\n\
              raw_codes_sha256: {}\n\
              site: {} ({:.5}, {:.5}, site {} m, antenna {} m)\n\
              product: {} [{}]\n\
@@ -171,6 +174,7 @@ impl DiagnosticReport {
             self.normalized_sha256,
             self.azimuth_sha256,
             self.oracle_field_sha256,
+            self.gate_status_sha256,
             self.raw_codes_sha256,
             self.site_icao,
             self.radar_latitude_degrees,

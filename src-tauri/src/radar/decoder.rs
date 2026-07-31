@@ -431,27 +431,7 @@ fn normalize_sweep(
             collected_at_unix_ms: radial.collection_timestamp(),
         });
         raw_codes.extend(raw);
-        for decoded in data.iter() {
-            match decoded {
-                MomentValue::Value(value) if value.is_finite() => {
-                    values.push(value);
-                    statuses.push(GateStatus::Valid);
-                }
-                MomentValue::Value(_) => {
-                    return Err(DecodeError::InvalidMetadata(format!(
-                        "radial {radial_index} contains a non-finite decoded gate"
-                    )));
-                }
-                MomentValue::BelowThreshold => {
-                    values.push(0.0);
-                    statuses.push(GateStatus::BelowThreshold);
-                }
-                MomentValue::RangeFolded => {
-                    values.push(0.0);
-                    statuses.push(GateStatus::RangeFolded);
-                }
-            }
-        }
+        append_moment_gates(radial_index, data, &mut values, &mut statuses)?;
     }
 
     let site = scan.site().ok_or(DecodeError::MissingSite)?;
@@ -536,6 +516,36 @@ fn normalize_sweep(
         statuses,
         raw_codes,
     })
+}
+
+fn append_moment_gates(
+    radial_index: usize,
+    data: &MomentData,
+    values: &mut Vec<f32>,
+    statuses: &mut Vec<GateStatus>,
+) -> Result<(), DecodeError> {
+    for decoded in data.iter() {
+        match decoded {
+            MomentValue::Value(value) if value.is_finite() => {
+                values.push(value);
+                statuses.push(GateStatus::Valid);
+            }
+            MomentValue::Value(_) => {
+                return Err(DecodeError::InvalidMetadata(format!(
+                    "radial {radial_index} contains a non-finite decoded gate"
+                )));
+            }
+            MomentValue::BelowThreshold => {
+                values.push(0.0);
+                statuses.push(GateStatus::BelowThreshold);
+            }
+            MomentValue::RangeFolded => {
+                values.push(0.0);
+                statuses.push(GateStatus::RangeFolded);
+            }
+        }
+    }
+    Ok(())
 }
 
 fn moment(radial: &nexrad_model::data::Radial, product: RadarProduct) -> Option<&MomentData> {
@@ -784,6 +794,25 @@ mod tests {
         assert!(validate_finite_radial(0, &radial_at_elevation(90.0)).is_ok());
     }
 
+    #[test]
+    fn scaled_moment_status_codes_remain_distinct() {
+        let data = MomentData::from_fixed_point(3, 0, 250, 8, 2.0, 66.0, vec![0, 1, 68]);
+        let mut values = Vec::new();
+        let mut statuses = Vec::new();
+
+        append_moment_gates(0, &data, &mut values, &mut statuses).unwrap();
+
+        assert_eq!(
+            statuses,
+            vec![
+                GateStatus::BelowThreshold,
+                GateStatus::RangeFolded,
+                GateStatus::Valid
+            ]
+        );
+        assert_eq!(values, vec![0.0, 0.0, 1.0]);
+    }
+
     fn radial_at_elevation(elevation_degrees: f32) -> Radial {
         Radial::new(
             0,
@@ -833,6 +862,10 @@ mod tests {
         assert_eq!(
             output.sweep.oracle_field_sha256(),
             "b88ff2738cb8c64d4572a2cb5623486a1603681cdeaf27f71e59bbac015261fd"
+        );
+        assert_eq!(
+            output.sweep.gate_status_sha256(),
+            "e79562f06bcf793c41ff1c3820e48e0da7162c989a54c27ed2d7ac39d6b961aa"
         );
         assert_eq!(
             output.sweep.raw_codes_sha256(),

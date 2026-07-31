@@ -4,8 +4,8 @@
   "oracle": "arm_pyart=2.2.5",
   "sourceSha256": "99c189c327307da6a26a9f265ee84bf9fc690dc1a7358db941949805afa4a0d3",
   "normalizedSha256": "f3c4ced03212402d921c9880b485db5bd95e5c28a1c752b2cae86a9e7bf27bf6",
-  "checkCount": 265,
-  "passedCount": 265,
+  "checkCount": 268,
+  "passedCount": 268,
   "failedCount": 0,
   "checks": [
     {
@@ -117,6 +117,18 @@
       "oracle": 285021
     },
     {
+      "name": "belowThresholdCount",
+      "passed": true,
+      "mistr": 1034019,
+      "oracle": 1034019
+    },
+    {
+      "name": "rangeFoldedCount",
+      "passed": true,
+      "mistr": 0,
+      "oracle": 0
+    },
+    {
       "name": "azimuthSha256",
       "passed": true,
       "mistr": "b3c63d60fc4ceedfa56018edff5a4d8f99a831dcbb43b62a24169def9db7d794",
@@ -127,6 +139,12 @@
       "passed": true,
       "mistr": "b88ff2738cb8c64d4572a2cb5623486a1603681cdeaf27f71e59bbac015261fd",
       "oracle": "b88ff2738cb8c64d4572a2cb5623486a1603681cdeaf27f71e59bbac015261fd"
+    },
+    {
+      "name": "gateStatusSha256",
+      "passed": true,
+      "mistr": "e79562f06bcf793c41ff1c3820e48e0da7162c989a54c27ed2d7ac39d6b961aa",
+      "oracle": "e79562f06bcf793c41ff1c3820e48e0da7162c989a54c27ed2d7ac39d6b961aa"
     },
     {
       "name": "rawCodesSha256",
@@ -496,10 +514,10 @@
       "oracle": 67
     },
     {
-      "name": "sample[0,0].valid",
+      "name": "sample[0,0].status",
       "passed": true,
-      "mistr": true,
-      "oracle": true
+      "mistr": "valid",
+      "oracle": "valid"
     },
     {
       "name": "sample[0,0].value",
@@ -548,10 +566,10 @@
       "oracle": 75
     },
     {
-      "name": "sample[0,1].valid",
+      "name": "sample[0,1].status",
       "passed": true,
-      "mistr": true,
-      "oracle": true
+      "mistr": "valid",
+      "oracle": "valid"
     },
     {
       "name": "sample[0,1].value",
@@ -600,10 +618,10 @@
       "oracle": 0
     },
     {
-      "name": "sample[0,458].valid",
+      "name": "sample[0,458].status",
       "passed": true,
-      "mistr": false,
-      "oracle": false
+      "mistr": "below_threshold",
+      "oracle": "below_threshold"
     },
     {
       "name": "sample[0,916].azimuthDegrees",
@@ -638,10 +656,10 @@
       "oracle": 0
     },
     {
-      "name": "sample[0,916].valid",
+      "name": "sample[0,916].status",
       "passed": true,
-      "mistr": false,
-      "oracle": false
+      "mistr": "below_threshold",
+      "oracle": "below_threshold"
     },
     {
       "name": "sample[0,1374].azimuthDegrees",
@@ -676,10 +694,10 @@
       "oracle": 0
     },
     {
-      "name": "sample[0,1374].valid",
+      "name": "sample[0,1374].status",
       "passed": true,
-      "mistr": false,
-      "oracle": false
+      "mistr": "below_threshold",
+      "oracle": "below_threshold"
     },
     {
       "name": "sample[0,1831].azimuthDegrees",
@@ -714,10 +732,10 @@
       "oracle": 0
     },
     {
-      "name": "sample[0,1831].valid",
+      "name": "sample[0,1831].status",
       "passed": true,
-      "mistr": false,
-      "oracle": false
+      "mistr": "below_threshold",
+      "oracle": "below_threshold"
     },
     {
       "name": "sample[1,0].azimuthDegrees",
@@ -752,10 +770,10 @@
       "oracle": 66
     },
     {
-      "name": "sample[1,0].valid",
+      "name": "sample[1,0].status",
       "passed": true,
-      "mistr": true,
-      "oracle": true
+      "mistr": "valid",
+      "oracle": "valid"
     },
     {
       "name": "sample[1,0].value",
@@ -804,10 +822,10 @@
       "oracle": 0
     },
     {
-      "name": "sample[1,1].valid",
+      "name": "sample[1,1].status",
       "passed": true,
-      "mistr": false,
-      "oracle": false
+      "mistr": "below_threshold",
+      "oracle": "below_threshold"
     },
     {
       "name": "sample[1,458].azimuthDegrees",
@@ -842,10 +860,10 @@
       "oracle": 0
     },
     {
-      "name": "sample[1,458].valid",
+      "name": "sample[1,458].status",
       "passed": true,
-      "mistr": false,
-      "oracle": false
+      "mistr": "below_threshold",
+      "oracle": "below_threshold"
     },
     {
       "name": "sample[1,916].azimuthDegrees",
@@ -880,10 +898,10 @@
       "oracle": 0
     },
     {
-      "name": "sample[1,916].valid",
+      "name": "sample[1,916].status",
       "passed": true,
-      "mistr": false,
-      "oracle": false
+      "mistr": "below_threshold",
+      "oracle": "below_threshold"
     },
     {
       "name": "sample[1,1374].azimuthDegrees",
@@ -918,10 +936,10 @@
       "oracle": 0
     },
     {
-      "name": "sample[1,1374].valid",
+      "name": "sample[1,1374].status",
       "passed": true,
-      "mistr": false,
-      "oracle": false
+      "mistr": "below_threshold",
+      "oracle": "below_threshold"
     },
     {
       "name": "sample[1,1831].azimuthDegrees",
@@ -956,10 +974,10 @@
       "oracle": 0
     },
     {
-      "name": "sample[1,1831].valid",
+      "name": "sample[1,1831].status",
       "passed": true,
-      "mistr": false,
-      "oracle": false
+      "mistr": "below_threshold",
+      "oracle": "below_threshold"
     },
     {
       "name": "sample[180,0].azimuthDegrees",
@@ -994,10 +1012,10 @@
       "oracle": 52
     },
     {
-      "name": "sample[180,0].valid",
+      "name": "sample[180,0].status",
       "passed": true,
-      "mistr": true,
-      "oracle": true
+      "mistr": "valid",
+      "oracle": "valid"
     },
     {
       "name": "sample[180,0].value",
@@ -1046,10 +1064,10 @@
       "oracle": 57
     },
     {
-      "name": "sample[180,1].valid",
+      "name": "sample[180,1].status",
       "passed": true,
-      "mistr": true,
-      "oracle": true
+      "mistr": "valid",
+      "oracle": "valid"
     },
     {
       "name": "sample[180,1].value",
@@ -1098,10 +1116,10 @@
       "oracle": 0
     },
     {
-      "name": "sample[180,458].valid",
+      "name": "sample[180,458].status",
       "passed": true,
-      "mistr": false,
-      "oracle": false
+      "mistr": "below_threshold",
+      "oracle": "below_threshold"
     },
     {
       "name": "sample[180,916].azimuthDegrees",
@@ -1136,10 +1154,10 @@
       "oracle": 0
     },
     {
-      "name": "sample[180,916].valid",
+      "name": "sample[180,916].status",
       "passed": true,
-      "mistr": false,
-      "oracle": false
+      "mistr": "below_threshold",
+      "oracle": "below_threshold"
     },
     {
       "name": "sample[180,1374].azimuthDegrees",
@@ -1174,10 +1192,10 @@
       "oracle": 0
     },
     {
-      "name": "sample[180,1374].valid",
+      "name": "sample[180,1374].status",
       "passed": true,
-      "mistr": false,
-      "oracle": false
+      "mistr": "below_threshold",
+      "oracle": "below_threshold"
     },
     {
       "name": "sample[180,1831].azimuthDegrees",
@@ -1212,10 +1230,10 @@
       "oracle": 0
     },
     {
-      "name": "sample[180,1831].valid",
+      "name": "sample[180,1831].status",
       "passed": true,
-      "mistr": false,
-      "oracle": false
+      "mistr": "below_threshold",
+      "oracle": "below_threshold"
     },
     {
       "name": "sample[360,0].azimuthDegrees",
@@ -1250,10 +1268,10 @@
       "oracle": 73
     },
     {
-      "name": "sample[360,0].valid",
+      "name": "sample[360,0].status",
       "passed": true,
-      "mistr": true,
-      "oracle": true
+      "mistr": "valid",
+      "oracle": "valid"
     },
     {
       "name": "sample[360,0].value",
@@ -1302,10 +1320,10 @@
       "oracle": 59
     },
     {
-      "name": "sample[360,1].valid",
+      "name": "sample[360,1].status",
       "passed": true,
-      "mistr": true,
-      "oracle": true
+      "mistr": "valid",
+      "oracle": "valid"
     },
     {
       "name": "sample[360,1].value",
@@ -1354,10 +1372,10 @@
       "oracle": 0
     },
     {
-      "name": "sample[360,458].valid",
+      "name": "sample[360,458].status",
       "passed": true,
-      "mistr": false,
-      "oracle": false
+      "mistr": "below_threshold",
+      "oracle": "below_threshold"
     },
     {
       "name": "sample[360,916].azimuthDegrees",
@@ -1392,10 +1410,10 @@
       "oracle": 0
     },
     {
-      "name": "sample[360,916].valid",
+      "name": "sample[360,916].status",
       "passed": true,
-      "mistr": false,
-      "oracle": false
+      "mistr": "below_threshold",
+      "oracle": "below_threshold"
     },
     {
       "name": "sample[360,1374].azimuthDegrees",
@@ -1430,10 +1448,10 @@
       "oracle": 0
     },
     {
-      "name": "sample[360,1374].valid",
+      "name": "sample[360,1374].status",
       "passed": true,
-      "mistr": false,
-      "oracle": false
+      "mistr": "below_threshold",
+      "oracle": "below_threshold"
     },
     {
       "name": "sample[360,1831].azimuthDegrees",
@@ -1468,10 +1486,10 @@
       "oracle": 0
     },
     {
-      "name": "sample[360,1831].valid",
+      "name": "sample[360,1831].status",
       "passed": true,
-      "mistr": false,
-      "oracle": false
+      "mistr": "below_threshold",
+      "oracle": "below_threshold"
     },
     {
       "name": "sample[540,0].azimuthDegrees",
@@ -1506,10 +1524,10 @@
       "oracle": 61
     },
     {
-      "name": "sample[540,0].valid",
+      "name": "sample[540,0].status",
       "passed": true,
-      "mistr": true,
-      "oracle": true
+      "mistr": "valid",
+      "oracle": "valid"
     },
     {
       "name": "sample[540,0].value",
@@ -1558,10 +1576,10 @@
       "oracle": 73
     },
     {
-      "name": "sample[540,1].valid",
+      "name": "sample[540,1].status",
       "passed": true,
-      "mistr": true,
-      "oracle": true
+      "mistr": "valid",
+      "oracle": "valid"
     },
     {
       "name": "sample[540,1].value",
@@ -1610,10 +1628,10 @@
       "oracle": 0
     },
     {
-      "name": "sample[540,458].valid",
+      "name": "sample[540,458].status",
       "passed": true,
-      "mistr": false,
-      "oracle": false
+      "mistr": "below_threshold",
+      "oracle": "below_threshold"
     },
     {
       "name": "sample[540,916].azimuthDegrees",
@@ -1648,10 +1666,10 @@
       "oracle": 0
     },
     {
-      "name": "sample[540,916].valid",
+      "name": "sample[540,916].status",
       "passed": true,
-      "mistr": false,
-      "oracle": false
+      "mistr": "below_threshold",
+      "oracle": "below_threshold"
     },
     {
       "name": "sample[540,1374].azimuthDegrees",
@@ -1686,10 +1704,10 @@
       "oracle": 0
     },
     {
-      "name": "sample[540,1374].valid",
+      "name": "sample[540,1374].status",
       "passed": true,
-      "mistr": false,
-      "oracle": false
+      "mistr": "below_threshold",
+      "oracle": "below_threshold"
     },
     {
       "name": "sample[540,1831].azimuthDegrees",
@@ -1724,10 +1742,10 @@
       "oracle": 0
     },
     {
-      "name": "sample[540,1831].valid",
+      "name": "sample[540,1831].status",
       "passed": true,
-      "mistr": false,
-      "oracle": false
+      "mistr": "below_threshold",
+      "oracle": "below_threshold"
     },
     {
       "name": "sample[719,0].azimuthDegrees",
@@ -1762,10 +1780,10 @@
       "oracle": 73
     },
     {
-      "name": "sample[719,0].valid",
+      "name": "sample[719,0].status",
       "passed": true,
-      "mistr": true,
-      "oracle": true
+      "mistr": "valid",
+      "oracle": "valid"
     },
     {
       "name": "sample[719,0].value",
@@ -1814,10 +1832,10 @@
       "oracle": 70
     },
     {
-      "name": "sample[719,1].valid",
+      "name": "sample[719,1].status",
       "passed": true,
-      "mistr": true,
-      "oracle": true
+      "mistr": "valid",
+      "oracle": "valid"
     },
     {
       "name": "sample[719,1].value",
@@ -1866,10 +1884,10 @@
       "oracle": 0
     },
     {
-      "name": "sample[719,458].valid",
+      "name": "sample[719,458].status",
       "passed": true,
-      "mistr": false,
-      "oracle": false
+      "mistr": "below_threshold",
+      "oracle": "below_threshold"
     },
     {
       "name": "sample[719,916].azimuthDegrees",
@@ -1904,10 +1922,10 @@
       "oracle": 0
     },
     {
-      "name": "sample[719,916].valid",
+      "name": "sample[719,916].status",
       "passed": true,
-      "mistr": false,
-      "oracle": false
+      "mistr": "below_threshold",
+      "oracle": "below_threshold"
     },
     {
       "name": "sample[719,1374].azimuthDegrees",
@@ -1942,10 +1960,10 @@
       "oracle": 0
     },
     {
-      "name": "sample[719,1374].valid",
+      "name": "sample[719,1374].status",
       "passed": true,
-      "mistr": false,
-      "oracle": false
+      "mistr": "below_threshold",
+      "oracle": "below_threshold"
     },
     {
       "name": "sample[719,1831].azimuthDegrees",
@@ -1980,10 +1998,10 @@
       "oracle": 0
     },
     {
-      "name": "sample[719,1831].valid",
+      "name": "sample[719,1831].status",
       "passed": true,
-      "mistr": false,
-      "oracle": false
+      "mistr": "below_threshold",
+      "oracle": "below_threshold"
     }
   ]
 }
