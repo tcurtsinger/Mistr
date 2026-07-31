@@ -5,6 +5,7 @@ description = "Native-data NEXRAD rendering feasibility prototype"
 authors = ["Mistr contributors"]
 edition = "2024"
 rust-version = "1.85"
+default-run = "mistr"
 
 [lib]
 name = "mistr_lib"
@@ -14,5 +15,16 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2.5.3", features = [] }
 
 [dependencies]
-serde = { version = "1.0.229", features = ["derive"] }
+bzip2 = "=0.6.0"
+chrono = { version = "=0.4.45", features = ["serde"] }
+flate2 = "=1.1.9"
+nexrad-data = { version = "=1.0.0-rc.7", default-features = false, features = ["nexrad-model"] }
+nexrad-model = { version = "=1.0.0-rc.2", features = ["chrono"] }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.151"
+sha2 = "=0.10.9"
 tauri = { version = "2.11.5", features = [] }
+thiserror = "=2.0.19"
+
+[dev-dependencies]
+proptest = "=1.9.0"

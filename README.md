@@ -11,7 +11,7 @@ The target is a Windows desktop storm command center with game-loop-style playba
 
 ## Status
 
-**Prototype only.** Phase 0 establishes a reproducible desktop scaffold, fixture provenance, environment capture, and validation harness. Decoder and GPU feasibility must pass explicit gates before this code is considered for production use.
+**Prototype only.** Phase 0 established the reproducible desktop harness. Phase 1 now contains a bounded Rust Level II decoder adapter and an independently verified reflectivity reference. GPU and full playback feasibility must still pass their explicit gates before this code is considered for production use.
 
 Start with [the documentation index](docs/README.md) and [prototype charter](docs/00_PROTOTYPE_CHARTER.md).
 
@@ -40,6 +40,16 @@ npm run tauri:build
 The unsigned NSIS and MSI outputs are local prototype artifacts under `src-tauri/target/release/bundle/`; they are not committed to the public repository.
 
 Downloaded radar data and generated diagnostics are intentionally ignored by Git. No AWS credentials are used: the Phase 0 fixture is fetched from a public Unidata NEXRAD bucket.
+
+## Phase 1 decoder check
+
+After `npm run fixture:download`, produce the Mistr diagnostic with:
+
+```powershell
+cargo run --locked --manifest-path src-tauri\Cargo.toml --bin mistr-decode -- fixtures\cache\KTLX20240520_230512_V06 --product reflectivity --json artifacts\phase-1\rust-reflectivity.json --text artifacts\phase-1\rust-reflectivity.txt
+```
+
+The independent Py-ART procedure is documented in [scripts/oracle/README.md](scripts/oracle/README.md). Reviewed, public-data-only reference reports are committed under `fixtures/expected/phase-1/`; arbitrary local diagnostics remain ignored.
 
 ## Public-repository rules
 

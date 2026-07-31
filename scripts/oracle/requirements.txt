@@ -1,0 +1,2 @@
+# Independent Level II oracle used only for Phase 1 validation.
+arm_pyart==2.2.5

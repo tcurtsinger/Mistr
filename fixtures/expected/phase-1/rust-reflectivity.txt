@@ -1,0 +1,54 @@
+Mistr Level II diagnostic
+decoder: nexrad-data=1.0.0-rc.7@4b4e5ed7cbb6c6d7c0997e86fc725c301c8fd40d;nexrad-decode=1.0.0-rc.3@de6e16d1977ca118738d917c130bf13413da7626;nexrad-model=1.0.0-rc.2@3d9ef8d7d1ecaa24795c53300fbdd5825852f1aa
+source_sha256: 99c189c327307da6a26a9f265ee84bf9fc690dc1a7358db941949805afa4a0d3
+normalized_sha256: f3c4ced03212402d921c9880b485db5bd95e5c28a1c752b2cae86a9e7bf27bf6
+azimuth_sha256: b3c63d60fc4ceedfa56018edff5a4d8f99a831dcbb43b62a24169def9db7d794
+oracle_field_sha256: b88ff2738cb8c64d4572a2cb5623486a1603681cdeaf27f71e59bbac015261fd
+gate_status_sha256: e79562f06bcf793c41ff1c3820e48e0da7162c989a54c27ed2d7ac39d6b961aa
+raw_codes_sha256: dca2af0bc4844389d73b8efa14db8232c6039e7814fbc4fddc8b0f10d8b4a534
+site: KTLX (35.33336, -97.27776, site 370 m, antenna 389 m)
+product: reflectivity [dBZ]
+volume: 2024-05-20T23:05:12.891Z to 2024-05-20T23:13:43.538Z
+sweep: elevation 1 / 0.483 deg / VCP 35
+dimensions: 720 radials x 1832 gates = 1319040 cells
+gate geometry: first center 2125 m; spacing 250 m; 8-bit; scale 2; offset 66
+statuses: 285021 valid; 1034019 below threshold; 0 range folded
+preflight: 67 records; 7936679 compressed bytes; 60645152 expanded record bytes
+
+Selected radial/gate values:
+  r=  0 g=   0 az=  0.255 elev= 0.483 range=   2125m raw=  67 status=Valid value=0.500
+  r=  0 g=   1 az=  0.255 elev= 0.483 range=   2375m raw=  75 status=Valid value=4.500
+  r=  0 g= 458 az=  0.255 elev= 0.483 range= 116625m raw=   0 status=BelowThreshold value=n/a
+  r=  0 g= 916 az=  0.255 elev= 0.483 range= 231125m raw=   0 status=BelowThreshold value=n/a
+  r=  0 g=1374 az=  0.255 elev= 0.483 range= 345625m raw=   0 status=BelowThreshold value=n/a
+  r=  0 g=1831 az=  0.255 elev= 0.483 range= 459875m raw=   0 status=BelowThreshold value=n/a
+  r=  1 g=   0 az=  0.753 elev= 0.483 range=   2125m raw=  66 status=Valid value=0.000
+  r=  1 g=   1 az=  0.753 elev= 0.483 range=   2375m raw=   0 status=BelowThreshold value=n/a
+  r=  1 g= 458 az=  0.753 elev= 0.483 range= 116625m raw=   0 status=BelowThreshold value=n/a
+  r=  1 g= 916 az=  0.753 elev= 0.483 range= 231125m raw=   0 status=BelowThreshold value=n/a
+  r=  1 g=1374 az=  0.753 elev= 0.483 range= 345625m raw=   0 status=BelowThreshold value=n/a
+  r=  1 g=1831 az=  0.753 elev= 0.483 range= 459875m raw=   0 status=BelowThreshold value=n/a
+  r=180 g=   0 az= 90.253 elev= 0.483 range=   2125m raw=  52 status=Valid value=-7.000
+  r=180 g=   1 az= 90.253 elev= 0.483 range=   2375m raw=  57 status=Valid value=-4.500
+  r=180 g= 458 az= 90.253 elev= 0.483 range= 116625m raw=   0 status=BelowThreshold value=n/a
+  r=180 g= 916 az= 90.253 elev= 0.483 range= 231125m raw=   0 status=BelowThreshold value=n/a
+  r=180 g=1374 az= 90.253 elev= 0.483 range= 345625m raw=   0 status=BelowThreshold value=n/a
+  r=180 g=1831 az= 90.253 elev= 0.483 range= 459875m raw=   0 status=BelowThreshold value=n/a
+  r=360 g=   0 az=180.253 elev= 0.483 range=   2125m raw=  73 status=Valid value=3.500
+  r=360 g=   1 az=180.253 elev= 0.483 range=   2375m raw=  59 status=Valid value=-3.500
+  r=360 g= 458 az=180.253 elev= 0.483 range= 116625m raw=   0 status=BelowThreshold value=n/a
+  r=360 g= 916 az=180.253 elev= 0.483 range= 231125m raw=   0 status=BelowThreshold value=n/a
+  r=360 g=1374 az=180.253 elev= 0.483 range= 345625m raw=   0 status=BelowThreshold value=n/a
+  r=360 g=1831 az=180.253 elev= 0.483 range= 459875m raw=   0 status=BelowThreshold value=n/a
+  r=540 g=   0 az=270.244 elev= 0.483 range=   2125m raw=  61 status=Valid value=-2.500
+  r=540 g=   1 az=270.244 elev= 0.483 range=   2375m raw=  73 status=Valid value=3.500
+  r=540 g= 458 az=270.244 elev= 0.483 range= 116625m raw=   0 status=BelowThreshold value=n/a
+  r=540 g= 916 az=270.244 elev= 0.483 range= 231125m raw=   0 status=BelowThreshold value=n/a
+  r=540 g=1374 az=270.244 elev= 0.483 range= 345625m raw=   0 status=BelowThreshold value=n/a
+  r=540 g=1831 az=270.244 elev= 0.483 range= 459875m raw=   0 status=BelowThreshold value=n/a
+  r=719 g=   0 az=359.753 elev= 0.483 range=   2125m raw=  73 status=Valid value=3.500
+  r=719 g=   1 az=359.753 elev= 0.483 range=   2375m raw=  70 status=Valid value=2.000
+  r=719 g= 458 az=359.753 elev= 0.483 range= 116625m raw=   0 status=BelowThreshold value=n/a
+  r=719 g= 916 az=359.753 elev= 0.483 range= 231125m raw=   0 status=BelowThreshold value=n/a
+  r=719 g=1374 az=359.753 elev= 0.483 range= 345625m raw=   0 status=BelowThreshold value=n/a
+  r=719 g=1831 az=359.753 elev= 0.483 range= 459875m raw=   0 status=BelowThreshold value=n/a

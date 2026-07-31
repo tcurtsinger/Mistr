@@ -19,6 +19,9 @@ benchmark-results/
 debug-bundles/
 output/
 .playwright-cli/
+.oracle-venv/
+__pycache__/
+*.py[cod]
 
 # Generated Tauri schemas and non-Windows icon variants.
 src-tauri/gen/schemas/
