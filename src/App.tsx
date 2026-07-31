@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import * as maplibregl from "maplibre-gl";
 import type { Map as MapLibreMap } from "maplibre-gl";
+import { updateMapReadiness, type MapReadiness } from "./mapReadiness";
 import { getRuntimeSnapshot, type RuntimeSnapshot } from "./runtime";
 
 const MAP_STYLE = "https://tiles.openfreemap.org/styles/dark";
@@ -12,7 +13,7 @@ export function App() {
     shell: "browser",
     appVersion: "development",
   });
-  const [mapState, setMapState] = useState("INITIALIZING");
+  const [mapState, setMapState] = useState<MapReadiness>("INITIALIZING");
 
   useEffect(() => {
     void getRuntimeSnapshot().then(setRuntime);
@@ -36,8 +37,12 @@ export function App() {
       new maplibregl.AttributionControl({ compact: true }),
       "bottom-right",
     );
-    instance.once("load", () => setMapState("BASEMAP READY"));
-    instance.once("error", () => setMapState("BASEMAP UNAVAILABLE"));
+    instance.once("load", () => {
+      setMapState((current) => updateMapReadiness(current, "load"));
+    });
+    instance.on("error", () => {
+      setMapState((current) => updateMapReadiness(current, "error"));
+    });
     map.current = instance;
 
     return () => {
