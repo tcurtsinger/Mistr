@@ -12,7 +12,7 @@ Phase 2 accepts [`PackedSweep v1`](../14_PACKED_SWEEP_V1.md): a deterministic li
 - Tauri returns `tauri::ipc::Response<Vec<u8>>`; the frontend requires a real `ArrayBuffer`, not a JSON number array.
 - TypeScript validates bounds, canonical offsets, alignment, enums, reserved bytes, dimensions, metadata, SHA-256, radials, and every raw/status/value relationship before exposing zero-copy typed-array views.
 - Rust allocates a frontend session epoch; generations are monotonic within it. A replacement WebView session reclaims orphaned delivered credits but leaves prior native work charged until completion. TypeScript blocks a response superseded while IPC or parsing was in progress.
-- The broker has exactly two global transfer credits. A third concurrent request fails immediately with `credit_exhausted`; old `spawn_blocking` work and raw responses already committed to IPC delivery stay charged across generation changes until completion or frontend stale-response acknowledgement. Idempotent release IDs make lost acknowledgements safely retryable.
+- The broker has exactly two global transfer credits. A third concurrent request fails immediately with `credit_exhausted`; old `spawn_blocking` work and raw responses already committed to IPC delivery stay charged across generation changes until completion or frontend stale-response acknowledgement. Release IDs remain idempotent for the frontend session's full lifetime, so even a long-delayed retry cannot release a newer credit.
 
 The implementation uses Tauri's documented raw array-buffer response API. It does not add HTTP, base64, private WebView hooks, or bulk JSON.
 
@@ -100,7 +100,7 @@ Automated tests cover:
 - observation-ID and wire-hash disagreement;
 - deterministic encoding and the exact committed Rust golden;
 - parsing the Rust golden in TypeScript without copying gate sections;
-- frontend-session replacement, repeated benchmark generations, monotonic within-session generations, cancellation, stale-response blocking and acknowledgement, cross-generation in-flight/delivery charging, idempotent/retryable lease release, and structured errors; and
+- frontend-session replacement, repeated benchmark generations, monotonic within-session generations, cancellation, stale-response blocking and acknowledgement, cross-generation in-flight/delivery charging, long-delayed idempotent/retryable lease release, and structured errors; and
 - two-credit exhaustion and recovery.
 
 The parser's 32 MiB hard limit is exercised before header access in both Rust and TypeScript. The representative 7.564 MiB payload remains below the 16 MiB target.

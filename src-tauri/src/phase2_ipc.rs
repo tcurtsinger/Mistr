@@ -3,7 +3,7 @@ use crate::packed_sweep::{
     validate_packed_sweep,
 };
 use serde::Serialize;
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::ipc::Response;
@@ -11,7 +11,6 @@ use tauri::ipc::Response;
 pub const TRANSFER_CREDIT_LIMIT: u8 = 2;
 const MAX_BENCHMARK_ITERATIONS: u8 = 20;
 const MAX_DIAGNOSTIC_HOLD_MS: u64 = 2_000;
-const MAX_RELEASE_ACKNOWLEDGEMENTS: usize = 64;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -47,7 +46,10 @@ struct TransferState {
     generation: u64,
     active: bool,
     held_credits_by_owner: BTreeMap<(u64, u64), u8>,
-    acknowledged_release_ids: VecDeque<String>,
+    // Retain every acknowledgement for the lifetime of its frontend session.
+    // A control response can be lost for arbitrarily long, so evicting an ID
+    // would let its eventual retry release a newer credit from the same owner.
+    acknowledged_release_ids: BTreeSet<String>,
     in_flight_credits: u8,
 }
 
@@ -128,11 +130,7 @@ impl TransferBroker {
     ) -> Result<TransferSnapshot, TransferError> {
         let mut state = self.lock()?;
         validate_release_id(release_id)?;
-        if state
-            .acknowledged_release_ids
-            .iter()
-            .any(|acknowledged| acknowledged == release_id)
-        {
+        if state.acknowledged_release_ids.contains(release_id) {
             return Ok(snapshot(&state));
         }
         let owner = (session, generation);
@@ -148,10 +146,7 @@ impl TransferBroker {
         }
         state
             .acknowledged_release_ids
-            .push_back(release_id.to_string());
-        if state.acknowledged_release_ids.len() > MAX_RELEASE_ACKNOWLEDGEMENTS {
-            state.acknowledged_release_ids.pop_front();
-        }
+            .insert(release_id.to_string());
         Ok(snapshot(&state))
     }
 
@@ -591,6 +586,37 @@ mod tests {
         assert_eq!(
             broker.release(session, 1, &id).unwrap().available_credits,
             2
+        );
+    }
+
+    #[test]
+    fn old_release_retry_cannot_release_a_newer_credit() {
+        let broker = TransferBroker::default();
+        let session = opened(&broker);
+        broker.begin(session, 1).unwrap();
+
+        for index in 1..=66 {
+            broker.acquire(session, 1).unwrap();
+            broker.complete_for_publish(session, 1).unwrap();
+            broker.release(session, 1, &release_id(index)).unwrap();
+        }
+
+        broker.acquire(session, 1).unwrap();
+        broker.complete_for_publish(session, 1).unwrap();
+        assert_eq!(broker.snapshot().unwrap().held_credits, 1);
+        assert_eq!(
+            broker
+                .release(session, 1, &release_id(1))
+                .unwrap()
+                .held_credits,
+            1
+        );
+        assert_eq!(
+            broker
+                .release(session, 1, &release_id(67))
+                .unwrap()
+                .held_credits,
+            0
         );
     }
 
