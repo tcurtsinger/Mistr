@@ -38,6 +38,8 @@
 
 **Reason:** Payloads contain roughly millions of gates and require bounded transfer behavior.
 
+**Accepted layout:** [`PackedSweep v1`](14_PACKED_SWEEP_V1.md) fixes the Phase 2 header, sections, integrity rules, generation identity, and two-credit transfer contract.
+
 ### D007 — Texture-oriented GPU representation
 
 **Decision:** Reject a naïve six-vertices-per-bin mesh as the primary renderer. Benchmark shared geometry versus polar sampling and select one compact design.
@@ -192,11 +194,11 @@ Supersedes / superseded by
 
 Required ADRs before Phase 3:
 
-- Decoder selection/pinning.
-- `PackedSweep v1` layout.
-- GPU renderer representation.
-- Normalization grid and missing-data semantics.
-- CPU/GPU retention policy.
+- [x] Decoder selection/pinning: [`13_DECODER_DECISION.md`](13_DECODER_DECISION.md).
+- [x] `PackedSweep v1` layout: [`14_PACKED_SWEEP_V1.md`](14_PACKED_SWEEP_V1.md).
+- [ ] GPU renderer representation.
+- [ ] Normalization grid and missing-data semantics.
+- [ ] CPU/GPU retention policy.
 
 Required ADRs before Phase 7:
 
