@@ -1,0 +1,46 @@
+{
+  "name": "mistr",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "verify": "npm run public:check && npm run docs:check && npm run test && npm run build && npm run rust:fmt && npm run rust:clippy && npm run rust:test && npm run rust:check",
+    "docs:check": "node scripts/check-doc-links.mjs",
+    "rust:check": "cargo check --manifest-path src-tauri/Cargo.toml --locked",
+    "rust:clippy": "cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings",
+    "rust:fmt": "cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check",
+    "rust:test": "cargo test --manifest-path src-tauri/Cargo.toml --locked",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "env:capture": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/capture-environment.ps1",
+    "fixture:download": "node scripts/verify-fixtures.mjs --download",
+    "fixture:verify": "node scripts/verify-fixtures.mjs",
+    "public:check": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-public-repo.ps1"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "2.11.1",
+    "maplibre-gl": "6.1.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.11.4",
+    "@types/node": "24.10.1",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "@vitejs/plugin-react": "6.0.5",
+    "typescript": "7.0.2",
+    "vite": "8.2.0",
+    "vitest": "4.1.10"
+  },
+  "engines": {
+    "node": ">=24.0.0",
+    "npm": ">=11.0.0"
+  }
+}
