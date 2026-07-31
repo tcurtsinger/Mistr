@@ -6,7 +6,7 @@ $root = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $root
 
 $forbiddenTrackedPatterns = @(
-  "(^|/)\.env($|\.)",
+  "(^|/)\.env($|\.(?!example$))",
   "\.(pem|key|pfx|p12|cer|crt)$",
   "\.(nexrad|ar2v)$",
   "(^|/)K[A-Z0-9]{3}[0-9]{8}_[0-9]{6}_V[0-9]{2}(\.gz)?$",
@@ -14,9 +14,15 @@ $forbiddenTrackedPatterns = @(
   "^fixtures/cache/.+"
 )
 
+$hasGitIndex = Test-Path -LiteralPath ".git"
+$trackedLookup = @{}
 $candidateFiles = @()
-if (Test-Path -LiteralPath ".git") {
-  $candidateFiles += @(git ls-files --cached --others --exclude-standard)
+if ($hasGitIndex) {
+  $trackedFiles = @(git ls-files --cached)
+  $untrackedFiles = @(git ls-files --others --exclude-standard)
+  foreach ($file in $trackedFiles) { $trackedLookup[$file] = $true }
+  $candidateFiles += $trackedFiles
+  $candidateFiles += $untrackedFiles
 } else {
   $candidateFiles += @(Get-ChildItem -Recurse -File | ForEach-Object {
     $_.FullName.Substring($root.Length + 1).Replace("\", "/")
@@ -41,19 +47,63 @@ $secretPatterns = @(
   "gh[pousr]_[A-Za-z0-9_]{20,}",
   "github_pat_[A-Za-z0-9_]{20,}",
   "npm_[A-Za-z0-9]{20,}",
-  '(?i)(password|secret|api[_-]?key|access[_-]?token|_authToken)\s*[:=]\s*["''][^"''\r\n]{8,}["'']',
-  '(?i)(password|secret|api[_-]?key|access[_-]?token|_authToken)\s*[:=]\s*(?!\$\{)[A-Za-z0-9_./+=-]{8,}'
+  '(?i)["'']?(password|secret|api[_-]?key|access[_-]?token|_authToken)["'']?\s*[:=]\s*["''](?!\$\{|<)[^"''\r\n]{8,}["'']',
+  '(?i)["'']?(password|secret|api[_-]?key|access[_-]?token|_authToken)["'']?\s*[:=]\s*(?!\$\{|<)[A-Za-z0-9_./+=-]{8,}'
 )
 
 $binaryExtensions = @(".7z", ".dll", ".exe", ".gif", ".gz", ".ico", ".icns", ".jpeg", ".jpg", ".msi", ".nexrad", ".pdf", ".png", ".webp", ".zip")
-foreach ($file in $candidateFiles) {
-  if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { continue }
-  if ($binaryExtensions -contains [IO.Path]::GetExtension($file).ToLowerInvariant()) { continue }
-  $content = Get-Content -LiteralPath $file -Raw
+$maximumPublicFileBytes = 1MB
+
+function Get-IndexText([string]$File) {
+  $previousErrorAction = $ErrorActionPreference
+  try {
+    $ErrorActionPreference = "Continue"
+    $lines = @(& git show ":$File" 2>$null)
+    $exitCode = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $previousErrorAction
+  }
+  if ($exitCode -ne 0) { throw "Could not read staged content for $File" }
+  return [string]::Join("`n", $lines)
+}
+
+function Get-IndexSize([string]$File) {
+  $size = & git cat-file -s ":$File" 2>$null
+  if ($LASTEXITCODE -ne 0) { throw "Could not read staged size for $File" }
+  return [int64]$size
+}
+
+function Test-SecretContent([string]$Label, [string]$Content) {
   foreach ($pattern in $secretPatterns) {
-    if ($content -match $pattern) {
-      $violations.Add("possible secret pattern in: $file")
+    if ($Content -match $pattern) {
+      $violations.Add("possible secret pattern in: $Label")
     }
+  }
+}
+
+foreach ($file in $candidateFiles) {
+  $isTracked = $hasGitIndex -and $trackedLookup.ContainsKey($file)
+  if ($isTracked) {
+    $fileSize = Get-IndexSize $file
+  } elseif (Test-Path -LiteralPath $file -PathType Leaf) {
+    $fileSize = (Get-Item -LiteralPath $file).Length
+  } else {
+    continue
+  }
+
+  if ($fileSize -gt $maximumPublicFileBytes) {
+    $violations.Add("oversized public artifact: $file ($fileSize bytes)")
+    continue
+  }
+  if ($binaryExtensions -contains [IO.Path]::GetExtension($file).ToLowerInvariant()) { continue }
+
+  if ($isTracked) {
+    Test-SecretContent "$file (index)" (Get-IndexText $file)
+    if (Test-Path -LiteralPath $file -PathType Leaf) {
+      Test-SecretContent "$file (working tree)" (Get-Content -LiteralPath $file -Raw)
+    }
+  } else {
+    Test-SecretContent $file (Get-Content -LiteralPath $file -Raw)
   }
 }
 
