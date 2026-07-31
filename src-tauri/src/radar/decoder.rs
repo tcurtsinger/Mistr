@@ -12,6 +12,9 @@ use std::io::{self, Read};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use thiserror::Error;
 
+/// Hard cap applied before Archive II bytes enter the decoder.
+pub const MAX_LEVEL2_INPUT_BYTES: usize = 64 * 1024 * 1024;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct DecodeLimits {
     pub max_input_bytes: usize,
@@ -28,7 +31,7 @@ struct DecodeLimits {
 impl Default for DecodeLimits {
     fn default() -> Self {
         Self {
-            max_input_bytes: 64 * 1024 * 1024,
+            max_input_bytes: MAX_LEVEL2_INPUT_BYTES,
             max_archive_bytes: 256 * 1024 * 1024,
             max_record_count: 8_192,
             max_record_bytes: 16 * 1024 * 1024,

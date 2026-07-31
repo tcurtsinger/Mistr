@@ -6,7 +6,7 @@
 mod decoder;
 mod diagnostic;
 
-pub use decoder::{DecodeError, decode_level2};
+pub use decoder::{DecodeError, MAX_LEVEL2_INPUT_BYTES, decode_level2};
 pub use diagnostic::{DiagnosticReport, GateSample};
 
 use serde::{Deserialize, Serialize};

@@ -1,6 +1,7 @@
-use mistr_lib::radar::{DiagnosticReport, RadarProduct, decode_level2};
+use mistr_lib::radar::{DiagnosticReport, MAX_LEVEL2_INPUT_BYTES, RadarProduct, decode_level2};
 use std::env;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -24,8 +25,7 @@ fn run() -> Result<(), String> {
         return Ok(());
     }
     let options = Options::parse(arguments.into_iter())?;
-    let input = fs::read(&options.input)
-        .map_err(|error| format!("could not read {}: {error}", options.input.display()))?;
+    let input = read_input(&options.input)?;
     let decoded = decode_level2(&input, options.product)
         .map_err(|error| format!("decode failed: {error}"))?;
     let report = DiagnosticReport::from_output(&decoded);
@@ -42,6 +42,38 @@ fn run() -> Result<(), String> {
         write_output(path, &report.to_text())?;
     }
     Ok(())
+}
+
+fn read_input(path: &Path) -> Result<Vec<u8>, String> {
+    let file = fs::File::open(path)
+        .map_err(|error| format!("could not open {}: {error}", path.display()))?;
+    let metadata = file
+        .metadata()
+        .map_err(|error| format!("could not inspect {}: {error}", path.display()))?;
+    if metadata.len() > MAX_LEVEL2_INPUT_BYTES as u64 {
+        return Err(format!(
+            "input {} is {} bytes; limit is {} bytes",
+            path.display(),
+            metadata.len(),
+            MAX_LEVEL2_INPUT_BYTES
+        ));
+    }
+    read_bounded(file, MAX_LEVEL2_INPUT_BYTES)
+        .map_err(|error| format!("could not read {}: {error}", path.display()))
+}
+
+fn read_bounded(reader: impl Read, limit: usize) -> Result<Vec<u8>, String> {
+    let mut input = Vec::new();
+    reader
+        .take((limit as u64).saturating_add(1))
+        .read_to_end(&mut input)
+        .map_err(|error| error.to_string())?;
+    if input.len() > limit {
+        return Err(format!(
+            "input grew beyond the {limit}-byte limit while it was being read"
+        ));
+    }
+    Ok(input)
 }
 
 fn write_output(path: &Path, content: &str) -> Result<(), String> {
@@ -114,4 +146,24 @@ impl Options {
 
 fn usage() -> &'static str {
     "usage: cargo run --bin mistr-decode -- <archive> [--product reflectivity|base_velocity] [--json <path>] [--text <path>]"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bounded_reader_stops_after_limit_plus_one_byte() {
+        let result = read_bounded(std::io::repeat(0), 128);
+        assert_eq!(
+            result,
+            Err("input grew beyond the 128-byte limit while it was being read".into())
+        );
+    }
+
+    #[test]
+    fn bounded_reader_accepts_input_at_limit() {
+        let result = read_bounded(&[7u8; 128][..], 128).expect("read bounded bytes");
+        assert_eq!(result, vec![7u8; 128]);
+    }
 }
