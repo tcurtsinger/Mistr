@@ -42,7 +42,9 @@ pub struct TransferSnapshot {
 
 #[derive(Debug, Default)]
 struct TransferState {
+    document_epoch: u64,
     session: u64,
+    session_document_epoch: u64,
     generation: u64,
     active: bool,
     held_credits_by_owner: BTreeMap<(u64, u64), u8>,
@@ -50,7 +52,7 @@ struct TransferState {
     // A control response can be lost for arbitrarily long, so evicting an ID
     // would let its eventual retry release a newer credit from the same owner.
     acknowledged_release_ids: BTreeSet<String>,
-    in_flight_credits: u8,
+    in_flight_credits_by_session: BTreeMap<u64, u8>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -61,16 +63,46 @@ pub struct TransferBroker {
 impl TransferBroker {
     fn open_session(&self) -> Result<TransferSnapshot, TransferError> {
         let mut state = self.lock()?;
+        if state.document_epoch == 0 {
+            // Unit tests and non-WebView callers do not pass through Tauri's
+            // page-load hook. The packaged app establishes this epoch first.
+            state.document_epoch = 1;
+        }
+        if state.session_document_epoch == state.document_epoch
+            && (held_credit_count_for_session(&state, state.session) > 0
+                || in_flight_credit_count_for_session(&state, state.session) > 0)
+        {
+            return Err(TransferError::new(
+                "session_still_owned",
+                "the current document still owns transfer credits; only a native page-load epoch can reclaim them",
+            ));
+        }
         state.session = state.session.checked_add(1).ok_or_else(|| {
             TransferError::new("session_exhausted", "frontend session counter exhausted")
         })?;
+        state.session_document_epoch = state.document_epoch;
         state.generation = 0;
         state.active = false;
-        // A new WebView owner means prior delivered buffers can no longer be
-        // acknowledged. In-flight native work remains globally charged.
-        state.held_credits_by_owner.clear();
         state.acknowledged_release_ids.clear();
         Ok(snapshot(&state))
+    }
+
+    pub(crate) fn document_started(&self) -> Result<(), TransferError> {
+        let mut state = self.lock()?;
+        state.document_epoch = state.document_epoch.checked_add(1).ok_or_else(|| {
+            TransferError::new(
+                "document_epoch_exhausted",
+                "WebView document epoch exhausted",
+            )
+        })?;
+        state.session_document_epoch = 0;
+        state.active = false;
+        // Tauri's native page-load start proves the previous JavaScript
+        // document is being replaced. Its delivered buffers are now orphaned;
+        // native work remains charged to its exact session until completion.
+        state.held_credits_by_owner.clear();
+        state.acknowledged_release_ids.clear();
+        Ok(())
     }
 
     fn begin(&self, session: u64, generation: u64) -> Result<TransferSnapshot, TransferError> {
@@ -118,7 +150,10 @@ impl TransferBroker {
                 "both renderer transfer credits are already in use",
             ));
         }
-        state.in_flight_credits += 1;
+        *state
+            .in_flight_credits_by_session
+            .entry(session)
+            .or_default() += 1;
         Ok(())
     }
 
@@ -150,11 +185,9 @@ impl TransferBroker {
         Ok(snapshot(&state))
     }
 
-    fn finish_without_publish(&self) {
-        if let Ok(mut state) = self.inner.lock()
-            && state.in_flight_credits > 0
-        {
-            state.in_flight_credits -= 1;
+    fn finish_without_publish(&self, session: u64) {
+        if let Ok(mut state) = self.inner.lock() {
+            take_in_flight_credit(&mut state, session);
         }
     }
 
@@ -184,13 +217,12 @@ impl TransferBroker {
         } else {
             None
         };
-        if state.in_flight_credits == 0 {
+        if !take_in_flight_credit(&mut state, session) {
             return Err(TransferError::new(
                 "transfer_state_invalid",
-                "completed work did not hold an in-flight credit",
+                format!("session {session} completed work without an in-flight credit"),
             ));
         }
-        state.in_flight_credits -= 1;
         if let Some(error) = publication_error {
             Err(error)
         } else {
@@ -218,7 +250,10 @@ impl TransferBroker {
 }
 
 fn ensure_session(state: &TransferState, session: u64) -> Result<(), TransferError> {
-    if session == 0 || session != state.session {
+    if session == 0
+        || session != state.session
+        || state.session_document_epoch != state.document_epoch
+    {
         return Err(TransferError::new(
             "stale_session",
             format!(
@@ -260,13 +295,13 @@ fn snapshot(state: &TransferState) -> TransferSnapshot {
         active: state.active,
         available_credits,
         held_credits: held_credit_count(state),
-        in_flight_credits: state.in_flight_credits,
+        in_flight_credits: in_flight_credit_count(state),
         credit_limit: TRANSFER_CREDIT_LIMIT,
     }
 }
 
 fn credits_in_use(state: &TransferState) -> u8 {
-    held_credit_count(state).saturating_add(state.in_flight_credits)
+    held_credit_count(state).saturating_add(in_flight_credit_count(state))
 }
 
 fn held_credit_count(state: &TransferState) -> u8 {
@@ -275,6 +310,42 @@ fn held_credit_count(state: &TransferState) -> u8 {
         .values()
         .copied()
         .fold(0, u8::saturating_add)
+}
+
+fn held_credit_count_for_session(state: &TransferState, session: u64) -> u8 {
+    state
+        .held_credits_by_owner
+        .iter()
+        .filter(|((owner_session, _), _)| *owner_session == session)
+        .map(|(_, held)| *held)
+        .fold(0, u8::saturating_add)
+}
+
+fn in_flight_credit_count(state: &TransferState) -> u8 {
+    state
+        .in_flight_credits_by_session
+        .values()
+        .copied()
+        .fold(0, u8::saturating_add)
+}
+
+fn in_flight_credit_count_for_session(state: &TransferState, session: u64) -> u8 {
+    state
+        .in_flight_credits_by_session
+        .get(&session)
+        .copied()
+        .unwrap_or(0)
+}
+
+fn take_in_flight_credit(state: &mut TransferState, session: u64) -> bool {
+    let Some(held) = state.in_flight_credits_by_session.get_mut(&session) else {
+        return false;
+    };
+    *held -= 1;
+    if *held == 0 {
+        state.in_flight_credits_by_session.remove(&session);
+    }
+    true
 }
 
 fn validate_release_id(release_id: &str) -> Result<(), TransferError> {
@@ -357,7 +428,7 @@ pub async fn request_phase2_benchmark_sweep(
     let encoded = match task {
         Ok(encoded) => encoded,
         Err(error) => {
-            broker.finish_without_publish();
+            broker.finish_without_publish(session);
             return Err(TransferError::new("backend_task_failed", error.to_string()));
         }
     };
@@ -365,7 +436,7 @@ pub async fn request_phase2_benchmark_sweep(
     let bytes = match encoded {
         Ok(bytes) => bytes,
         Err(error) => {
-            broker.finish_without_publish();
+            broker.finish_without_publish(session);
             return Err(error);
         }
     };
@@ -512,7 +583,7 @@ mod tests {
             "stale_generation"
         );
         assert_eq!(broker.snapshot().unwrap().available_credits, 1);
-        broker.finish_without_publish();
+        broker.finish_without_publish(session);
         assert_eq!(broker.snapshot().unwrap().available_credits, 2);
     }
 
@@ -556,6 +627,7 @@ mod tests {
         broker.complete_for_publish(first, 1).unwrap();
         broker.acquire(first, 1).unwrap();
 
+        broker.document_started().unwrap();
         let second = opened(&broker);
         let opened = broker.snapshot().unwrap();
         assert_eq!(second, first + 1);
@@ -569,6 +641,26 @@ mod tests {
             "stale_session"
         );
         assert_eq!(broker.snapshot().unwrap().available_credits, 2);
+    }
+
+    #[test]
+    fn second_client_in_same_document_cannot_reclaim_live_credit() {
+        let broker = TransferBroker::default();
+        let first = opened(&broker);
+        broker.begin(first, 1).unwrap();
+        broker.acquire(first, 1).unwrap();
+        broker.complete_for_publish(first, 1).unwrap();
+
+        assert_eq!(
+            broker.open_session().unwrap_err().code,
+            "session_still_owned"
+        );
+        assert_eq!(broker.snapshot().unwrap().held_credits, 1);
+        broker.release(first, 1, &release_id(1)).unwrap();
+
+        let second = opened(&broker);
+        assert_eq!(second, first + 1);
+        assert_eq!(broker.snapshot().unwrap().held_credits, 0);
     }
 
     #[test]
