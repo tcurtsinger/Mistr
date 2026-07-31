@@ -47,13 +47,24 @@ function validateFixture(fixture, knownIds) {
   knownIds.add(fixture.id);
 
   if (
+    typeof fixture.source !== "string" ||
+    !fixture.source.trim() ||
     fixture.bucket !== "unidata-nexrad-level2" ||
     typeof fixture.key !== "string" ||
     !fixture.key ||
+    typeof fixture.station !== "string" ||
+    !/^K[A-Z0-9]{3}$/.test(fixture.station) ||
+    typeof fixture.observedAt !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(
+      fixture.observedAt,
+    ) ||
+    !Number.isFinite(Date.parse(fixture.observedAt)) ||
     !Number.isSafeInteger(fixture.sizeBytes) ||
     fixture.sizeBytes < 1 ||
     typeof fixture.sha256 !== "string" ||
     !/^[a-f0-9]{64}$/.test(fixture.sha256) ||
+    typeof fixture.etag !== "string" ||
+    !/^[a-f0-9]{32}(?:-\d+)?$/.test(fixture.etag) ||
     typeof fixture.localPath !== "string"
   ) {
     throw new Error(`${fixture.id}: invalid fixture metadata`);
