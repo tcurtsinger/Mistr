@@ -36,6 +36,7 @@ $secretPatterns = @(
   "-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----",
   "AKIA[0-9A-Z]{16}",
   "gh[pousr]_[A-Za-z0-9_]{20,}",
+  "github_pat_[A-Za-z0-9_]{20,}",
   "npm_[A-Za-z0-9]{20,}",
   '(?i)(password|secret|api[_-]?key|access[_-]?token|_authToken)\s*[:=]\s*["''][^"''\r\n]{8,}["'']',
   '(?i)(password|secret|api[_-]?key|access[_-]?token|_authToken)\s*[:=]\s*(?!\$\{)[A-Za-z0-9_./+=-]{8,}'

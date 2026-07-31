@@ -55,10 +55,7 @@ function validateFixture(fixture, knownIds) {
     typeof fixture.station !== "string" ||
     !/^K[A-Z0-9]{3}$/.test(fixture.station) ||
     typeof fixture.observedAt !== "string" ||
-    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(
-      fixture.observedAt,
-    ) ||
-    !Number.isFinite(Date.parse(fixture.observedAt)) ||
+    !isValidUtcTimestamp(fixture.observedAt) ||
     !Number.isSafeInteger(fixture.sizeBytes) ||
     fixture.sizeBytes < 1 ||
     typeof fixture.sha256 !== "string" ||
@@ -78,6 +75,38 @@ function validateFixture(fixture, knownIds) {
   ) {
     throw new Error(`${fixture.id}: source URL does not match its fixed bucket key`);
   }
+
+  const keyMetadata = /^(\d{4})\/(\d{2})\/(\d{2})\/(K[A-Z0-9]{3})\/\4\1\2\3_(\d{2})(\d{2})(\d{2})_V\d{2}(?:\.gz)?$/.exec(
+    fixture.key,
+  );
+  if (!keyMetadata) {
+    throw new Error(`${fixture.id}: unsupported Level II archive key format`);
+  }
+
+  const [, year, month, day, keyStation, hour, minute, second] = keyMetadata;
+  const keyTimestamp = `${year}-${month}-${day}T${hour}:${minute}:${second}Z`;
+  if (fixture.station !== keyStation || fixture.observedAt !== keyTimestamp) {
+    throw new Error(`${fixture.id}: station or scan time does not match its archive key`);
+  }
+}
+
+function isValidUtcTimestamp(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})Z$/.exec(
+    value,
+  );
+  if (!match) return false;
+
+  const [, year, month, day, hour, minute, second] = match.map(Number);
+  const parsed = new Date(value);
+  return (
+    Number.isFinite(parsed.getTime()) &&
+    parsed.getUTCFullYear() === year &&
+    parsed.getUTCMonth() + 1 === month &&
+    parsed.getUTCDate() === day &&
+    parsed.getUTCHours() === hour &&
+    parsed.getUTCMinutes() === minute &&
+    parsed.getUTCSeconds() === second
+  );
 }
 
 async function downloadIfNeeded(fixture, destination) {
