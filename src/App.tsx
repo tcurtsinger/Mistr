@@ -147,11 +147,10 @@ export function App() {
         const replacementGpuBytes: number[] = [];
         for (let round = 1; round <= PHASE4_REPLACEMENT_ROUNDS; round += 1) {
           const replacementGeneration = activeLayer.getSnapshot().generation + 1;
-          activeLayer.replaceResidentFrames(baseModels.map((model) => ({
+          await activeController.replaceResidentFrames(baseModels.map((model) => ({
             ...model,
             generation: BigInt(replacementGeneration),
           })));
-          await activeController.establishInitialPaint();
           replacementGpuBytes.push(activeLayer.getSnapshot().metrics?.gpuResourceBytes ?? 0);
         }
 

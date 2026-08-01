@@ -10,6 +10,8 @@ class FakeLayer {
   private selected = "frame-a";
   private painted = "frame-a";
   private sequence = 1;
+  private generation = 7;
+  private residentObservationIds = ["frame-a", "frame-b", "frame-c"];
   private pending: (() => void) | null = null;
 
   getSnapshot(): RadarRendererSnapshot {
@@ -18,9 +20,9 @@ class FakeLayer {
       observationId: this.selected,
       selectedObservationId: this.selected,
       lastPaintedObservationId: this.painted,
-      generation: 7,
+      generation: this.generation,
       selectionSequence: this.sequence,
-      residentObservationIds: ["frame-a", "frame-b", "frame-c"],
+      residentObservationIds: this.residentObservationIds,
       contextEpoch: 3,
       textureValidationsPassed: 3,
       shaderLog: [],
@@ -43,13 +45,21 @@ class FakeLayer {
     });
   }
 
+  replaceResidentFrames(models: readonly RadarSweepCpuModel[]): void {
+    this.generation += 1;
+    this.residentObservationIds = models.map((model) => model.observationId);
+    this.selected = this.residentObservationIds[0];
+    this.painted = this.selected;
+    this.sequence += 1;
+  }
+
   completePaint() {
     this.pending?.();
   }
 
   private receipt(): RadarPaintReceipt {
     return {
-      generation: 7,
+      generation: this.generation,
       observationId: this.painted,
       contextEpoch: 3,
       selectionSequence: this.sequence,
@@ -91,6 +101,32 @@ describe("resident playback truth", () => {
   it("rejects a scrub target that is not resident", async () => {
     const controller = new ResidentPlaybackController(new FakeLayer(), frames());
     await expect(controller.scrub(3)).rejects.toThrow("not resident");
+  });
+
+  it("advances through replacement observation IDs instead of the constructor-time loop", async () => {
+    const layer = new FakeLayer();
+    const controller = new ResidentPlaybackController(layer, frames());
+    const replacements = [frame("replacement-a", 400), frame("replacement-b", 500)];
+
+    await controller.replaceResidentFrames(replacements);
+    const pending = controller.step();
+    await Promise.resolve();
+
+    expect(controller.snapshot()).toMatchObject({
+      generation: 8,
+      residentCount: 2,
+      selectedObservationId: "replacement-b",
+      lastPaintedObservationId: "replacement-a",
+      playheadObservedAtUnixMs: 400,
+    });
+
+    layer.completePaint();
+    await expect(pending).resolves.toMatchObject({ observationId: "replacement-b" });
+    expect(controller.snapshot()).toMatchObject({
+      selectedObservationId: "replacement-b",
+      lastPaintedObservationId: "replacement-b",
+      playheadObservedAtUnixMs: 500,
+    });
   });
 });
 
