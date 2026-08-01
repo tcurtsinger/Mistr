@@ -169,6 +169,18 @@ export class PackedSweepTransferClient {
   }
 
   async request(holdMs = 0): Promise<PackedSweepLease> {
+    return this.requestFromCommand("request_phase2_benchmark_sweep", holdMs, true);
+  }
+
+  async requestPhase3Fixture(): Promise<PackedSweepLease> {
+    return this.requestFromCommand("request_phase3_fixture_sweep", 0, false);
+  }
+
+  private async requestFromCommand(
+    command: "request_phase2_benchmark_sweep" | "request_phase3_fixture_sweep",
+    holdMs: number,
+    includeHold: boolean,
+  ): Promise<PackedSweepLease> {
     this.assertSessionOpen();
     await this.flushPendingReleaseAcks();
     const session = this.session;
@@ -184,11 +196,14 @@ export class PackedSweepTransferClient {
     let response: ArrayBuffer;
     try {
       const invokeStarted = performance.now();
-      response = await this.invoke<ArrayBuffer>("request_phase2_benchmark_sweep", {
+      const arguments_: Record<string, unknown> = {
         session,
         generation,
-        holdMs,
-      });
+      };
+      if (includeHold) {
+        arguments_.holdMs = holdMs;
+      }
+      response = await this.invoke<ArrayBuffer>(command, arguments_);
       const invokeMs = performance.now() - invokeStarted;
       if (!this.active || this.session !== session || this.generation !== generation) {
         await this.releaseAfterFailure(session, generation);

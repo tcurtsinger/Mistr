@@ -218,3 +218,20 @@ Implementation must record and pin the exact Mistr versions rather than inheriti
 - Confirm current MapLibre custom-layer API and pinned version.
 - Recheck GustAVO's radar products, handoff zoom, current branch, and dirty worktree before integration.
 - Record all revalidation in a dated research update rather than silently changing this snapshot.
+
+## 6. Phase 3 API revalidation (2026-07-31)
+
+Mistr Phase 3 rechecked the pinned MapLibre 6.1.0 package types/source and current official API documentation before implementing the custom layer.
+
+- `CustomLayerInterface` remains the public extension point for custom WebGL drawing.
+- The public render input supplies `defaultProjectionData.mainMatrix`; Mistr does not read MapLibre private transform or painter state.
+- MapLibre 6 is ESM-only, requires WebGL2, and loads a module worker. In Vite, Mistr explicitly bundles that worker with `?worker&url` and configures it through public `setWorkerUrl` before map construction.
+- The WebGL2 texture/readback/fence operations used by the renderer are standard public WebGL 2.0 APIs.
+
+Sources:
+
+- [MapLibre `CustomLayerInterface`](https://maplibre.org/maplibre-gl-js/docs/API/interfaces/CustomLayerInterface/)
+- [MapLibre `CustomRenderMethodInput`](https://maplibre.org/maplibre-gl-js/docs/API/type-aliases/CustomRenderMethodInput/)
+- [MapLibre custom-layer example](https://maplibre.org/maplibre-gl-js/docs/examples/add-a-custom-style-layer/)
+- [MapLibre v6.0.0 release notes](https://github.com/maplibre/maplibre-gl-js/releases/tag/v6.0.0)
+- [WebGL 2.0 specification](https://registry.khronos.org/webgl/specs/latest/2.0/)
