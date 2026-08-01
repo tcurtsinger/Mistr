@@ -206,6 +206,8 @@ Prove a reliable live acquisition path and measure whether it improves freshness
 
 ## Phase 6 — Product parity and packaged recovery
 
+**Status:** Completed on the prototype's primary Windows 11/NVIDIA/WebView2 environment. All automated and packaged criteria passed; real operating-system sleep/wake remains an explicitly manual follow-up (DRF-003), not a claimed pass.
+
 ### Objective
 
 Prove the required GustAVO semantics beyond reflectivity and survive real desktop lifecycle faults.
@@ -234,6 +236,8 @@ Prove the required GustAVO semantics beyond reflectivity and survive real deskto
 - Context restoration recreates the visible frame first and then the loop.
 - Recovery does not show stale data as current.
 - Packaged results agree with deterministic fixture expectations.
+
+Implementation record: [`18_LEVEL3_N0S_AND_CONTEXT_RECOVERY_DECISION.md`](18_LEVEL3_N0S_AND_CONTEXT_RECOVERY_DECISION.md). Results: [`phase-reports/PHASE_6_N0S_AND_CONTEXT_RECOVERY.md`](phase-reports/PHASE_6_N0S_AND_CONTEXT_RECOVERY.md).
 
 ## Phase 7 — GustAVO integration rehearsal
 

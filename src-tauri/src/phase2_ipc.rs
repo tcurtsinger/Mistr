@@ -4,7 +4,7 @@ use crate::packed_sweep::{
     PackedSweepIdentity, PackedSweepSummary, encode_packed_sweep, phase2_benchmark_sweep,
     validate_packed_sweep,
 };
-use crate::radar::{MAX_LEVEL2_INPUT_BYTES, RadarProduct, decode_level2};
+use crate::radar::{MAX_LEVEL2_INPUT_BYTES, RadarProduct, decode_level2, decode_level3_n0s};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -22,6 +22,7 @@ const PHASE3_FIXTURE_NAME: &str = "KTLX20240520_230512_V06";
 const PHASE3_FIXTURE_ID: &str = "ktlx-2024-05-20-230512-v06";
 const PHASE4_FRAME_COUNT: usize = 20;
 const PHASE4_FIXTURE_SET: &str = "phase4KtlxReflectivityLoop";
+const PHASE6_N0S_FIXTURE_SET: &str = "phase6N0sCorpus";
 const FIXTURE_MANIFEST_JSON: &str = include_str!("../../fixtures/manifest.json");
 
 #[derive(Debug, Clone, Serialize)]
@@ -730,6 +731,45 @@ pub async fn request_phase4_fixture_sweep(
 }
 
 #[tauri::command]
+pub async fn request_phase6_n0s_fixture_sweep(
+    state: tauri::State<'_, TransferBroker>,
+    session: u64,
+    generation: u64,
+    fixture_id: String,
+) -> Result<Response, TransferError> {
+    let broker = state.inner().clone();
+    broker.acquire(session, generation)?;
+    let task = tauri::async_runtime::spawn_blocking(move || {
+        let fixture = phase6_n0s_fixture_expectation(&fixture_id)?;
+        let path = phase6_fixture_path(&fixture)?;
+        let input = read_fixture_archive(&path, &fixture)?;
+        verify_fixture_archive_hash(&input, &fixture, "Phase 6")?;
+        let decoded = decode_level3_n0s(&input, &fixture.station)
+            .map_err(|error| TransferError::new("fixture_decode_failed", error.to_string()))?;
+        encode_packed_sweep(&decoded.sweep, PackedSweepIdentity { generation })
+            .map_err(|error| TransferError::new("wire_encode_failed", error.to_string()))
+    })
+    .await;
+
+    let encoded = match task {
+        Ok(encoded) => encoded,
+        Err(error) => {
+            broker.finish_without_publish(session);
+            return Err(TransferError::new("backend_task_failed", error.to_string()));
+        }
+    };
+    let bytes = match encoded {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            broker.finish_without_publish(session);
+            return Err(error);
+        }
+    };
+    broker.complete_for_publish(session, generation)?;
+    Ok(Response::new(bytes))
+}
+
+#[tauri::command]
 pub async fn request_phase5_live_sweep(
     state: tauri::State<'_, TransferBroker>,
     session: u64,
@@ -834,6 +874,8 @@ struct FixtureManifest {
 #[serde(rename_all = "camelCase")]
 struct FixtureManifestEntry {
     id: String,
+    dataset_kind: String,
+    station: String,
     size_bytes: u64,
     sha256: String,
     local_path: String,
@@ -847,7 +889,7 @@ fn fixture_manifest() -> Result<FixtureManifest, TransferError> {
                 format!("embedded fixture manifest is invalid: {error}"),
             )
         })?;
-    if manifest.schema_version != 1 {
+    if manifest.schema_version != 2 {
         return Err(TransferError::new(
             "fixture_manifest_invalid",
             format!(
@@ -875,6 +917,42 @@ fn phase3_fixture_expectation() -> Result<FixtureManifestEntry, TransferError> {
 fn phase4_fixture_expectation(fixture_id: &str) -> Result<FixtureManifestEntry, TransferError> {
     let manifest = fixture_manifest()?;
     phase4_fixture_expectation_in(&manifest, fixture_id)
+}
+
+fn phase6_n0s_fixture_expectation(fixture_id: &str) -> Result<FixtureManifestEntry, TransferError> {
+    let manifest = fixture_manifest()?;
+    let fixture_ids = manifest
+        .fixture_sets
+        .get(PHASE6_N0S_FIXTURE_SET)
+        .ok_or_else(|| {
+            TransferError::new(
+                "fixture_manifest_invalid",
+                format!("embedded fixture manifest is missing set {PHASE6_N0S_FIXTURE_SET}"),
+            )
+        })?;
+    if !fixture_ids.iter().any(|candidate| candidate == fixture_id) {
+        return Err(TransferError::new(
+            "fixture_not_pinned",
+            format!("fixture ID {fixture_id:?} is not in set {PHASE6_N0S_FIXTURE_SET}"),
+        ));
+    }
+    let fixture = manifest
+        .fixtures
+        .into_iter()
+        .find(|fixture| fixture.id == fixture_id)
+        .ok_or_else(|| {
+            TransferError::new(
+                "fixture_manifest_invalid",
+                format!("set {PHASE6_N0S_FIXTURE_SET} references missing fixture {fixture_id:?}"),
+            )
+        })?;
+    if fixture.dataset_kind != "level3_n0s" {
+        return Err(TransferError::new(
+            "fixture_manifest_invalid",
+            format!("fixture {fixture_id:?} is not Level III N0S"),
+        ));
+    }
+    Ok(fixture)
 }
 
 fn phase4_fixture_expectation_in(
@@ -1042,6 +1120,37 @@ fn phase4_fixture_path(fixture: &FixtureManifestEntry) -> Result<PathBuf, Transf
         ));
     }
     if let Some(cache_dir) = std::env::var_os("MISTR_PHASE4_FIXTURE_CACHE_DIR") {
+        let file_name = relative.file_name().ok_or_else(|| {
+            TransferError::new(
+                "fixture_manifest_invalid",
+                format!("fixture {} has no local filename", fixture.id),
+            )
+        })?;
+        return Ok(PathBuf::from(cache_dir).join(file_name));
+    }
+    let current = std::env::current_dir().map_err(|error| {
+        TransferError::new(
+            "fixture_path_failed",
+            format!("failed to resolve current directory: {error}"),
+        )
+    })?;
+    Ok(current.join("fixtures").join(relative))
+}
+
+fn phase6_fixture_path(fixture: &FixtureManifestEntry) -> Result<PathBuf, TransferError> {
+    let relative = std::path::Path::new(&fixture.local_path);
+    if relative.is_absolute()
+        || relative
+            .components()
+            .any(|component| !matches!(component, std::path::Component::Normal(_)))
+        || relative.parent() != Some(std::path::Path::new("cache"))
+    {
+        return Err(TransferError::new(
+            "fixture_manifest_invalid",
+            format!("fixture {} has an unsafe localPath", fixture.id),
+        ));
+    }
+    if let Some(cache_dir) = std::env::var_os("MISTR_PHASE6_FIXTURE_CACHE_DIR") {
         let file_name = relative.file_name().ok_or_else(|| {
             TransferError::new(
                 "fixture_manifest_invalid",
@@ -1407,13 +1516,33 @@ mod tests {
             assert_eq!(fixture.sha256.len(), 64);
             assert!(fixture.local_path.starts_with("cache/KTLX20240520_"));
         }
+        let original_fixture_count = manifest.fixtures.len();
         let mut future_fixture = manifest.fixtures[0].clone();
         future_fixture.id = "future-phase-fixture".to_string();
         manifest.fixtures.push(future_fixture);
-        assert_eq!(manifest.fixtures.len(), PHASE4_FRAME_COUNT + 1);
+        assert_eq!(manifest.fixtures.len(), original_fixture_count + 1);
         assert!(phase4_fixture_expectation_in(&manifest, fixture_ids[0].as_str()).is_ok());
         assert_eq!(
             phase4_fixture_expectation_in(&manifest, "future-phase-fixture")
+                .unwrap_err()
+                .code,
+            "fixture_not_pinned"
+        );
+    }
+
+    #[test]
+    fn phase6_manifest_pins_only_explicit_n0s_products() {
+        let manifest = fixture_manifest().unwrap();
+        let fixture_ids = manifest.fixture_sets.get(PHASE6_N0S_FIXTURE_SET).unwrap();
+        assert_eq!(fixture_ids.len(), 4);
+        for fixture_id in fixture_ids {
+            let fixture = phase6_n0s_fixture_expectation(fixture_id).unwrap();
+            assert_eq!(fixture.dataset_kind, "level3_n0s");
+            assert_eq!(fixture.station.len(), 4);
+            assert_eq!(fixture.sha256.len(), 64);
+        }
+        assert_eq!(
+            phase6_n0s_fixture_expectation("ktlx-2024-05-20-230512-v06")
                 .unwrap_err()
                 .code,
             "fixture_not_pinned"

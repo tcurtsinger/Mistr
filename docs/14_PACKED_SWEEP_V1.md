@@ -45,8 +45,8 @@ The buffer carries a caller generation and stable observation ID. Rust owns enco
 | 14 | 2 | header length | `320` |
 | 16 | 4 | total length | exact buffer length, at most 32 MiB |
 | 20 | 4 | flags | exactly one raw-code-width flag |
-| 24 | 2 | product | `1` reflectivity, `2` base velocity |
-| 26 | 2 | source kind | `1` Level II Archive II, `2` Phase 2 synthetic benchmark, `3` real-time Level II chunks |
+| 24 | 2 | product | `1` reflectivity, `2` base velocity, `3` storm-relative velocity |
+| 26 | 2 | source kind | `1` Level II Archive II, `2` Phase 2 synthetic benchmark, `3` real-time Level II chunks, `4` Level III N0S |
 | 28 | 4 | reserved | zero |
 | 32 | 8 | generation | request generation; stale generations cannot publish |
 | 40 | 16 | observation ID | first 16 bytes of normalized SHA-256 |
@@ -125,10 +125,11 @@ No other code is valid in v1.
 
 - Eight-bit products use one byte per gate.
 - Sixteen-bit products use little-endian `u16` per gate.
-- When scale is nonzero: raw `0` must be below threshold, raw `1` must be range folded, and raw `2+` must be valid with `value = f32((raw - offset) / scale)`.
+- For Level II scaled moments: raw `0` must be below threshold, raw `1` must be range folded, and raw `2+` must be valid with `value = f32((raw - offset) / scale)`.
+- For storm-relative product 3 / N0S: category `0` must be unavailable, categories `1..=14` must be valid with their product-description threshold in the value section, and category `15` must be range folded. N0S threshold knots are product-specific and are not reconstructed from scale/offset.
 - When scale is exactly zero, raw codes are direct values and every gate must be valid.
 
-The explicit value section is intentionally retained in v1 even though current scaled moments can be reconstructed from raw codes. It preserves the exact Mistr normalized output, lets TypeScript prove the raw/value relation, and keeps the renderer decision independent. At current reflectivity dimensions the complete transfer remains below the 16 MiB target.
+The explicit value section is intentionally retained in v1. Scaled Level II moments can be reconstructed from raw codes, while categorical N0S requires its per-product threshold values for truthful interrogation. At current reflectivity and N0S dimensions the complete transfer remains below the 16 MiB target.
 
 ## Integrity hash
 

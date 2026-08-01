@@ -641,6 +641,7 @@ fn moment(radial: &nexrad_model::data::Radial, product: RadarProduct) -> Option<
     match product {
         RadarProduct::Reflectivity => radial.reflectivity(),
         RadarProduct::BaseVelocity => radial.velocity(),
+        RadarProduct::StormRelativeVelocity => None,
     }
 }
 

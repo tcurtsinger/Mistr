@@ -333,6 +333,10 @@ Minimum packaged verification:
 
 Browser-only Playwright tests remain useful for deterministic custom-layer logic but cannot satisfy the packaged-runtime gate.
 
+### Phase 6 primary-machine result
+
+Two consecutive packaged WebView2 cold-start passes completed on Windows 11 with hardware-accelerated NVIDIA rendering. Both passes exercised a 20-frame resident reflectivity loop, actual WebGL context loss/restoration, visible-first recovery, post-recovery paint, minimize/restore, disconnected resident playback, 1x/2x device-scale overrides, explicit `N0S` labeling/interrogation, an `N0S` context reset, and two cold restarts. Detailed generated logs remain ignored; the reproducible evidence summary is [`phase-reports/PHASE_6_N0S_AND_CONTEXT_RECOVERY.md`](phase-reports/PHASE_6_N0S_AND_CONTEXT_RECOVERY.md). Sleep/wake was unavailable to honest automation and remains DRF-003.
+
 ## 11. Adoption gates
 
 All are mandatory unless explicitly reclassified through a documented decision:

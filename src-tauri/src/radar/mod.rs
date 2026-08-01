@@ -5,9 +5,11 @@
 
 mod decoder;
 mod diagnostic;
+mod level3_n0s;
 
 pub use decoder::{DecodeError, MAX_LEVEL2_INPUT_BYTES, decode_level2, decode_safe_lowest_sweep};
 pub use diagnostic::{DiagnosticReport, GateSample};
+pub use level3_n0s::{Level3N0sError, MAX_LEVEL3_N0S_INPUT_BYTES, decode_level3_n0s};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -20,6 +22,7 @@ pub const NORMALIZED_SWEEP_SCHEMA_VERSION: u16 = 1;
 pub enum RadarProduct {
     Reflectivity,
     BaseVelocity,
+    StormRelativeVelocity,
 }
 
 impl RadarProduct {
@@ -27,6 +30,7 @@ impl RadarProduct {
         match self {
             Self::Reflectivity => "reflectivity",
             Self::BaseVelocity => "base_velocity",
+            Self::StormRelativeVelocity => "storm_relative_velocity",
         }
     }
 
@@ -34,6 +38,7 @@ impl RadarProduct {
         match self {
             Self::Reflectivity => "dBZ",
             Self::BaseVelocity => "m/s",
+            Self::StormRelativeVelocity => "kt",
         }
     }
 }
@@ -45,8 +50,11 @@ impl FromStr for RadarProduct {
         match value.trim().to_ascii_lowercase().as_str() {
             "reflectivity" | "ref" => Ok(Self::Reflectivity),
             "base_velocity" | "velocity" | "vel" => Ok(Self::BaseVelocity),
+            "storm_relative_velocity" | "storm_relative" | "srv" | "n0s" => {
+                Ok(Self::StormRelativeVelocity)
+            }
             other => Err(format!(
-                "unsupported product '{other}'; expected reflectivity or base_velocity"
+                "unsupported product '{other}'; expected reflectivity, base_velocity, or storm_relative_velocity"
             )),
         }
     }

@@ -24,9 +24,11 @@ const STATUS_ENCODING_V1: u8 = 1;
 const VALUE_ENCODING_F32: u8 = 1;
 const PRODUCT_REFLECTIVITY: u16 = 1;
 const PRODUCT_BASE_VELOCITY: u16 = 2;
+const PRODUCT_STORM_RELATIVE_VELOCITY: u16 = 3;
 const SOURCE_LEVEL2_ARCHIVE_II: u16 = 1;
 const SOURCE_PHASE2_SYNTHETIC: u16 = 2;
 const SOURCE_LEVEL2_CHUNKS: u16 = 3;
+const SOURCE_LEVEL3_N0S: u16 = 4;
 
 const OFFSET_WIRE_SHA256: usize = 208;
 const END_WIRE_SHA256: usize = 240;
@@ -294,14 +296,17 @@ pub fn validate_packed_sweep(bytes: &[u8]) -> Result<PackedSweepSummary, PackedS
     let product = match get_u16(bytes, 24) {
         PRODUCT_REFLECTIVITY => "reflectivity",
         PRODUCT_BASE_VELOCITY => "base_velocity",
+        PRODUCT_STORM_RELATIVE_VELOCITY => "storm_relative_velocity",
         value => return Err(PackedSweepError::InvalidProduct(value)),
     };
     let source_kind = match get_u16(bytes, 26) {
         SOURCE_LEVEL2_ARCHIVE_II => "nexrad_level2_archive_ii",
         SOURCE_PHASE2_SYNTHETIC => "mistr_phase2_synthetic",
         SOURCE_LEVEL2_CHUNKS => "nexrad_level2_chunks",
+        SOURCE_LEVEL3_N0S => "nexrad_level3_n0s",
         value => return Err(PackedSweepError::InvalidSourceKind(value)),
     };
+    validate_product_source(product, source_kind, false)?;
     if !all_zero(&bytes[28..32])
         || !all_zero(&bytes[66..68])
         || !all_zero(&bytes[272..PACKED_SWEEP_HEADER_BYTES])
@@ -443,6 +448,7 @@ pub fn validate_packed_sweep(bytes: &[u8]) -> Result<PackedSweepSummary, PackedS
         }
     }
 
+    let mut n0s_category_values = [None; 16];
     for index in 0..cell_count {
         let value = get_f32(bytes, values.offset + index * 4);
         let status = bytes[statuses.offset + index];
@@ -451,7 +457,15 @@ pub fn validate_packed_sweep(bytes: &[u8]) -> Result<PackedSweepSummary, PackedS
         } else {
             get_u16(bytes, raw.offset + index * 2)
         };
-        validate_gate(index, value, status, raw_code, scale, offset)?;
+        validate_gate(index, value, status, raw_code, scale, offset, product)?;
+        validate_n0s_category_consistency(
+            index,
+            product,
+            raw_code,
+            status,
+            value,
+            &mut n0s_category_values,
+        )?;
     }
 
     Ok(PackedSweepSummary {
@@ -479,12 +493,39 @@ fn validate_gate(
     raw_code: u16,
     scale: f32,
     offset: f32,
+    product: &str,
 ) -> Result<(), PackedSweepError> {
     if !value.is_finite() {
         return Err(PackedSweepError::InvalidGate {
             index,
             reason: "non-finite value",
         });
+    }
+    if product == "storm_relative_velocity" {
+        let expected_status = match raw_code {
+            0 => 1,
+            1..=14 => 0,
+            15 => 2,
+            _ => {
+                return Err(PackedSweepError::InvalidGate {
+                    index,
+                    reason: "N0S category exceeds 15",
+                });
+            }
+        };
+        if status != expected_status {
+            return Err(PackedSweepError::InvalidGate {
+                index,
+                reason: "N0S category/status disagreement",
+            });
+        }
+        if expected_status != 0 && value.to_bits() != 0.0f32.to_bits() {
+            return Err(PackedSweepError::InvalidGate {
+                index,
+                reason: "invalid N0S category has a nonzero value",
+            });
+        }
+        return Ok(());
     }
     let (expected_status, expected_value) = if scale == 0.0 {
         (0, raw_code as f32)
@@ -511,6 +552,7 @@ fn validate_gate(
 }
 
 fn validate_normalized_sweep(sweep: &NormalizedSweep) -> Result<(), PackedSweepError> {
+    validate_product_source(sweep.product.canonical_name(), sweep.source_kind, true)?;
     if sweep.schema_version != NORMALIZED_SWEEP_SCHEMA_VERSION {
         return Err(PackedSweepError::InvalidSweep(
             "normalized schema version is unsupported",
@@ -576,6 +618,7 @@ fn validate_normalized_sweep(sweep: &NormalizedSweep) -> Result<(), PackedSweepE
             });
         }
     }
+    let mut n0s_category_values = [None; 16];
     for index in 0..cell_count {
         validate_gate(
             index,
@@ -584,6 +627,15 @@ fn validate_normalized_sweep(sweep: &NormalizedSweep) -> Result<(), PackedSweepE
             sweep.raw_codes[index],
             sweep.scale,
             sweep.offset,
+            sweep.product.canonical_name(),
+        )?;
+        validate_n0s_category_consistency(
+            index,
+            sweep.product.canonical_name(),
+            sweep.raw_codes[index],
+            status_code(sweep.statuses[index]),
+            sweep.values[index],
+            &mut n0s_category_values,
         )?;
         if sweep.data_word_size_bits == 8 && sweep.raw_codes[index] > u8::MAX as u16 {
             return Err(PackedSweepError::InvalidGate {
@@ -595,10 +647,53 @@ fn validate_normalized_sweep(sweep: &NormalizedSweep) -> Result<(), PackedSweepE
     Ok(())
 }
 
+fn validate_product_source(
+    product: &str,
+    source_kind: &str,
+    normalized: bool,
+) -> Result<(), PackedSweepError> {
+    let matches = (product == "storm_relative_velocity") == (source_kind == "nexrad_level3_n0s");
+    if matches {
+        Ok(())
+    } else if normalized {
+        Err(PackedSweepError::InvalidSweep("product/source combination"))
+    } else {
+        Err(PackedSweepError::InvalidMetadata(
+            "product/source combination",
+        ))
+    }
+}
+
+fn validate_n0s_category_consistency(
+    index: usize,
+    product: &str,
+    raw_code: u16,
+    status: u8,
+    value: f32,
+    category_values: &mut [Option<u32>; 16],
+) -> Result<(), PackedSweepError> {
+    if product != "storm_relative_velocity" || status != 0 {
+        return Ok(());
+    }
+    let slot = &mut category_values[raw_code as usize];
+    match *slot {
+        Some(expected) if expected != value.to_bits() => Err(PackedSweepError::InvalidGate {
+            index,
+            reason: "N0S category has inconsistent values",
+        }),
+        Some(_) => Ok(()),
+        None => {
+            *slot = Some(value.to_bits());
+            Ok(())
+        }
+    }
+}
+
 fn product_code(product: RadarProduct) -> u16 {
     match product {
         RadarProduct::Reflectivity => PRODUCT_REFLECTIVITY,
         RadarProduct::BaseVelocity => PRODUCT_BASE_VELOCITY,
+        RadarProduct::StormRelativeVelocity => PRODUCT_STORM_RELATIVE_VELOCITY,
     }
 }
 
@@ -607,6 +702,7 @@ fn source_kind_code(source_kind: &str) -> Result<u16, PackedSweepError> {
         "nexrad_level2_archive_ii" => Ok(SOURCE_LEVEL2_ARCHIVE_II),
         "mistr_phase2_synthetic" => Ok(SOURCE_PHASE2_SYNTHETIC),
         "nexrad_level2_chunks" => Ok(SOURCE_LEVEL2_CHUNKS),
+        "nexrad_level3_n0s" => Ok(SOURCE_LEVEL3_N0S),
         _ => Err(PackedSweepError::InvalidSweep("source kind")),
     }
 }
@@ -983,6 +1079,27 @@ mod tests {
     }
 
     #[test]
+    fn product_and_source_kind_cannot_masquerade_as_n0s() {
+        let mut bytes = encoded_golden();
+        put_u16(&mut bytes, 26, SOURCE_LEVEL3_N0S);
+        let hash = calculate_wire_sha256(&bytes);
+        bytes[OFFSET_WIRE_SHA256..END_WIRE_SHA256].copy_from_slice(&hash);
+        assert_eq!(
+            validate_packed_sweep(&bytes),
+            Err(PackedSweepError::InvalidMetadata(
+                "product/source combination"
+            ))
+        );
+
+        let mut sweep = phase2_golden_sweep();
+        sweep.product = RadarProduct::StormRelativeVelocity;
+        assert_eq!(
+            encode_packed_sweep(&sweep, PackedSweepIdentity { generation: 1 }),
+            Err(PackedSweepError::InvalidSweep("product/source combination"))
+        );
+    }
+
+    #[test]
     fn hostile_section_offset_is_rejected() {
         let mut bytes = encoded_golden();
         put_u32(&mut bytes, OFFSET_VALUE_SECTION, 321);
@@ -1080,5 +1197,32 @@ mod tests {
             summary.wire_sha256,
             "8d9999eeb5d6a34a985c1c94a33707446bf6e9a959657c217d1ad4e7a219fc78"
         );
+    }
+
+    #[test]
+    fn current_ktlx_n0s_fixture_encodes_to_the_expected_wire_when_available() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../fixtures/cache/TLX_N0S_2024_05_20_23_05_12");
+        if !path.exists() {
+            eprintln!(
+                "fixture is not downloaded; run `npm run fixture:download` for the Phase 6 integration assertion"
+            );
+            return;
+        }
+
+        let input = std::fs::read(path).expect("read verified public N0S fixture");
+        let decoded = crate::radar::decode_level3_n0s(&input, "KTLX")
+            .expect("decode current KTLX N0S fixture");
+        let bytes = encode_packed_sweep(&decoded.sweep, PackedSweepIdentity { generation: 1 })
+            .expect("encode current KTLX N0S sweep");
+        let committed = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../fixtures/expected/phase-6/ktlx-n0s-packed-sweep-v1.bin"
+        ));
+        assert_eq!(bytes.as_slice(), committed);
+        let summary = validate_packed_sweep(&bytes).expect("validate current KTLX N0S wire");
+        assert_eq!(summary.product, "storm_relative_velocity");
+        assert_eq!(summary.source_kind, "nexrad_level3_n0s");
+        assert_eq!(summary.cell_count, 82_800);
     }
 }

@@ -59,12 +59,13 @@ export interface PackedSweepMetadata {
   generation: bigint;
   observationId: string;
   siteIcao: string;
-  product: "reflectivity" | "base_velocity";
-  units: "dBZ" | "m/s";
+  product: "reflectivity" | "base_velocity" | "storm_relative_velocity";
+  units: "dBZ" | "m/s" | "kt";
   sourceKind:
     | "nexrad_level2_archive_ii"
     | "mistr_phase2_synthetic"
-    | "nexrad_level2_chunks";
+    | "nexrad_level2_chunks"
+    | "nexrad_level3_n0s";
   elevationNumber: number;
   dataWordSizeBits: 8 | 16;
   vcp: number;
@@ -159,7 +160,9 @@ export async function parsePackedSweep(
     ? "reflectivity"
     : productCode === 2
       ? "base_velocity"
-      : null;
+      : productCode === 3
+        ? "storm_relative_velocity"
+        : null;
   if (product === null) {
     throw new PackedSweepError("invalid_product", String(productCode));
   }
@@ -170,9 +173,17 @@ export async function parsePackedSweep(
       ? "mistr_phase2_synthetic"
       : sourceKindCode === 3
         ? "nexrad_level2_chunks"
-        : null;
+        : sourceKindCode === 4
+          ? "nexrad_level3_n0s"
+          : null;
   if (sourceKind === null) {
     throw new PackedSweepError("invalid_source_kind", String(sourceKindCode));
+  }
+  if (
+    (product === "storm_relative_velocity")
+    !== (sourceKind === "nexrad_level3_n0s")
+  ) {
+    throw new PackedSweepError("invalid_metadata", "product/source combination");
   }
   assertZero(bytes, 28, 32);
   assertZero(bytes, 66, 68);
@@ -283,7 +294,7 @@ export async function parsePackedSweep(
   const rawCodes = dataWordSizeBits === 8
     ? new Uint8Array(bytes.buffer, bytes.byteOffset + rawSection.offset, cellCount)
     : new Uint16Array(bytes.buffer, bytes.byteOffset + rawSection.offset, cellCount);
-  validateGates(values, statuses, rawCodes, scale, offset);
+  validateGates(values, statuses, rawCodes, scale, offset, product);
 
   const metadata: PackedSweepMetadata = {
     schemaVersion,
@@ -291,7 +302,11 @@ export async function parsePackedSweep(
     observationId: hex(bytes.subarray(40, 56)),
     siteIcao,
     product,
-    units: product === "reflectivity" ? "dBZ" : "m/s",
+    units: product === "reflectivity"
+      ? "dBZ"
+      : product === "base_velocity"
+        ? "m/s"
+        : "kt",
     sourceKind,
     elevationNumber: bytes[60],
     dataWordSizeBits: dataWordSizeBits as 8 | 16,
@@ -347,13 +362,35 @@ function validateGates(
   rawCodes: Uint8Array | Uint16Array,
   scale: number,
   offset: number,
+  product: PackedSweepMetadata["product"],
 ) {
+  const n0sCategoryValues = new Map<number, number>();
   for (let index = 0; index < values.length; index += 1) {
     const value = values[index];
     const status = statuses[index];
     const raw = rawCodes[index];
     if (!Number.isFinite(value)) {
       throw new PackedSweepError("invalid_gate", `${index}: non-finite value`);
+    }
+    if (product === "storm_relative_velocity") {
+      const expectedStatus = raw === 0 ? 1 : raw === 15 ? 2 : raw <= 14 ? 0 : -1;
+      if (expectedStatus < 0 || status !== expectedStatus) {
+        throw new PackedSweepError("invalid_gate", `${index}: N0S category/status disagreement`);
+      }
+      if (status !== 0 && !Object.is(value, 0)) {
+        throw new PackedSweepError("invalid_gate", `${index}: invalid N0S category has value`);
+      }
+      if (status === 0) {
+        const prior = n0sCategoryValues.get(raw);
+        if (prior !== undefined && !Object.is(prior, value)) {
+          throw new PackedSweepError(
+            "invalid_gate",
+            `${index}: N0S category has inconsistent values`,
+          );
+        }
+        n0sCategoryValues.set(raw, value);
+      }
+      continue;
     }
     let expectedStatus: number;
     let expectedValue: number;

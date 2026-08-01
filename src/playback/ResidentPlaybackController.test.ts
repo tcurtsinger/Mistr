@@ -35,6 +35,13 @@ class FakeLayer {
       selectionSequence: this.sequence,
       residentObservationIds: this.residentObservationIds,
       contextEpoch: 3,
+      recovery: {
+        phase: "ready",
+        targetResidentCount: this.residentObservationIds.length,
+        currentResidentCount: this.residentObservationIds.length,
+        visibleObservationId: this.selected,
+        visibleFramePainted: true,
+      },
       textureValidationsPassed: 3,
       shaderLog: [],
     };
@@ -45,6 +52,10 @@ class FakeLayer {
       return Promise.resolve(this.receipt());
     }
     return this.beginPendingPaint();
+  }
+
+  waitForRecovery() {
+    return Promise.resolve(this.getSnapshot().recovery);
   }
 
   selectAndWait(observationId: string): Promise<RadarPaintReceipt> {

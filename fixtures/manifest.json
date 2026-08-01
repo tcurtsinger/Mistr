@@ -1,6 +1,6 @@
 {
   "$schema": "./manifest.schema.json",
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "fixtureSets": {
     "phase4KtlxReflectivityLoop": [
       "ktlx-2024-05-20-202103-v06",
@@ -23,6 +23,17 @@
       "ktlx-2024-05-20-224800-v06",
       "ktlx-2024-05-20-225641-v06",
       "ktlx-2024-05-20-230512-v06"
+    ],
+    "phase6N0sCorpus": [
+      "ktlx-n0s-2024-05-20-230512",
+      "kamx-n0s-2026-08-01-000212",
+      "kdmx-n0s-2026-08-01-000215",
+      "pabc-n0s-2026-08-01-000230"
+    ],
+    "phase6TlxIemComparison": [
+      "ktlx-n0s-2024-05-20-230512",
+      "iem-ktlx-n0s-2024-05-20-2305-png",
+      "iem-ktlx-n0s-2024-05-20-2305-world"
     ]
   },
   "fixtures": [
@@ -37,7 +48,8 @@
       "sizeBytes": 8678580,
       "sha256": "a85a9cfd9b14a9f7fda05bae106438c531334cbe82dcfe89c5beba439922c441",
       "etag": "9c095d3d6843127ef88914d706696b64-2",
-      "localPath": "cache/KTLX20240520_202103_V06"
+      "localPath": "cache/KTLX20240520_202103_V06",
+      "datasetKind": "level2_archive"
     },
     {
       "id": "ktlx-2024-05-20-202943-v06",
@@ -50,7 +62,8 @@
       "sizeBytes": 8668613,
       "sha256": "e2fb35c2229975dd1725d484df0776c0ba282755dca0bfff3c1310aeaf9d5012",
       "etag": "974b8abc682fb2b51db4492ffed7dccd-2",
-      "localPath": "cache/KTLX20240520_202943_V06"
+      "localPath": "cache/KTLX20240520_202943_V06",
+      "datasetKind": "level2_archive"
     },
     {
       "id": "ktlx-2024-05-20-203824-v06",
@@ -63,7 +76,8 @@
       "sizeBytes": 8656484,
       "sha256": "a87daf6e04b7f805d0dcf8ac982e50b85a315afb42e6ca5aebcdc6920a222c38",
       "etag": "d97f943d0cdc791327576a21cecb4e47-2",
-      "localPath": "cache/KTLX20240520_203824_V06"
+      "localPath": "cache/KTLX20240520_203824_V06",
+      "datasetKind": "level2_archive"
     },
     {
       "id": "ktlx-2024-05-20-204705-v06",
@@ -76,7 +90,8 @@
       "sizeBytes": 8791422,
       "sha256": "33e6f57475cc70ba245350c837845364e195327f6e2c1931da85de0eae1541bd",
       "etag": "0c5f3114f72291cdb1ad693a8e032db5-2",
-      "localPath": "cache/KTLX20240520_204705_V06"
+      "localPath": "cache/KTLX20240520_204705_V06",
+      "datasetKind": "level2_archive"
     },
     {
       "id": "ktlx-2024-05-20-205546-v06",
@@ -89,7 +104,8 @@
       "sizeBytes": 8738217,
       "sha256": "af344f85c99d8ffea978941dc969426be4cfa47a8494c3ffc2549569225c284b",
       "etag": "548a7978a61f9b294ee54a602a6935f0-2",
-      "localPath": "cache/KTLX20240520_205546_V06"
+      "localPath": "cache/KTLX20240520_205546_V06",
+      "datasetKind": "level2_archive"
     },
     {
       "id": "ktlx-2024-05-20-210417-v06",
@@ -102,7 +118,8 @@
       "sizeBytes": 8601590,
       "sha256": "1ef51e51214c37ce4e487bc908047133b05345a6c812ef3b61f128e41ab40dfb",
       "etag": "0d8e3a4664439d8c2c012d8f3f21b3c9-2",
-      "localPath": "cache/KTLX20240520_210417_V06"
+      "localPath": "cache/KTLX20240520_210417_V06",
+      "datasetKind": "level2_archive"
     },
     {
       "id": "ktlx-2024-05-20-211257-v06",
@@ -115,7 +132,8 @@
       "sizeBytes": 8596327,
       "sha256": "72e09811f98d6d966d0388967673fde92ee2315eeb8ec59533de16e7403f6a08",
       "etag": "543e095a1ab10c42425455212056fc89-2",
-      "localPath": "cache/KTLX20240520_211257_V06"
+      "localPath": "cache/KTLX20240520_211257_V06",
+      "datasetKind": "level2_archive"
     },
     {
       "id": "ktlx-2024-05-20-212128-v06",
@@ -128,7 +146,8 @@
       "sizeBytes": 8551996,
       "sha256": "4abe1418676588c81051f6def44c6c23133fb8d2f9c215628ac97672b4eba100",
       "etag": "8f129fd18405b71bbefd501c9a654fc1-2",
-      "localPath": "cache/KTLX20240520_212128_V06"
+      "localPath": "cache/KTLX20240520_212128_V06",
+      "datasetKind": "level2_archive"
     },
     {
       "id": "ktlx-2024-05-20-213008-v06",
@@ -141,7 +160,8 @@
       "sizeBytes": 8539141,
       "sha256": "c293f0a06f3724fe8ad9a99bbe2f39728d41cfe31a998ac4f05e5ef551b89fdf",
       "etag": "a22e02449893230745b207559776807e-2",
-      "localPath": "cache/KTLX20240520_213008_V06"
+      "localPath": "cache/KTLX20240520_213008_V06",
+      "datasetKind": "level2_archive"
     },
     {
       "id": "ktlx-2024-05-20-213848-v06",
@@ -154,7 +174,8 @@
       "sizeBytes": 8519157,
       "sha256": "e595d23c09ac87731cce1588d0b8b0c24d870c08b52734be8bdbdf09044ac362",
       "etag": "12221cf720af10658ad7d12614f6b59b-2",
-      "localPath": "cache/KTLX20240520_213848_V06"
+      "localPath": "cache/KTLX20240520_213848_V06",
+      "datasetKind": "level2_archive"
     },
     {
       "id": "ktlx-2024-05-20-214728-v06",
@@ -167,7 +188,8 @@
       "sizeBytes": 8531196,
       "sha256": "dc8c125a43ead154231f899b7a3bc104e5b97c2c07b44e40199ad73f17e5ffce",
       "etag": "e82b5fb39d2a81c2c781a55d87842cfc-2",
-      "localPath": "cache/KTLX20240520_214728_V06"
+      "localPath": "cache/KTLX20240520_214728_V06",
+      "datasetKind": "level2_archive"
     },
     {
       "id": "ktlx-2024-05-20-215607-v06",
@@ -180,7 +202,8 @@
       "sizeBytes": 8409025,
       "sha256": "532a47281c843b3c10f7951ea39e79478557927898ee7328b047e9ccdaa10275",
       "etag": "b1414c1f4534774128ad761f0397d6c6-2",
-      "localPath": "cache/KTLX20240520_215607_V06"
+      "localPath": "cache/KTLX20240520_215607_V06",
+      "datasetKind": "level2_archive"
     },
     {
       "id": "ktlx-2024-05-20-220439-v06",
@@ -193,7 +216,8 @@
       "sizeBytes": 8434122,
       "sha256": "b9ca47e349485d396f8431f0c094eabd90deb9fb1a5f3e2324f2eb8fda4e243e",
       "etag": "9529da870646bae051c268eb8505066a-2",
-      "localPath": "cache/KTLX20240520_220439_V06"
+      "localPath": "cache/KTLX20240520_220439_V06",
+      "datasetKind": "level2_archive"
     },
     {
       "id": "ktlx-2024-05-20-221320-v06",
@@ -206,7 +230,8 @@
       "sizeBytes": 8335008,
       "sha256": "b58262bef685b04137ad150cdb10123a75b1a50885b4eaa0aec4e3ec01cefa97",
       "etag": "826e41fdece37504548db917da4963e0",
-      "localPath": "cache/KTLX20240520_221320_V06"
+      "localPath": "cache/KTLX20240520_221320_V06",
+      "datasetKind": "level2_archive"
     },
     {
       "id": "ktlx-2024-05-20-222159-v06",
@@ -219,7 +244,8 @@
       "sizeBytes": 8248318,
       "sha256": "de974ab70fd643055eccd65d57f4d49ca527865f983b6e79202cbc596e75e53a",
       "etag": "3d6e996eb27517f210c2a151a3af5adb",
-      "localPath": "cache/KTLX20240520_222159_V06"
+      "localPath": "cache/KTLX20240520_222159_V06",
+      "datasetKind": "level2_archive"
     },
     {
       "id": "ktlx-2024-05-20-223039-v06",
@@ -232,7 +258,8 @@
       "sizeBytes": 8173600,
       "sha256": "56197cb626882dcc505300226eddd545e067bc7916d627e1ca2696995e841b72",
       "etag": "fb5ea77f1c897f51794b3a31cef33ded",
-      "localPath": "cache/KTLX20240520_223039_V06"
+      "localPath": "cache/KTLX20240520_223039_V06",
+      "datasetKind": "level2_archive"
     },
     {
       "id": "ktlx-2024-05-20-223919-v06",
@@ -245,7 +272,8 @@
       "sizeBytes": 8105572,
       "sha256": "034ae06721077dd5e2715adbfdfd046333ddad18842bb96296feadffcc429aa2",
       "etag": "704ec7356d04452f101debc03d683dac",
-      "localPath": "cache/KTLX20240520_223919_V06"
+      "localPath": "cache/KTLX20240520_223919_V06",
+      "datasetKind": "level2_archive"
     },
     {
       "id": "ktlx-2024-05-20-224800-v06",
@@ -258,7 +286,8 @@
       "sizeBytes": 8051937,
       "sha256": "77ed3fd7adbb3ae0419f39d8cc79ce967ad83168c032fee14e6a393ed6372d63",
       "etag": "f9f1bc67e3145fae4070d07f068dc4a7",
-      "localPath": "cache/KTLX20240520_224800_V06"
+      "localPath": "cache/KTLX20240520_224800_V06",
+      "datasetKind": "level2_archive"
     },
     {
       "id": "ktlx-2024-05-20-225641-v06",
@@ -271,7 +300,8 @@
       "sizeBytes": 8001561,
       "sha256": "aa415e60f646605cd3ef1137bc4a262cf0168f8f5641993d785f1e1ad254b1a9",
       "etag": "c2d34ee067d8c42f09d8bd4037b56f38",
-      "localPath": "cache/KTLX20240520_225641_V06"
+      "localPath": "cache/KTLX20240520_225641_V06",
+      "datasetKind": "level2_archive"
     },
     {
       "id": "ktlx-2024-05-20-230512-v06",
@@ -284,7 +314,86 @@
       "sizeBytes": 7936679,
       "sha256": "99c189c327307da6a26a9f265ee84bf9fc690dc1a7358db941949805afa4a0d3",
       "etag": "6582bb873105982fe323a3ada35df602",
-      "localPath": "cache/KTLX20240520_230512_V06"
+      "localPath": "cache/KTLX20240520_230512_V06",
+      "datasetKind": "level2_archive"
+    },
+    {
+      "id": "ktlx-n0s-2024-05-20-230512",
+      "source": "AWS Open Data / Unidata NEXRAD Level III",
+      "datasetKind": "level3_n0s",
+      "bucket": "unidata-nexrad-level3",
+      "key": "TLX_N0S_2024_05_20_23_05_12",
+      "url": "https://unidata-nexrad-level3.s3.amazonaws.com/TLX_N0S_2024_05_20_23_05_12",
+      "station": "KTLX",
+      "observedAt": "2024-05-20T23:05:12Z",
+      "sizeBytes": 19838,
+      "sha256": "a53ce671be76654032da8a4f6c83d041588cc58bc8776dcf318766fe83ee5f32",
+      "etag": "8b4b4d0fa6ebee7d1ac29f341c867caa",
+      "localPath": "cache/TLX_N0S_2024_05_20_23_05_12"
+    },
+    {
+      "id": "kamx-n0s-2026-08-01-000212",
+      "source": "AWS Open Data / Unidata NEXRAD Level III",
+      "datasetKind": "level3_n0s",
+      "bucket": "unidata-nexrad-level3",
+      "key": "AMX_N0S_2026_08_01_00_02_12",
+      "url": "https://unidata-nexrad-level3.s3.amazonaws.com/AMX_N0S_2026_08_01_00_02_12",
+      "station": "KAMX",
+      "observedAt": "2026-08-01T00:02:12Z",
+      "sizeBytes": 17994,
+      "sha256": "df4d832f7f69a80ea7095a116fdc98925749a55fd59ff444ec52c7f22a2c2bd4",
+      "etag": "84c5a4e62c4c3da3060eb6a4908b2223",
+      "localPath": "cache/AMX_N0S_2026_08_01_00_02_12"
+    },
+    {
+      "id": "kdmx-n0s-2026-08-01-000215",
+      "source": "AWS Open Data / Unidata NEXRAD Level III",
+      "datasetKind": "level3_n0s",
+      "bucket": "unidata-nexrad-level3",
+      "key": "DMX_N0S_2026_08_01_00_02_15",
+      "url": "https://unidata-nexrad-level3.s3.amazonaws.com/DMX_N0S_2026_08_01_00_02_15",
+      "station": "KDMX",
+      "observedAt": "2026-08-01T00:02:15Z",
+      "sizeBytes": 22116,
+      "sha256": "3697853fa9a4b1a49f36c09a7e33cafaa4d6e34de9c0030f80f1d1264c82efd0",
+      "etag": "dbd477f2029fd23d6436cbd8b35f1529",
+      "localPath": "cache/DMX_N0S_2026_08_01_00_02_15"
+    },
+    {
+      "id": "pabc-n0s-2026-08-01-000230",
+      "source": "AWS Open Data / Unidata NEXRAD Level III",
+      "datasetKind": "level3_n0s",
+      "bucket": "unidata-nexrad-level3",
+      "key": "ABC_N0S_2026_08_01_00_02_30",
+      "url": "https://unidata-nexrad-level3.s3.amazonaws.com/ABC_N0S_2026_08_01_00_02_30",
+      "station": "PABC",
+      "observedAt": "2026-08-01T00:02:30Z",
+      "sizeBytes": 19980,
+      "sha256": "209df1235b5d50f46b5e6d98a80ee7f42ac1d1314280b31b846c9c0bc44f6ddd",
+      "etag": "7ae3d701b1c4a5043c8772df2e3b037a",
+      "localPath": "cache/ABC_N0S_2026_08_01_00_02_30"
+    },
+    {
+      "id": "iem-ktlx-n0s-2024-05-20-2305-png",
+      "source": "Iowa Environmental Mesonet RIDGE archive",
+      "datasetKind": "iem_ridge_png",
+      "url": "https://mesonet.agron.iastate.edu/archive/data/2024/05/20/GIS/ridge/TLX/N0S/TLX_N0S_202405202305.png",
+      "station": "KTLX",
+      "observedAt": "2024-05-20T23:05:00Z",
+      "sizeBytes": 29915,
+      "sha256": "1084720fe90905727293ee20dabd73bb10698a4d47e8428d4cdba8cbedfe3b92",
+      "localPath": "cache/TLX_N0S_202405202305.png"
+    },
+    {
+      "id": "iem-ktlx-n0s-2024-05-20-2305-world",
+      "source": "Iowa Environmental Mesonet RIDGE archive",
+      "datasetKind": "iem_ridge_world_file",
+      "url": "https://mesonet.agron.iastate.edu/archive/data/2024/05/20/GIS/ridge/TLX/N0S/TLX_N0S_202405202305.wld",
+      "station": "KTLX",
+      "observedAt": "2024-05-20T23:05:00Z",
+      "sizeBytes": 48,
+      "sha256": "c310d2c05fa1579a11e3f6e6cdff8de7c5bad7a527359560e06f9ad6b9586d66",
+      "localPath": "cache/TLX_N0S_202405202305.wld"
     }
   ]
 }

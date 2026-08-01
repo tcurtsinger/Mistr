@@ -241,6 +241,13 @@ export class PackedSweepTransferClient {
     );
   }
 
+  async requestPhase6N0sFixture(fixtureId: string): Promise<PackedSweepLease> {
+    if (!/^[a-z0-9-]+$/.test(fixtureId)) {
+      throw new TypeError("fixtureId must be a lowercase slug");
+    }
+    return this.requestFromCommand("request_phase6_n0s_fixture_sweep", 0, false, fixtureId);
+  }
+
   async phase5LiveEvidence(observationId: string): Promise<Phase5LiveTransferEvidence> {
     this.assertSessionOpen();
     if (!this.active || this.generation === 0) {
@@ -265,7 +272,8 @@ export class PackedSweepTransferClient {
       | "request_phase2_benchmark_sweep"
       | "request_phase3_fixture_sweep"
       | "request_phase4_fixture_sweep"
-      | "request_phase5_live_sweep",
+      | "request_phase5_live_sweep"
+      | "request_phase6_n0s_fixture_sweep",
     holdMs: number,
     includeHold: boolean,
     fixtureId?: string,

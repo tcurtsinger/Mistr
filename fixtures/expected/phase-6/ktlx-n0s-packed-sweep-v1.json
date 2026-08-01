@@ -1,0 +1,25 @@
+{
+  "mode": "phase6_level3_n0s",
+  "buildProfile": "debug",
+  "fixture": "TLX_N0S_2024_05_20_23_05_12",
+  "product": "storm_relative_velocity",
+  "compressedInputBytes": 19838,
+  "decodeMs": 1.7596999999999998,
+  "encodeMs": 35.886599999999994,
+  "validateMs": 9.393500000000001,
+  "payload": {
+    "schemaVersion": 1,
+    "generation": 1,
+    "observationId": "5fb25fcd23e36e6ac6ca3134ebe825d7",
+    "siteIcao": "KTLX",
+    "product": "storm_relative_velocity",
+    "sourceKind": "nexrad_level3_n0s",
+    "radialCount": 360,
+    "gateCount": 230,
+    "cellCount": 82800,
+    "dataWordSizeBits": 8,
+    "totalBytes": 505760,
+    "normalizedSha256": "5fb25fcd23e36e6ac6ca3134ebe825d7d00843f5a835ae036abb58cd5c6dacc8",
+    "wireSha256": "19ca5496b49cb6b1f589705408159356d0f0b5aa7a229b6d337097201984e9b6"
+  }
+}

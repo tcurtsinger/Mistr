@@ -27,6 +27,14 @@ This ledger keeps review feedback visible without turning low-probability edge c
 - **Reason:** The scanner detects long-lived AWS access-key patterns but does not explicitly detect temporary `ASIA` access-key IDs or session-token field names. Fixture downloads are anonymous and Mistr stores no AWS credentials. GitHub secret scanning and push protection remain the primary repository boundary.
 - **Revisit:** Before adding authenticated AWS access or expanding the scanner's stated coverage.
 
+### DRF-003 - Real Windows sleep/wake lifecycle pass
+
+- **Origin:** Phase 6 packaged lifecycle validation.
+- **Area:** Packaged Tauri/WebView2 runtime and `RadarCustomLayer` recovery.
+- **Disposition:** Deferred manual environment check.
+- **Reason:** Automatically suspending the primary workstation is disruptive and can sever the active development/review session. CDP page freezing is not an honest substitute because it intentionally suppresses `requestAnimationFrame`. Actual WebGL context loss, minimize/restore, offline/online, DPI overrides, and cold restart passed twice.
+- **Revisit:** Before a production GustAVO adoption decision, run one controlled Windows sleep/wake cycle while radar playback is active and save the Phase 6 report plus a post-wake paint receipt.
+
 ## Closed items
 
 None.

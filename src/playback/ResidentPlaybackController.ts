@@ -42,6 +42,7 @@ export class ResidentPlaybackController {
       | "replaceResidentFrames"
       | "rollbackResidentFrameReplacement"
       | "selectAndWait"
+      | "waitForRecovery"
       | "waitForPaint"
     >,
     private frames: readonly RadarSweepCpuModel[],
@@ -101,6 +102,9 @@ export class ResidentPlaybackController {
   ): Promise<RadarPaintReceipt> {
     this.assertActive();
     await this.pauseAndWait();
+    if (this.layer.getSnapshot().recovery.phase !== "ready") {
+      await this.layer.waitForRecovery();
+    }
     beforeCommit?.();
 
     // The renderer swap and controller-frame update are synchronous so no
@@ -222,6 +226,9 @@ export class ResidentPlaybackController {
       transitionCount: this.transitionCount,
       completedCycles: this.completedCycles,
       holdReason: this.operation ? "AWAITING_GPU_PAINT" : undefined,
+      ...(renderer.recovery.phase !== "ready"
+        ? { holdReason: `GPU_RECOVERY_${renderer.recovery.phase.toUpperCase()}` }
+        : {}),
     };
   }
 
@@ -258,6 +265,10 @@ export class ResidentPlaybackController {
     completesCycle = false,
   ): Promise<RadarPaintReceipt> {
     if (this.operation) throw new Error("a frame selection is already awaiting paint");
+    if (this.layer.getSnapshot().recovery.phase !== "ready") {
+      await this.layer.waitForRecovery();
+      this.assertActive();
+    }
     const priorSelectionSequence = this.layer.getSnapshot().selectionSequence;
     const operation = this.layer.selectAndWait(observationId);
     this.operation = operation;

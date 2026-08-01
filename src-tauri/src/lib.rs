@@ -34,6 +34,7 @@ pub fn run() {
             phase2_ipc::request_phase2_benchmark_sweep,
             phase2_ipc::request_phase3_fixture_sweep,
             phase2_ipc::request_phase4_fixture_sweep,
+            phase2_ipc::request_phase6_n0s_fixture_sweep,
             phase2_ipc::request_phase5_live_sweep,
             phase2_ipc::benchmark_phase2_encoder,
         ])

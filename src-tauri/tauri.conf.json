@@ -30,6 +30,6 @@
     "targets": ["nsis", "msi"],
     "icon": ["icons/icon.ico"],
     "shortDescription": "Native-data NEXRAD rendering prototype",
-    "longDescription": "Feasibility prototype for decoded NEXRAD Level II playback in a custom MapLibre WebGL layer."
+    "longDescription": "Feasibility prototype for decoded NEXRAD Level II and Level III playback in a custom MapLibre WebGL layer."
   }
 }

@@ -133,6 +133,60 @@ describe("resident replacement rollback", () => {
   });
 });
 
+describe("context recovery truth", () => {
+  it("invalidates old paint truth, advances the context epoch, and retains CPU observations", () => {
+    const models = [model(0), model(1), model(2)];
+    const layer = new RadarCustomLayer(models, { onSnapshot: vi.fn() });
+    const internals = layer as unknown as {
+      beginContextRecovery(): void;
+      paintReceipt: RadarPaintReceipt | undefined;
+      frameResources: Map<string, unknown>;
+    };
+    internals.paintReceipt = receipt(0);
+    internals.frameResources = new Map(models.map((entry) => [entry.observationId, {
+      textureValidation: { allPassed: true },
+    }]));
+
+    internals.beginContextRecovery();
+
+    expect(layer.getSnapshot()).toMatchObject({
+      status: "recovering",
+      contextEpoch: 2,
+      lastPaintedObservationId: undefined,
+      recovery: {
+        phase: "context_lost",
+        targetResidentCount: 3,
+        visibleObservationId: "observation-0",
+        visibleFramePainted: false,
+      },
+    });
+    expect(() => layer.selectFrame("observation-1")).toThrow("renderer is recovering");
+  });
+
+  it("rejects paint and recovery waiters when recovery fails", async () => {
+    const layer = new RadarCustomLayer([model(0)], { onSnapshot: vi.fn() });
+    const internals = layer as unknown as {
+      beginContextRecovery(): void;
+      failRenderer(error: unknown): void;
+    };
+    const paintFailure = expect(layer.waitForPaint(1, 1_000)).rejects.toThrow(
+      "recovery upload failed",
+    );
+    internals.beginContextRecovery();
+    const recoveryFailure = expect(layer.waitForRecovery(1_000)).rejects.toThrow(
+      "recovery upload failed",
+    );
+
+    internals.failRenderer(new Error("recovery upload failed"));
+
+    await Promise.all([paintFailure, recoveryFailure]);
+    expect(layer.getSnapshot()).toMatchObject({
+      status: "error",
+      error: "recovery upload failed",
+    });
+  });
+});
+
 function model(index: number): RadarSweepCpuModel {
   return {
     observationId: `observation-${index}`,

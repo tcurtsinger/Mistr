@@ -1,4 +1,6 @@
-use mistr_lib::radar::{DiagnosticReport, MAX_LEVEL2_INPUT_BYTES, RadarProduct, decode_level2};
+use mistr_lib::radar::{
+    DiagnosticReport, MAX_LEVEL2_INPUT_BYTES, RadarProduct, decode_level2, decode_level3_n0s,
+};
 use std::env;
 use std::fs;
 use std::io::Read;
@@ -26,8 +28,15 @@ fn run() -> Result<(), String> {
     }
     let options = Options::parse(arguments.into_iter())?;
     let input = read_input(&options.input)?;
-    let decoded = decode_level2(&input, options.product)
-        .map_err(|error| format!("decode failed: {error}"))?;
+    let decoded = if options.product == RadarProduct::StormRelativeVelocity {
+        let site = options
+            .site
+            .as_deref()
+            .ok_or_else(|| "--site is required for N0S decoding".to_string())?;
+        decode_level3_n0s(&input, site).map_err(|error| format!("decode failed: {error}"))?
+    } else {
+        decode_level2(&input, options.product).map_err(|error| format!("decode failed: {error}"))?
+    };
     let report = DiagnosticReport::from_output(&decoded);
     let json = serde_json::to_string_pretty(&report)
         .map_err(|error| format!("could not serialize diagnostic JSON: {error}"))?
@@ -93,6 +102,7 @@ struct Options {
     product: RadarProduct,
     json_output: Option<PathBuf>,
     text_output: Option<PathBuf>,
+    site: Option<String>,
 }
 
 impl Options {
@@ -101,6 +111,7 @@ impl Options {
         let mut product = RadarProduct::Reflectivity;
         let mut json_output = None;
         let mut text_output = None;
+        let mut site = None;
 
         while let Some(argument) = args.next() {
             match argument.as_str() {
@@ -122,6 +133,12 @@ impl Options {
                             .ok_or_else(|| "--text requires a path".to_string())?,
                     ));
                 }
+                "--site" => {
+                    site = Some(
+                        args.next()
+                            .ok_or_else(|| "--site requires a value".to_string())?,
+                    );
+                }
                 option if option.starts_with('-') => {
                     return Err(format!("unknown option {option}\n{}", usage()));
                 }
@@ -140,12 +157,13 @@ impl Options {
             product,
             json_output,
             text_output,
+            site,
         })
     }
 }
 
 fn usage() -> &'static str {
-    "usage: cargo run --bin mistr-decode -- <archive> [--product reflectivity|base_velocity] [--json <path>] [--text <path>]"
+    "usage: cargo run --bin mistr-decode -- <archive> [--product reflectivity|base_velocity|n0s] [--site <ICAO>] [--json <path>] [--text <path>]"
 }
 
 #[cfg(test)]

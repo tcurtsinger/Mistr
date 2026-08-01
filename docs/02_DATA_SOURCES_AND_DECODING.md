@@ -10,7 +10,7 @@ Primary public buckets:
 |---|---|---|
 | `s3://unidata-nexrad-level2` | Completed/archive Level II volumes | Deterministic fixtures, recent history, fallback for complete volumes |
 | `s3://unidata-nexrad-level2-chunks` | Real-time Level II volume chunks | Lowest-latency live selected-site Level II acquisition |
-| `s3://unidata-nexrad-level3` | Selected real-time Level III products | Evaluate official `N0S` storm-relative velocity parity |
+| `s3://unidata-nexrad-level3` | Selected real-time Level III products | Implemented official `N0S` storm-relative velocity path |
 | Existing NOAA/NWS `SR_BREF` WMS | Current selected-site tiled reflectivity | Visual/latency comparison and fallback only |
 | Existing IEM RIDGE `N0S` | Current selected-site tiled SRV | Product parity, latency comparison, fallback only |
 | Existing IEM `USCOMP-N0Q` | National mosaic | Retained outside the raw selected-site engine |
@@ -52,7 +52,7 @@ Mistr must label Level II velocity as **Base velocity** or **Radial velocity** u
 
 ### 3.3 Storm-relative velocity
 
-GustAVO currently uses official `N0S` storm-relative velocity from IEM RIDGE. Mistr's initial parity route is to evaluate raw `N0S` objects in `unidata-nexrad-level3` and normalize them into the same renderer contract.
+GustAVO currently uses official `N0S` storm-relative velocity from IEM RIDGE. Phase 6 accepted a bounded raw Level III code-56 `N0S` decoder and normalizes it as the canonical `storm_relative_velocity` product in `kt` through the same renderer contract. The pinned implementation and parity evidence are recorded in [`18_LEVEL3_N0S_AND_CONTEXT_RECOVERY_DECISION.md`](18_LEVEL3_N0S_AND_CONTEXT_RECOVERY_DECISION.md).
 
 Mistr must not initially:
 
@@ -192,7 +192,7 @@ NormalizedSweep
   source_object_id
   source_content_hash
   site_icao
-  product                     // reflectivity | base_velocity | n0s | ...
+  product                     // reflectivity | base_velocity | storm_relative_velocity | ...
   units
   measured_at_utc
   volume_started_at_utc
