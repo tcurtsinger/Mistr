@@ -235,8 +235,8 @@ interface ResidentFrameReplacement {
   previousSelectedAt: number;
   previousTextureValidation?: RadarTextureValidation;
   previousPaintReceipt?: RadarPaintReceipt;
-  previousPaintReceiptsLength: number;
-  previousSwitchLatencySamplesLength: number;
+  previousPaintReceipts: RadarPaintReceipt[];
+  previousSwitchLatencySamples: number[];
 }
 
 export class RadarCustomLayer implements CustomLayerInterface {
@@ -555,8 +555,8 @@ export class RadarCustomLayer implements CustomLayerInterface {
       previousSelectedAt: this.selectedAt,
       previousTextureValidation: this.textureValidation,
       previousPaintReceipt: this.paintReceipt,
-      previousPaintReceiptsLength: this.paintReceipts.length,
-      previousSwitchLatencySamplesLength: this.switchLatencySamples.length,
+      previousPaintReceipts: this.paintReceipts.map((receipt) => ({ ...receipt })),
+      previousSwitchLatencySamples: [...this.switchLatencySamples],
     };
     this.frameResources = pendingFrames;
     this.paletteTexture = pendingPalette;
@@ -611,8 +611,8 @@ export class RadarCustomLayer implements CustomLayerInterface {
     this.selectedAt = replacement.previousSelectedAt;
     this.textureValidation = replacement.previousTextureValidation;
     this.paintReceipt = replacement.previousPaintReceipt;
-    this.paintReceipts.length = replacement.previousPaintReceiptsLength;
-    this.switchLatencySamples.length = replacement.previousSwitchLatencySamplesLength;
+    this.paintReceipts = replacement.previousPaintReceipts;
+    this.switchLatencySamples = replacement.previousSwitchLatencySamples;
     this.pendingReplacement = null;
     this.runtimeError = undefined;
 

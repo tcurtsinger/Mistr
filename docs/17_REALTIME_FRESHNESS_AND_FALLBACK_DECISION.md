@@ -10,7 +10,7 @@
 
 Waiting for a completed Level II volume is structurally simple, but it discards the freshness advantage of the real-time chunk feed. Publishing merely because a partial byte stream happens to decode is unsafe: the result could begin mid-elevation, omit radials, cross a gap, or outlive a site switch.
 
-The decision therefore needs a stronger boundary than â€œdecoder returned a sweep,â€ plus a fallback that never replaces known visible truth with partial work.
+The decision therefore needs a stronger boundary than “decoder returned a sweep,” plus a fallback that never replaces known visible truth with partial work.
 
 The public-data contract was revalidated against the [AWS Open Data registry](https://registry.opendata.aws/noaa-nexrad/), [NCEI's real-time block description](https://www.ncei.noaa.gov/products/radar/decoding-utilities-examples), and the [ROC Archive II/User ICD](https://www.roc.noaa.gov/public-documents/icds/2620010J.pdf). The AWS source has a rotating real-time chunk bucket and a completed archive bucket. NCEI describes real-time Level II as ordered header/data blocks whose data sections use BZip2 compression.
 

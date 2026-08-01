@@ -1,4 +1,4 @@
-# Phase 5 â€” Real-Time Chunks and Latency
+# Phase 5 — Real-Time Chunks and Latency
 
 **Status:** Complete on the primary Windows workstation
 
@@ -46,11 +46,11 @@ The committed reviewed dataset is [`fixtures/expected/phase-5/live-latency-datas
 | Observed assembler gaps | `0` |
 | Observed conflicting duplicates | 0 |
 
-Echo coverage is retained as a reproducible fraction of valid reflectivity gates. The report uses â€œlower/higher echo coverage,â€ not an unsupported meteorological storm classification. The matrix includes `6` lower-coverage and `8` higher-coverage observations.
+Echo coverage is retained as a reproducible fraction of valid reflectivity gates. The report uses “lower/higher echo coverage,” not an unsupported meteorological storm classification. The matrix includes `6` lower-coverage and `8` higher-coverage observations.
 
 ## Latency
 
-All values are milliseconds. P50/P95 use nearest rank. â€œLead versus providerâ€ is provider first-observed time minus Mistr safe-decode completion; positive means Mistr was first. NOAA/IEM first-seen values carry up to 5,000 ms polling uncertainty. S3 `Last-Modified` is second-resolution and uses a different clock from local decode completion, so the `-240` ms minimum is treated as timestamp uncertainty, not as decoding before availability.
+All values are milliseconds. P50/P95 use nearest rank. “Lead versus provider” is provider first-observed time minus Mistr safe-decode completion; positive means Mistr was first. NOAA/IEM first-seen values carry up to 5,000 ms polling uncertainty. S3 `Last-Modified` is second-resolution and uses a different clock from local decode completion, so the `-240` ms minimum is treated as timestamp uncertainty, not as decoding before availability.
 
 | Measurement | Samples | Minimum | P50 | P95 | Worst |
 |---|---:|---:|---:|---:|---:|
@@ -74,7 +74,7 @@ The Mistr-owned assembler enforces:
 - late-object ignore and explicit incomplete rollover evidence; and
 - generation cancellation before each network/decode/publication boundary.
 
-The progressive decoder additionally requires a physical first-radial start and last-radial end, rejects unknown statuses and duplicate source azimuth numbers, and permits publication only once for a volume. Missing reflectivity or an incomplete boundary means â€œnot safe yetâ€; other decoder errors fail closed.
+The progressive decoder additionally requires a physical first-radial start and last-radial end, rejects unknown statuses and duplicate source azimuth numbers, and permits publication only once for a volume. Missing reflectivity or an incomplete boundary means “not safe yet”; other decoder errors fail closed.
 
 Deterministic tests cover gaps, out-of-order delivery, duplicates, terminal ordering, rollover, late chunks, payload mismatch, site/generation mismatch, single-use publication, fixed-host rejection, bounded XML/provider parsing, dense and sparse rotating-index wrap, complete-request timeout enforcement, cancellation, atomic evidence publication, and the display fallback reducer.
 
@@ -101,7 +101,7 @@ npm run test:phase5:packaged
 | Gate | Result |
 |---|---:|
 | Shell | Release Tauri / WebView2 |
-| Window and receipt framebuffer | 3840 Ã— 2160 |
+| Window and receipt framebuffer | 3840 × 2160 |
 | GPU path | Hardware ANGLE / NVIDIA RTX 4080 / D3D11 |
 | Superseded request | KAMX rejected before publication (`live_start_failed` or `live_sweep_failed`, depending on stage) |
 | Current publication | KTLX generation 3 only |
