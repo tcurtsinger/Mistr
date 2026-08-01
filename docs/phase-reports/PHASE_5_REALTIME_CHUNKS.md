@@ -10,7 +10,7 @@
 
 **PASS** for the bounded Phase 5 scope.
 
-Mistr discovered rotating real-time volumes, assembled strict start/intermediate/end sequences, progressively decoded only physically complete lowest reflectivity sweeps, and compared each published candidate with the same sweep decoded from its completed volume. The reviewed dataset contains `14` fresh observations across `8` sites and three observed VCPs (`35, 212, 215`). Every early/complete comparison matched exactly.
+Mistr discovered rotating real-time volumes, assembled strict start/intermediate/end sequences, progressively decoded only physically complete lowest reflectivity sweeps, and compared each published candidate with the same sweep decoded from its completed chunk volume. Both outputs retain `nexrad_level2_chunks` provenance. The reviewed dataset contains `14` fresh observations across `8` sites and three observed VCPs (`35, 212, 215`). Every early/complete comparison matched exactly.
 
 In this observation window, safe decode completed `26411` ms before NOAA at P50 and `27828` ms before IEM at P50, with a five-second provider-poll uncertainty. This supports proceeding with the raw selected-site architecture; it does not promise that raw always wins.
 

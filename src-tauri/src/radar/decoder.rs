@@ -1034,6 +1034,9 @@ mod tests {
         let input = std::fs::read(path).expect("read verified public fixture");
         let output =
             decode_level2(&input, RadarProduct::Reflectivity).expect("decode current KTLX fixture");
+        let chunk_output = decode_safe_lowest_sweep(&input, RadarProduct::Reflectivity)
+            .expect("decode complete KTLX bytes with real-time chunk provenance");
+        assert_eq!(chunk_output.sweep.source_kind, "nexrad_level2_chunks");
         assert_eq!(
             output.sweep.source_sha256,
             "99c189c327307da6a26a9f265ee84bf9fc690dc1a7358db941949805afa4a0d3"

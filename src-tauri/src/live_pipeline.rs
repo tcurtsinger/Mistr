@@ -3,9 +3,7 @@
 
 use crate::acquisition::{AcquisitionCounters, AcquisitionError, PublicRadarClient};
 use crate::chunk_assembly::{ChunkAssembler, ChunkAssemblyError, ChunkIngestOutcome};
-use crate::radar::{
-    DecodeError, DecodeOutput, RadarProduct, decode_level2, decode_safe_lowest_sweep,
-};
+use crate::radar::{DecodeError, DecodeOutput, RadarProduct, decode_safe_lowest_sweep};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -336,11 +334,16 @@ impl LiveSweepSession {
                         )
                     })?;
                 let output = tokio::task::spawn_blocking(move || {
-                    decode_level2(&bytes, RadarProduct::Reflectivity)
+                    decode_safe_lowest_sweep(&bytes, RadarProduct::Reflectivity)
                 })
                 .await
                 .map_err(|error| LivePipelineError::DecodeTask(error.to_string()))?
                 .map_err(|error| LivePipelineError::Decode(error.to_string()))?;
+                if output.sweep.source_kind != "nexrad_level2_chunks" {
+                    return Err(LivePipelineError::Decode(
+                        "completed real-time volume lost chunk provenance".into(),
+                    ));
+                }
                 self.token.ensure_current()?;
                 let complete = SweepFingerprint::from_output(&output);
                 let safe = self.safe_fingerprint.as_ref().ok_or_else(|| {
