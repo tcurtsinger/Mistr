@@ -59,6 +59,21 @@ h1 span { color: #83979d; font-size: 12px; font-weight: 550; letter-spacing: .12
 .checkpoint { left: 16px; top: 112px; width: min(360px, calc(100vw - 32px)); padding: 18px; }
 .checkpoint h2 { margin: 5px 0 10px; font-size: 18px; }
 .checkpoint > p:not(.eyebrow) { color: #a7b9be; font-size: 13px; line-height: 1.55; }
+.live-action {
+  width: 100%;
+  margin: 8px 0 0;
+  border: 1px solid rgba(103, 201, 218, .42);
+  padding: 10px 12px;
+  color: #dce9ed;
+  background: rgba(18, 49, 56, .82);
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: .12em;
+  cursor: pointer;
+}
+.live-action:hover:not(:disabled) { border-color: rgba(103, 201, 218, .82); background: rgba(25, 67, 76, .9); }
+.live-action:disabled { cursor: wait; opacity: .5; }
 .checkpoint dl { margin: 18px 0 0; display: grid; gap: 10px; }
 .checkpoint dl div { display: flex; justify-content: space-between; gap: 16px; border-top: 1px solid rgba(112, 208, 225, .1); padding-top: 10px; }
 .checkpoint dd { margin: 0; color: #d6e4e8; font-family: "Cascadia Mono", Consolas, monospace; font-size: 11px; }

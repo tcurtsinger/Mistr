@@ -8,11 +8,22 @@ import { ResidentPlaybackController } from "./ResidentPlaybackController";
 
 class FakeLayer {
   private selected = "frame-a";
-  private painted = "frame-a";
+  private painted: string | undefined = "frame-a";
   private sequence = 1;
+  private paintedSequence = 1;
   private generation = 7;
+  private paintedGeneration = 7;
   private residentObservationIds = ["frame-a", "frame-b", "frame-c"];
   private pending: { complete(): void; fail(error: Error): void } | null = null;
+  private replacement: {
+    selected: string;
+    painted: string | undefined;
+    sequence: number;
+    paintedSequence: number;
+    generation: number;
+    paintedGeneration: number;
+    residentObservationIds: string[];
+  } | null = null;
 
   getSnapshot(): RadarRendererSnapshot {
     return {
@@ -30,17 +41,26 @@ class FakeLayer {
   }
 
   waitForPaint(): Promise<RadarPaintReceipt> {
-    return Promise.resolve(this.receipt());
+    if (this.selected === this.painted && this.generation === this.paintedGeneration) {
+      return Promise.resolve(this.receipt());
+    }
+    return this.beginPendingPaint();
   }
 
   selectAndWait(observationId: string): Promise<RadarPaintReceipt> {
     if (observationId === this.selected) return Promise.resolve(this.receipt());
     this.selected = observationId;
     this.sequence += 1;
+    return this.beginPendingPaint();
+  }
+
+  private beginPendingPaint(): Promise<RadarPaintReceipt> {
     return new Promise((resolve, reject) => {
       this.pending = {
         complete: () => {
-          this.painted = observationId;
+          this.painted = this.selected;
+          this.paintedSequence = this.sequence;
+          this.paintedGeneration = this.generation;
           this.pending = null;
           resolve(this.receipt());
         },
@@ -53,11 +73,39 @@ class FakeLayer {
   }
 
   replaceResidentFrames(models: readonly RadarSweepCpuModel[]): void {
+    this.replacement = {
+      selected: this.selected,
+      painted: this.painted,
+      sequence: this.sequence,
+      paintedSequence: this.paintedSequence,
+      generation: this.generation,
+      paintedGeneration: this.paintedGeneration,
+      residentObservationIds: this.residentObservationIds,
+    };
     this.generation += 1;
     this.residentObservationIds = models.map((model) => model.observationId);
     this.selected = this.residentObservationIds[0];
-    this.painted = this.selected;
     this.sequence += 1;
+  }
+
+  commitResidentFrameReplacement(selectionSequence: number): void {
+    if (!this.replacement || selectionSequence !== this.sequence) {
+      throw new Error("replacement is not ready to commit");
+    }
+    this.replacement = null;
+  }
+
+  rollbackResidentFrameReplacement(): Promise<RadarPaintReceipt> {
+    if (!this.replacement) throw new Error("replacement is not pending");
+    this.selected = this.replacement.selected;
+    this.sequence = this.replacement.sequence;
+    this.generation = this.replacement.generation;
+    this.residentObservationIds = this.replacement.residentObservationIds;
+    this.painted = undefined;
+    this.paintedSequence = 0;
+    this.paintedGeneration = 0;
+    this.replacement = null;
+    return this.beginPendingPaint();
   }
 
   completePaint() {
@@ -69,12 +117,13 @@ class FakeLayer {
   }
 
   private receipt(): RadarPaintReceipt {
+    if (!this.painted) throw new Error("there is no completed fake paint");
     return {
-      generation: this.generation,
+      generation: this.paintedGeneration,
       observationId: this.painted,
       contextEpoch: 3,
-      selectionSequence: this.sequence,
-      drawSequence: this.sequence * 2,
+      selectionSequence: this.paintedSequence,
+      drawSequence: this.paintedSequence * 2,
       completedAtUnixMs: 1_720_000_000_000,
       firstPaintLatencyMs: 2,
       residentSwitchLatencyMs: 1,
@@ -120,7 +169,16 @@ describe("resident playback truth", () => {
     const controller = new ResidentPlaybackController(layer, frames());
     const replacements = [frame("replacement-a", 400), frame("replacement-b", 500)];
 
-    await controller.replaceResidentFrames(replacements);
+    const replacement = controller.replaceResidentFrames(replacements);
+    await vi.waitFor(() => {
+      expect(controller.snapshot()).toMatchObject({
+        generation: 8,
+        selectedObservationId: "replacement-a",
+        holdReason: "AWAITING_GPU_PAINT",
+      });
+    });
+    layer.completePaint();
+    await replacement;
     const pending = controller.step();
     await Promise.resolve();
 
@@ -138,6 +196,162 @@ describe("resident playback truth", () => {
       selectedObservationId: "replacement-b",
       lastPaintedObservationId: "replacement-b",
       playheadObservedAtUnixMs: 500,
+    });
+  });
+
+  it("rechecks publication ownership after waiting for an in-progress paint", async () => {
+    const layer = new FakeLayer();
+    const controller = new ResidentPlaybackController(layer, frames());
+    const inProgress = controller.scrub(1);
+    await Promise.resolve();
+    let ownsGeneration = true;
+    const replacement = controller.replaceResidentFrames(
+      [frame("replacement-a", 400)],
+      () => {
+        if (!ownsGeneration) throw new Error("generation was superseded");
+      },
+    );
+
+    ownsGeneration = false;
+    layer.completePaint();
+    await inProgress;
+    await expect(replacement).rejects.toThrow("generation was superseded");
+    expect(controller.snapshot()).toMatchObject({
+      generation: 7,
+      residentCount: 3,
+      selectedObservationId: "frame-b",
+      lastPaintedObservationId: "frame-b",
+    });
+  });
+
+  it("rolls back the resident loop when the replacement paint fails", async () => {
+    const layer = new FakeLayer();
+    const controller = new ResidentPlaybackController(layer, frames());
+    await controller.establishInitialPaint();
+
+    const replacement = controller.replaceResidentFrames([frame("replacement-a", 400)]);
+    const replacementFailure = expect(replacement).rejects.toThrow("paint failed");
+    await vi.waitFor(() => {
+      expect(controller.snapshot()).toMatchObject({
+        generation: 8,
+        residentCount: 1,
+        selectedObservationId: "replacement-a",
+        lastPaintedObservationId: "frame-a",
+      });
+    });
+    layer.failPaint();
+
+    await vi.waitFor(() => {
+      expect(controller.snapshot()).toMatchObject({
+        generation: 7,
+        residentCount: 3,
+        selectedObservationId: "frame-a",
+        lastPaintedObservationId: undefined,
+        holdReason: "AWAITING_GPU_PAINT",
+      });
+    });
+    layer.completePaint();
+    await replacementFailure;
+    expect(controller.snapshot()).toMatchObject({
+      generation: 7,
+      residentCount: 3,
+      selectedObservationId: "frame-a",
+      lastPaintedObservationId: "frame-a",
+      playheadObservedAtUnixMs: 100,
+    });
+  });
+
+  it("rolls back a replacement superseded while its GPU paint is pending", async () => {
+    const layer = new FakeLayer();
+    const controller = new ResidentPlaybackController(layer, frames());
+    await controller.establishInitialPaint();
+    let ownsGeneration = true;
+
+    const replacement = controller.replaceResidentFrames(
+      [frame("replacement-a", 400)],
+      () => {
+        if (!ownsGeneration) throw new Error("generation was superseded");
+      },
+    );
+    const replacementFailure = expect(replacement).rejects.toThrow("generation was superseded");
+    await vi.waitFor(() => {
+      expect(controller.snapshot()).toMatchObject({
+        generation: 8,
+        selectedObservationId: "replacement-a",
+        holdReason: "AWAITING_GPU_PAINT",
+      });
+    });
+    ownsGeneration = false;
+    layer.completePaint();
+
+    await vi.waitFor(() => {
+      expect(controller.snapshot()).toMatchObject({
+        generation: 7,
+        residentCount: 3,
+        selectedObservationId: "frame-a",
+        lastPaintedObservationId: undefined,
+        holdReason: "AWAITING_GPU_PAINT",
+      });
+    });
+    layer.completePaint();
+    await replacementFailure;
+    expect(controller.snapshot()).toMatchObject({
+      generation: 7,
+      residentCount: 3,
+      selectedObservationId: "frame-a",
+      lastPaintedObservationId: "frame-a",
+      playheadObservedAtUnixMs: 100,
+    });
+  });
+
+  it("keeps a newer replacement queued until an older rollback repaint completes", async () => {
+    const layer = new FakeLayer();
+    const controller = new ResidentPlaybackController(layer, frames());
+    await controller.establishInitialPaint();
+    let ownsFirstGeneration = true;
+
+    const first = controller.replaceResidentFrames(
+      [frame("replacement-a", 400)],
+      () => {
+        if (!ownsFirstGeneration) throw new Error("generation was superseded");
+      },
+    );
+    const firstFailure = expect(first).rejects.toThrow("generation was superseded");
+    await vi.waitFor(() => {
+      expect(controller.snapshot()).toMatchObject({
+        generation: 8,
+        selectedObservationId: "replacement-a",
+        holdReason: "AWAITING_GPU_PAINT",
+      });
+    });
+    ownsFirstGeneration = false;
+    const newest = controller.replaceResidentFrames([frame("replacement-b", 500)]);
+    layer.completePaint();
+
+    await vi.waitFor(() => {
+      expect(controller.snapshot()).toMatchObject({
+        generation: 7,
+        selectedObservationId: "frame-a",
+        lastPaintedObservationId: undefined,
+        holdReason: "AWAITING_GPU_PAINT",
+      });
+    });
+    layer.completePaint();
+    await firstFailure;
+
+    await vi.waitFor(() => {
+      expect(controller.snapshot()).toMatchObject({
+        generation: 8,
+        residentCount: 1,
+        selectedObservationId: "replacement-b",
+        lastPaintedObservationId: "frame-a",
+        holdReason: "AWAITING_GPU_PAINT",
+      });
+    });
+    layer.completePaint();
+    await expect(newest).resolves.toMatchObject({
+      generation: 8,
+      observationId: "replacement-b",
     });
   });
 

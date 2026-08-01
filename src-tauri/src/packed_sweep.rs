@@ -26,6 +26,7 @@ const PRODUCT_REFLECTIVITY: u16 = 1;
 const PRODUCT_BASE_VELOCITY: u16 = 2;
 const SOURCE_LEVEL2_ARCHIVE_II: u16 = 1;
 const SOURCE_PHASE2_SYNTHETIC: u16 = 2;
+const SOURCE_LEVEL2_CHUNKS: u16 = 3;
 
 const OFFSET_WIRE_SHA256: usize = 208;
 const END_WIRE_SHA256: usize = 240;
@@ -298,6 +299,7 @@ pub fn validate_packed_sweep(bytes: &[u8]) -> Result<PackedSweepSummary, PackedS
     let source_kind = match get_u16(bytes, 26) {
         SOURCE_LEVEL2_ARCHIVE_II => "nexrad_level2_archive_ii",
         SOURCE_PHASE2_SYNTHETIC => "mistr_phase2_synthetic",
+        SOURCE_LEVEL2_CHUNKS => "nexrad_level2_chunks",
         value => return Err(PackedSweepError::InvalidSourceKind(value)),
     };
     if !all_zero(&bytes[28..32])
@@ -604,6 +606,7 @@ fn source_kind_code(source_kind: &str) -> Result<u16, PackedSweepError> {
     match source_kind {
         "nexrad_level2_archive_ii" => Ok(SOURCE_LEVEL2_ARCHIVE_II),
         "mistr_phase2_synthetic" => Ok(SOURCE_PHASE2_SYNTHETIC),
+        "nexrad_level2_chunks" => Ok(SOURCE_LEVEL2_CHUNKS),
         _ => Err(PackedSweepError::InvalidSweep("source kind")),
     }
 }
@@ -966,6 +969,17 @@ mod tests {
     #[test]
     fn encoding_is_deterministic() {
         assert_eq!(encoded_golden(), encoded_golden());
+    }
+
+    #[test]
+    fn real_time_chunk_source_kind_round_trips() {
+        let mut sweep = phase2_golden_sweep();
+        sweep.source_kind = "nexrad_level2_chunks";
+        let bytes = encode_packed_sweep(&sweep, PackedSweepIdentity { generation: 8 })
+            .expect("encode real-time source kind");
+        let summary = validate_packed_sweep(&bytes).expect("validate real-time source kind");
+        assert_eq!(summary.source_kind, "nexrad_level2_chunks");
+        assert_eq!(summary.generation, 8);
     }
 
     #[test]

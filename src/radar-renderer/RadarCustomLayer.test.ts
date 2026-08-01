@@ -1,11 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   assertNoWebGlError,
   hasVerifiedHardwareAcceleration,
+  RadarCustomLayer,
   radarShaderSources,
   validateReplacementGeneration,
   validateResidentModels,
 } from "./RadarCustomLayer";
+import type { RadarPaintReceipt } from "./RadarCustomLayer";
 import type { RadarSweepCpuModel } from "./cpuModel";
 
 describe("Radar custom-layer shader contract", () => {
@@ -84,6 +86,53 @@ describe("resident loop validation", () => {
   });
 });
 
+describe("resident replacement rollback", () => {
+  it("restores capped histories but withholds prior paint truth until restoration completes", async () => {
+    const previousReceipts = Array.from({ length: 64 }, (_, index) => receipt(index));
+    const previousLatencies = Array.from({ length: 240 }, (_, index) => index);
+    const rejectedReceipt = receipt(999);
+    const onSnapshot = vi.fn();
+    const layer = new RadarCustomLayer(model(0), { onSnapshot });
+    const internals = layer as unknown as Record<string, unknown>;
+    const gl = {
+      ARRAY_BUFFER: 0x8892,
+      ARRAY_BUFFER_BINDING: 0x8894,
+      STATIC_DRAW: 0x88e4,
+      bindBuffer: vi.fn(),
+      bufferData: vi.fn(),
+      deleteTexture: vi.fn(),
+      getParameter: vi.fn(() => null),
+    } as unknown as WebGL2RenderingContext;
+
+    internals.gl = gl;
+    internals.quadBuffer = {} as WebGLBuffer;
+    internals.paintReceipt = rejectedReceipt;
+    internals.paintReceipts = [...previousReceipts.slice(1), rejectedReceipt];
+    internals.switchLatencySamples = [...previousLatencies.slice(1), 999];
+    internals.pendingReplacement = {
+      previousModels: [model(0)],
+      previousFrames: new Map(),
+      previousPalette: {} as WebGLTexture,
+      previousSelectedObservationId: "observation-0",
+      previousSelectionSequence: 1,
+      previousPaintReceipts: previousReceipts,
+      previousSwitchLatencySamples: previousLatencies,
+    };
+
+    const rollback = layer.rollbackResidentFrameReplacement(10);
+    const rollbackFailure = expect(rollback).rejects.toThrow("did not paint");
+
+    expect(layer.getPaintReceipts()).toEqual(previousReceipts);
+    expect(internals.switchLatencySamples).toEqual(previousLatencies);
+    expect(layer.getPaintReceipts()).not.toContainEqual(rejectedReceipt);
+    expect(layer.getSnapshot()).toMatchObject({
+      lastPaintedObservationId: undefined,
+    });
+    expect(onSnapshot).toHaveBeenLastCalledWith(expect.objectContaining({ status: "ready" }));
+    await rollbackFailure;
+  });
+});
+
 function model(index: number): RadarSweepCpuModel {
   return {
     observationId: `observation-${index}`,
@@ -93,7 +142,23 @@ function model(index: number): RadarSweepCpuModel {
     scale: 2,
     offset: 66,
     center: { longitude: -97.27776, latitude: 35.333363 },
+    maxRangeM: 230_000,
     generation: 1n,
     observedAtUnixMs: 1_700_000_000_000 + index,
   } as RadarSweepCpuModel;
+}
+
+function receipt(index: number): RadarPaintReceipt {
+  return {
+    generation: 1,
+    observationId: `receipt-${index}`,
+    contextEpoch: 1,
+    selectionSequence: index + 1,
+    drawSequence: index + 1,
+    completedAtUnixMs: 1_700_000_000_000 + index,
+    firstPaintLatencyMs: index,
+    residentSwitchLatencyMs: index,
+    framebufferWidth: 3840,
+    framebufferHeight: 2160,
+  };
 }

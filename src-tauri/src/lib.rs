@@ -1,3 +1,6 @@
+pub mod acquisition;
+pub mod chunk_assembly;
+pub mod live_pipeline;
 pub mod packed_sweep;
 mod phase2_ipc;
 pub mod radar;
@@ -27,9 +30,11 @@ pub fn run() {
             phase2_ipc::release_phase2_transfer_credit,
             phase2_ipc::phase2_transfer_snapshot,
             phase2_ipc::phase4_activity_snapshot,
+            phase2_ipc::phase5_live_evidence,
             phase2_ipc::request_phase2_benchmark_sweep,
             phase2_ipc::request_phase3_fixture_sweep,
             phase2_ipc::request_phase4_fixture_sweep,
+            phase2_ipc::request_phase5_live_sweep,
             phase2_ipc::benchmark_phase2_encoder,
         ])
         .run(tauri::generate_context!())

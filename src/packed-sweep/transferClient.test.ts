@@ -29,6 +29,34 @@ function snapshot(generation: number, heldCredits = 0, session = 1): TransferSna
 }
 
 describe("PackedSweepTransferClient", () => {
+  it("passes only bounded canonical inputs to the Phase 5 live command", async () => {
+    const requests: Array<Record<string, unknown> | undefined> = [];
+    const invoke: InvokeFunction = async <T>(command: string, arguments_?: Record<string, unknown>) => {
+      if (command === "open_phase2_transfer_session") return snapshot(0) as T;
+      if (command === "begin_phase2_generation") return snapshot(7) as T;
+      if (command === "request_phase5_live_sweep") {
+        requests.push(arguments_);
+        return goldenBuffer() as T;
+      }
+      if (command === "release_phase2_transfer_credit") return snapshot(7) as T;
+      throw new Error(`unexpected command ${command}`);
+    };
+    const client = new PackedSweepTransferClient(invoke);
+    await client.open();
+    await client.begin(7);
+    const lease = await client.requestPhase5Live("KTLX", true, 120);
+    expect(requests).toEqual([{
+      session: 1,
+      generation: 7,
+      site: "KTLX",
+      freshOnly: true,
+      timeoutSeconds: 120,
+    }]);
+    await lease.release();
+    await expect(client.requestPhase5Live("ktlx")).rejects.toThrow("four uppercase");
+    await expect(client.requestPhase5Live("KTLX", false, 901)).rejects.toThrow("10 and 900");
+  });
+
   it("requests the Phase 3 fixture through the same leased binary path", async () => {
     const requests: Array<Record<string, unknown> | undefined> = [];
     const invoke: InvokeFunction = async <T>(command: string, arguments_?: Record<string, unknown>) => {

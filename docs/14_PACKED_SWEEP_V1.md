@@ -46,7 +46,7 @@ The buffer carries a caller generation and stable observation ID. Rust owns enco
 | 16 | 4 | total length | exact buffer length, at most 32 MiB |
 | 20 | 4 | flags | exactly one raw-code-width flag |
 | 24 | 2 | product | `1` reflectivity, `2` base velocity |
-| 26 | 2 | source kind | `1` Level II Archive II, `2` Phase 2 synthetic benchmark |
+| 26 | 2 | source kind | `1` Level II Archive II, `2` Phase 2 synthetic benchmark, `3` real-time Level II chunks |
 | 28 | 4 | reserved | zero |
 | 32 | 8 | generation | request generation; stale generations cannot publish |
 | 40 | 16 | observation ID | first 16 bytes of normalized SHA-256 |
@@ -164,6 +164,8 @@ The broker has exactly two global transfer credits. A request consumes one befor
 Each JavaScript owner first asks Rust to allocate a monotonic frontend session. Generations are monotonic within that session, so a diagnostic can be rerun after a WebView reload without reusing stale backend generations. Tauri's native `PageLoadEvent::Started` hook advances a document epoch and is the only event allowed to reclaim delivered credits from a replaced JavaScript document; native work from the old session remains globally charged to that exact session until it actually completes. Another client calling `open()` inside the same live document is rejected while that document still holds or transfers a buffer, so session creation cannot bypass the two-credit limit.
 
 Starting or cancelling a generation invalidates prior publication rights, but it does not refund credits for `spawn_blocking` work that is still executing or raw responses already committed to IPC delivery. Within one session, an old delivered response remains associated with its generation until TypeScript acknowledges and discards it. Rust checks session and generation before work and immediately before committing a raw response. TypeScript discards and acknowledges a response if its local session/generation changed while `invoke` or parsing was pending. Thus repeated supersession cannot bypass the global two-transfer bound, and stale bytes cannot reach upload.
+
+Phase 5 uses the same generation and credit contract for live network work. Beginning a newer generation also cancels the old Rust acquisition token. Safe-sweep evidence is committed in the same broker lock transition that turns an in-flight credit into a delivered credit, so stale work cannot leave publishable evidence behind. The frontend can retrieve evidence only for the current session/generation and exact observation ID.
 
 Each release carries a random 16-64 character acknowledgement ID. Rust retains every acknowledged ID for the lifetime of that frontend session and treats a repeated ID as success, so a control response lost for arbitrarily long can be retried without releasing a newer buffer. The set is discarded only after the native page-load hook confirms replacement of the prior document, or after a same-document session becomes quiescent. A lease is marked released only after acknowledgement. Failed automatic stale/error acknowledgements remain queued and must flush before that client begins or requests more work; a native document replacement is the owner-loss recovery path.
 

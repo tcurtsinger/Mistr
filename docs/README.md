@@ -1,6 +1,6 @@
 # Mistr
 
-**Status:** Implementation in progress. Phases 0 through 4 are complete on the primary Windows workstation. Phase 5 live-chunk acquisition and latency comparison is next.
+**Status:** Implementation in progress. Phases 0 through 5 are complete on the primary Windows workstation. Phase 6 product parity and packaged recovery is next.
 
 Mistr is the bounded raw-radar feasibility prototype for GustAVO. Its purpose is to determine whether selected-site NEXRAD playback can move from provider-rendered map tiles to decoded, GPU-resident radar data without rewriting the full GustAVO desktop application.
 
@@ -44,9 +44,11 @@ Mistr will test a targeted retrofit before any Electron, Qt, game-engine, or ful
 | [14_PACKED_SWEEP_V1.md](14_PACKED_SWEEP_V1.md) | Phase 2 binary layout, integrity, generation, and transfer-credit contract |
 | [15_GPU_RENDERER_DECISION.md](15_GPU_RENDERER_DECISION.md) | Phase 3 renderer representation, native-grid semantics, and retention ADR |
 | [16_RESIDENT_PLAYBACK_DECISION.md](16_RESIDENT_PLAYBACK_DECISION.md) | Phase 4 resource-set, hard-cut, atomic replacement, and paint-truth ADR |
+| [17_REALTIME_FRESHNESS_AND_FALLBACK_DECISION.md](17_REALTIME_FRESHNESS_AND_FALLBACK_DECISION.md) | Phase 5 safe-sweep publication, source freshness, cancellation, and fallback ADR |
 | [phase-reports/PHASE_2_PACKED_WIRE_AND_IPC.md](phase-reports/PHASE_2_PACKED_WIRE_AND_IPC.md) | Phase 2 cross-language, packaged IPC, timing, and memory evidence |
 | [phase-reports/PHASE_3_STATIC_GPU_RENDERER.md](phase-reports/PHASE_3_STATIC_GPU_RENDERER.md) | Phase 3 packaged GPU, alignment, palette, coexistence, and performance evidence |
 | [phase-reports/PHASE_4_RESIDENT_PLAYBACK.md](phase-reports/PHASE_4_RESIDENT_PLAYBACK.md) | Phase 4 real 20-observation residency, 4K playback, paint truth, and resource evidence |
+| [phase-reports/PHASE_5_REALTIME_CHUNKS.md](phase-reports/PHASE_5_REALTIME_CHUNKS.md) | Phase 5 live chunk assembly, completed-volume comparison, latency, fallback, and packaged evidence |
 | [DEFERRED_REVIEW_FINDINGS.md](DEFERRED_REVIEW_FINDINGS.md) | Non-blocking review edge cases deliberately recorded for later work |
 | [GLOSSARY.md](GLOSSARY.md) | Radar, rendering, and test terminology |
 

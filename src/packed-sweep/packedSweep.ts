@@ -61,7 +61,10 @@ export interface PackedSweepMetadata {
   siteIcao: string;
   product: "reflectivity" | "base_velocity";
   units: "dBZ" | "m/s";
-  sourceKind: "nexrad_level2_archive_ii" | "mistr_phase2_synthetic";
+  sourceKind:
+    | "nexrad_level2_archive_ii"
+    | "mistr_phase2_synthetic"
+    | "nexrad_level2_chunks";
   elevationNumber: number;
   dataWordSizeBits: 8 | 16;
   vcp: number;
@@ -165,7 +168,9 @@ export async function parsePackedSweep(
     ? "nexrad_level2_archive_ii"
     : sourceKindCode === 2
       ? "mistr_phase2_synthetic"
-      : null;
+      : sourceKindCode === 3
+        ? "nexrad_level2_chunks"
+        : null;
   if (sourceKind === null) {
     throw new PackedSweepError("invalid_source_kind", String(sourceKindCode));
   }
@@ -479,4 +484,3 @@ function isLittleEndian(): boolean {
   const marker = new Uint16Array([1]);
   return new Uint8Array(marker.buffer)[0] === 1;
 }
-
