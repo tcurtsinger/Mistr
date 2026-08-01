@@ -90,6 +90,29 @@ export function failLiveDisplay(
   };
 }
 
+export function retainPaintedFallback(
+  state: LiveDisplayState,
+  frame: PaintedFrameTruth,
+): LiveDisplayState {
+  if (state.kind === "painted" || sameFrameTruth(state.lastComplete, frame)) return state;
+  return {
+    ...state,
+    lastComplete: frame,
+    fallback: fallbackFor(frame),
+  };
+}
+
+function sameFrameTruth(
+  left: PaintedFrameTruth | undefined,
+  right: PaintedFrameTruth,
+): boolean {
+  return left?.observationId === right.observationId
+    && left.site === right.site
+    && left.source === right.source
+    && left.observedAtUnixMs === right.observedAtUnixMs
+    && left.paintedAtUnixMs === right.paintedAtUnixMs;
+}
+
 function fallbackFor(lastComplete?: PaintedFrameTruth): LiveFallbackPolicy {
   return {
     retainLastComplete: true,

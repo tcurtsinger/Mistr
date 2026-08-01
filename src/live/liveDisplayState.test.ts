@@ -4,6 +4,7 @@ import {
   failLiveDisplay,
   initialLiveDisplay,
   publishLiveDisplay,
+  retainPaintedFallback,
   type PaintedFrameTruth,
 } from "./liveDisplayState";
 
@@ -35,6 +36,22 @@ describe("live display truth", () => {
       nextFallback: "nexrad_level2_archive",
       terminalFallback: "provider_tiles",
     });
+  });
+
+  it("tracks the archive frame that actually paints while live acquisition is pending", () => {
+    const acquiring = beginLiveDisplay(initialLiveDisplay(archiveFrame), 2, "KTLX", true);
+    const currentArchiveFrame = {
+      ...archiveFrame,
+      observationId: "c".repeat(32),
+      observedAtUnixMs: 5,
+      paintedAtUnixMs: 6,
+    };
+    const synchronized = retainPaintedFallback(acquiring, currentArchiveFrame);
+    const degraded = failLiveDisplay(synchronized, 2, "provider timeout");
+
+    expect(degraded.kind).toBe("degraded");
+    expect(degraded.lastComplete).toEqual(currentArchiveFrame);
+    expect(degraded.lastComplete).not.toEqual(archiveFrame);
   });
 
   it("ignores late publication and failure from a superseded site generation", () => {

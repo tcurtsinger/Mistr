@@ -49,6 +49,7 @@ import {
   failLiveDisplay,
   initialLiveDisplay,
   publishLiveDisplay,
+  retainPaintedFallback,
   type LiveDisplayState,
   type PaintedFrameTruth,
 } from "./live/liveDisplayState";
@@ -149,6 +150,19 @@ export function App() {
     const publishPhase5 = (report: Phase5Report) => {
       latestPhase5 = report;
       if (!cancelled) setPhase5(report);
+    };
+
+    const synchronizeArchiveFallback = (renderer: RadarRendererSnapshot) => {
+      const receipt = renderer.paintReceipt;
+      const paintedModel = receipt ? modelsById.get(receipt.observationId) : undefined;
+      if (!receipt || paintedModel?.sourceKind !== "nexrad_level2_archive_ii") return;
+      const synchronized = retainPaintedFallback(
+        liveDisplay,
+        frameTruth(paintedModel, receipt),
+      );
+      if (synchronized === liveDisplay) return;
+      liveDisplay = synchronized;
+      publishPhase5({ ...latestPhase5, display: synchronized });
     };
 
     const publish = (patch: Partial<Phase4Report> = {}) => {
@@ -317,6 +331,7 @@ export function App() {
       };
       layer = new RadarCustomLayer(models, {
         onSnapshot(renderer) {
+          synchronizeArchiveFallback(renderer);
           publish({
             renderer,
             playback: controller?.snapshot(),
