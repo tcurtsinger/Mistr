@@ -19,6 +19,35 @@ export interface Phase4ActivitySnapshot {
   bulkIpcBytes: number;
 }
 
+export interface AcquisitionCounters {
+  networkRequests: number;
+  responseBytes: number;
+}
+
+export interface SafeSweepEvidence {
+  generation: number;
+  site: string;
+  volumeIndex: number;
+  volumeStartedAtUnixMs: number;
+  safeSequence: number;
+  safeChunkLastModifiedUnixMs: number;
+  discoveredAtUnixMs: number;
+  decodeStartedAtUnixMs: number;
+  decodeCompletedAtUnixMs: number;
+  decoderAttempts: number;
+  gapObservations: number;
+  duplicateObservations: number;
+  acquisitionDelta: AcquisitionCounters;
+}
+
+export interface Phase5LiveTransferEvidence {
+  observationId: string;
+  sourceKind: "nexrad_level2_chunks";
+  packedBytes: number;
+  publishedAtUnixMs: number;
+  safe: SafeSweepEvidence;
+}
+
 export interface TimingDistribution {
   min: number;
   p50: number;
@@ -192,6 +221,41 @@ export class PackedSweepTransferClient {
     return this.requestFromCommand("request_phase4_fixture_sweep", 0, false, fixtureId);
   }
 
+  async requestPhase5Live(
+    site: string,
+    freshOnly = false,
+    timeoutSeconds = 180,
+  ): Promise<PackedSweepLease> {
+    if (!/^[A-Z0-9]{4}$/.test(site)) {
+      throw new TypeError("site must be exactly four uppercase ASCII letters/digits");
+    }
+    if (!Number.isInteger(timeoutSeconds) || timeoutSeconds < 10 || timeoutSeconds > 900) {
+      throw new RangeError("timeoutSeconds must be an integer between 10 and 900");
+    }
+    return this.requestFromCommand(
+      "request_phase5_live_sweep",
+      0,
+      false,
+      undefined,
+      { site, freshOnly, timeoutSeconds },
+    );
+  }
+
+  async phase5LiveEvidence(observationId: string): Promise<Phase5LiveTransferEvidence> {
+    this.assertSessionOpen();
+    if (!this.active || this.generation === 0) {
+      throw new TransferClientError("generation_not_active", "no generation is active");
+    }
+    if (!/^[a-f0-9]{32}$/.test(observationId)) {
+      throw new TypeError("observationId must be a 32-character lowercase hex digest");
+    }
+    return this.invoke<Phase5LiveTransferEvidence>("phase5_live_evidence", {
+      session: this.session,
+      generation: this.generation,
+      observationId,
+    });
+  }
+
   async phase4ActivitySnapshot(): Promise<Phase4ActivitySnapshot> {
     return this.invoke<Phase4ActivitySnapshot>("phase4_activity_snapshot");
   }
@@ -200,10 +264,12 @@ export class PackedSweepTransferClient {
     command:
       | "request_phase2_benchmark_sweep"
       | "request_phase3_fixture_sweep"
-      | "request_phase4_fixture_sweep",
+      | "request_phase4_fixture_sweep"
+      | "request_phase5_live_sweep",
     holdMs: number,
     includeHold: boolean,
     fixtureId?: string,
+    extraArguments?: Record<string, unknown>,
   ): Promise<PackedSweepLease> {
     this.assertSessionOpen();
     await this.flushPendingReleaseAcks();
@@ -223,6 +289,7 @@ export class PackedSweepTransferClient {
       const arguments_: Record<string, unknown> = {
         session,
         generation,
+        ...extraArguments,
       };
       if (includeHold) {
         arguments_.holdMs = holdMs;

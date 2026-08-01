@@ -21,7 +21,10 @@ export interface RadarSweepCpuModel {
   siteIcao: string;
   product: "reflectivity";
   units: "dBZ";
-  sourceKind: "nexrad_level2_archive_ii" | "mistr_phase2_synthetic";
+  sourceKind:
+    | "nexrad_level2_archive_ii"
+    | "nexrad_level2_chunks"
+    | "mistr_phase2_synthetic";
   generation: bigint;
   observedAtUnixMs: number;
   volumeEndedAtUnixMs: number;

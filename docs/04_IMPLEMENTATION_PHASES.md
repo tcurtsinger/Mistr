@@ -173,6 +173,8 @@ Prove the core game-loop property: after loading, playback is GPU-resident and i
 
 ## Phase 5 — Real-time chunks and latency comparison
 
+**Status:** Complete on the primary Windows workstation. See [`phase-reports/PHASE_5_REALTIME_CHUNKS.md`](phase-reports/PHASE_5_REALTIME_CHUNKS.md) and [`17_REALTIME_FRESHNESS_AND_FALLBACK_DECISION.md`](17_REALTIME_FRESHNESS_AND_FALLBACK_DECISION.md).
+
 ### Objective
 
 Prove a reliable live acquisition path and measure whether it improves freshness.

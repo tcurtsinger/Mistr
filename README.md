@@ -11,7 +11,7 @@ The target is a Windows desktop storm command center with game-loop-style playba
 
 ## Status
 
-**Prototype only.** Phases 0 through 4 are complete on the primary Windows workstation. The current build decodes 20 hash-pinned real KTLX observations, retains about 50.64 MiB of compact CPU truth, uploads about 50.64 MiB of known GPU resources, and proves 2,000 packaged 4K receipt-gated hard cuts with zero radar hot-path I/O/decode/IPC and no measured long tasks. Live chunks, velocity parity, context recovery, fallback, multi-machine evidence, and GustAVO integration still have explicit later gates.
+**Prototype only.** Phases 0 through 5 are complete on the primary Windows workstation. The build retains the Phase 4 proof of 20 GPU-resident real observations and adds bounded, cancellable acquisition from the public real-time Level II chunk bucket. A live frame is exposed only after the lowest sweep has a verified physical boundary, and the packaged app replaces visible radar only after an authoritative GPU receipt. Velocity parity, context recovery, multi-machine evidence, and GustAVO integration still have explicit later gates.
 
 Start with [the documentation index](docs/README.md) and [prototype charter](docs/00_PROTOTYPE_CHARTER.md).
 
@@ -76,6 +76,22 @@ npm run test:phase4:packaged
 ```
 
 The runner performs two 1,000-transition interaction scenarios and five atomic loop replacements per scenario. Its ignored evidence is written under `artifacts/phase-4/`. The contract and results are documented in the [resident playback decision](docs/16_RESIDENT_PLAYBACK_DECISION.md) and [Phase 4 report](docs/phase-reports/PHASE_4_RESIDENT_PLAYBACK.md).
+
+## Phase 5 live gate
+
+Run the release/WebView2 live acquisition, site-supersession, and 4K GPU-paint gate with:
+
+```powershell
+npm run test:phase5:packaged
+```
+
+Run a source-only observation probe without the WebView with:
+
+```powershell
+cargo run --release --locked --manifest-path src-tauri\Cargo.toml --bin mistr-live-probe -- --site KTLX --fresh --timeout-seconds 900 --output artifacts\phase-5\live\KTLX.json
+```
+
+The probe uses anonymous fixed-host HTTPS only. Raw chunks, executables, provider responses, and packaged screenshots remain ignored; the reviewed latency dataset contains only bounded public metadata and hashes. See the [real-time decision](docs/17_REALTIME_FRESHNESS_AND_FALLBACK_DECISION.md) and [Phase 5 report](docs/phase-reports/PHASE_5_REALTIME_CHUNKS.md).
 
 ## Public-repository rules
 

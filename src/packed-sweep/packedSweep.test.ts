@@ -102,6 +102,14 @@ describe("parsePackedSweep", () => {
     await expectCode(parsePackedSweep(flags), "invalid_encoding");
   });
 
+  it("recognizes the Phase 5 real-time chunk source code", async () => {
+    const bytes = golden();
+    new DataView(bytes.buffer).setUint16(26, 3, true);
+    await rewriteHash(bytes);
+    const packed = await parsePackedSweep(bytes);
+    expect(packed.metadata.sourceKind).toBe("nexrad_level2_chunks");
+  });
+
   it("rejects payload corruption by hash", async () => {
     const bytes = golden();
     bytes[PACKED_SWEEP_HEADER_BYTES + 4] ^= 1;

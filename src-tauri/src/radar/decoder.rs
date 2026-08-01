@@ -6,8 +6,9 @@ use bzip2::read::BzDecoder;
 use chrono::{DateTime, Utc};
 use flate2::read::MultiGzDecoder;
 use nexrad_data::volume::{File as VolumeFile, Header};
-use nexrad_model::data::{DataMoment, MomentData, MomentValue, Scan, Sweep};
+use nexrad_model::data::{DataMoment, MomentData, MomentValue, RadialStatus, Scan, Sweep};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeSet;
 use std::io::{self, Read};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use thiserror::Error;
@@ -84,6 +85,8 @@ pub enum DecodeError {
     MissingSite,
     #[error("selected sweep contains no radials")]
     EmptySweep,
+    #[error("lowest sweep is not safe to publish: {0}")]
+    IncompleteSweep(String),
     #[error("selected sweep has invalid numeric metadata: {0}")]
     InvalidMetadata(String),
     #[error(
@@ -112,13 +115,45 @@ pub enum DecodeError {
 /// Decode a bounded Archive II byte slice and normalize its lowest available
 /// elevation for `product`.
 pub fn decode_level2(input: &[u8], product: RadarProduct) -> Result<DecodeOutput, DecodeError> {
-    decode_level2_with_limits(input, product, DecodeLimits::default())
+    decode_level2_internal(
+        input,
+        product,
+        DecodeLimits::default(),
+        "nexrad_level2_archive_ii",
+        false,
+    )
 }
 
+/// Decode progressively assembled real-time chunks only after the selected
+/// lowest sweep contains explicit start and end radial boundaries.
+pub fn decode_safe_lowest_sweep(
+    input: &[u8],
+    product: RadarProduct,
+) -> Result<DecodeOutput, DecodeError> {
+    decode_level2_internal(
+        input,
+        product,
+        DecodeLimits::default(),
+        "nexrad_level2_chunks",
+        true,
+    )
+}
+
+#[cfg(test)]
 fn decode_level2_with_limits(
     input: &[u8],
     product: RadarProduct,
     limits: DecodeLimits,
+) -> Result<DecodeOutput, DecodeError> {
+    decode_level2_internal(input, product, limits, "nexrad_level2_archive_ii", false)
+}
+
+fn decode_level2_internal(
+    input: &[u8],
+    product: RadarProduct,
+    limits: DecodeLimits,
+    source_kind: &'static str,
+    require_complete_lowest_sweep: bool,
 ) -> Result<DecodeOutput, DecodeError> {
     if input.is_empty() {
         return Err(DecodeError::EmptyInput);
@@ -150,7 +185,11 @@ fn decode_level2_with_limits(
         Err(payload) => return Err(DecodeError::ThirdPartyPanic(panic_message(payload))),
     };
 
-    let sweep = normalize_scan(&scan, product, &source_sha256, limits)?;
+    if require_complete_lowest_sweep {
+        validate_lowest_sweep_complete(&scan, product)?;
+    }
+    let mut sweep = normalize_scan(&scan, product, &source_sha256, limits)?;
+    sweep.source_kind = source_kind;
     Ok(DecodeOutput {
         sweep,
         evidence: DecodeEvidence {
@@ -313,8 +352,13 @@ fn normalize_scan(
     source_sha256: &str,
     limits: DecodeLimits,
 ) -> Result<NormalizedSweep, DecodeError> {
-    let (_, selected) = scan
-        .sweeps()
+    let selected = select_lowest_sweep(scan, product)?;
+
+    normalize_sweep(scan, selected, product, source_sha256, limits)
+}
+
+fn select_lowest_sweep(scan: &Scan, product: RadarProduct) -> Result<&Sweep, DecodeError> {
+    scan.sweeps()
         .iter()
         .enumerate()
         .filter_map(|(index, sweep)| {
@@ -336,12 +380,57 @@ fn normalize_scan(
                 .total_cmp(&right.1)
                 .then_with(|| left.0.cmp(&right.0))
         })
-        .map(|(index, _, sweep)| (index, sweep))
+        .map(|(_, _, sweep)| sweep)
         .ok_or(DecodeError::MissingProduct {
             product: product.canonical_name(),
-        })?;
+        })
+}
 
-    normalize_sweep(scan, selected, product, source_sha256, limits)
+fn validate_lowest_sweep_complete(scan: &Scan, product: RadarProduct) -> Result<(), DecodeError> {
+    let sweep = select_lowest_sweep(scan, product)?;
+    validate_sweep_boundaries(sweep)
+}
+
+fn validate_sweep_boundaries(sweep: &Sweep) -> Result<(), DecodeError> {
+    let radials = sweep.radials();
+    let first = radials.first().ok_or(DecodeError::EmptySweep)?;
+    let last = radials.last().ok_or(DecodeError::EmptySweep)?;
+    if !matches!(
+        first.radial_status(),
+        RadialStatus::ScanStart
+            | RadialStatus::ElevationStart
+            | RadialStatus::ElevationStartVCPFinal
+    ) {
+        return Err(DecodeError::IncompleteSweep(
+            "first radial does not declare a sweep-start boundary".into(),
+        ));
+    }
+    if !matches!(
+        last.radial_status(),
+        RadialStatus::ElevationEnd | RadialStatus::ScanEnd
+    ) {
+        return Err(DecodeError::IncompleteSweep(
+            "last radial does not declare a sweep-end boundary".into(),
+        ));
+    }
+    if radials
+        .iter()
+        .any(|radial| matches!(radial.radial_status(), RadialStatus::Unknown(_)))
+    {
+        return Err(DecodeError::IncompleteSweep(
+            "selected sweep contains an unknown radial status".into(),
+        ));
+    }
+    let unique_azimuths = radials
+        .iter()
+        .map(|radial| radial.azimuth_number())
+        .collect::<BTreeSet<_>>();
+    if unique_azimuths.len() != radials.len() {
+        return Err(DecodeError::IncompleteSweep(
+            "selected sweep contains duplicate source azimuth numbers".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn normalize_sweep(
@@ -847,6 +936,88 @@ mod tests {
             None,
             None,
         )
+    }
+
+    fn boundary_radial(azimuth_number: u16, status: RadialStatus) -> Radial {
+        Radial::new(
+            1_800_000_000_000 + i64::from(azimuth_number),
+            azimuth_number,
+            f32::from(azimuth_number),
+            1.0,
+            status,
+            1,
+            0.5,
+            Some(MomentData::from_fixed_point(
+                1,
+                0,
+                250,
+                8,
+                2.0,
+                66.0,
+                vec![68],
+            )),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+    }
+
+    #[test]
+    fn progressive_sweep_requires_explicit_start_and_end_boundaries() {
+        let incomplete = Sweep::new(
+            1,
+            vec![
+                boundary_radial(1, RadialStatus::ScanStart),
+                boundary_radial(2, RadialStatus::IntermediateRadialData),
+            ],
+        );
+        assert!(matches!(
+            validate_sweep_boundaries(&incomplete),
+            Err(DecodeError::IncompleteSweep(message))
+                if message.contains("sweep-end boundary")
+        ));
+
+        let complete = Sweep::new(
+            1,
+            vec![
+                boundary_radial(1, RadialStatus::ScanStart),
+                boundary_radial(2, RadialStatus::ElevationEnd),
+            ],
+        );
+        assert_eq!(validate_sweep_boundaries(&complete), Ok(()));
+    }
+
+    #[test]
+    fn progressive_sweep_rejects_unknown_status_and_duplicate_azimuths() {
+        let unknown = Sweep::new(
+            1,
+            vec![
+                boundary_radial(1, RadialStatus::ScanStart),
+                boundary_radial(2, RadialStatus::Unknown(99)),
+                boundary_radial(3, RadialStatus::ElevationEnd),
+            ],
+        );
+        assert!(matches!(
+            validate_sweep_boundaries(&unknown),
+            Err(DecodeError::IncompleteSweep(message))
+                if message.contains("unknown radial status")
+        ));
+
+        let duplicate = Sweep::new(
+            1,
+            vec![
+                boundary_radial(1, RadialStatus::ScanStart),
+                boundary_radial(1, RadialStatus::ElevationEnd),
+            ],
+        );
+        assert!(matches!(
+            validate_sweep_boundaries(&duplicate),
+            Err(DecodeError::IncompleteSweep(message))
+                if message.contains("duplicate source azimuth")
+        ));
     }
 
     #[test]

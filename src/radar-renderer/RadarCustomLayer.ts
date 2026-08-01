@@ -477,30 +477,32 @@ export class RadarCustomLayer implements CustomLayerInterface {
     const currentKey = this.models[0];
     const replacementKey = models[0];
     validateReplacementGeneration(generationNumber(currentKey), generationNumber(replacementKey));
-    if (
-      currentKey.siteIcao !== replacementKey.siteIcao
-      || currentKey.product !== replacementKey.product
-      || currentKey.sourceKind !== replacementKey.sourceKind
-      || currentKey.scale !== replacementKey.scale
-      || currentKey.offset !== replacementKey.offset
-      || currentKey.center.longitude !== replacementKey.center.longitude
-      || currentKey.center.latitude !== replacementKey.center.latitude
-      || Math.max(...models.map((model) => model.maxRangeM))
-        > Math.max(...this.models.map((model) => model.maxRangeM))
-    ) {
-      throw new RadarRendererError("replacement changes the allocated radar render key or bounds");
+    if (currentKey.product !== replacementKey.product) {
+      throw new RadarRendererError("replacement changes the renderer product");
     }
 
     const gl = this.gl;
     const palette = buildReflectivityPalette(replacementKey.scale, replacementKey.offset);
     const pendingFrames = new Map<string, RadarFrameResources>();
+    let pendingPalette: WebGLTexture | null = null;
     const previousUnpack = gl.getParameter(gl.UNPACK_ALIGNMENT) as number;
     const previousActive = gl.getParameter(gl.ACTIVE_TEXTURE) as number;
     const previousTexture = gl.getParameter(gl.TEXTURE_BINDING_2D) as WebGLTexture | null;
+    const previousArrayBuffer = gl.getParameter(gl.ARRAY_BUFFER_BINDING) as WebGLBuffer | null;
     try {
       gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+      pendingPalette = createTexture2d(
+        gl,
+        256,
+        1,
+        gl.RGBA8,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        palette,
+        "replacement palette upload",
+      );
       for (const model of models) {
-        const frame = createFrameResources(gl, model, this.paletteTexture, palette);
+        const frame = createFrameResources(gl, model, pendingPalette, palette);
         pendingFrames.set(model.observationId, frame);
         this.frameUploadCount += 1;
         this.frameUploadBytes += frame.gpuBytes;
@@ -509,25 +511,33 @@ export class RadarCustomLayer implements CustomLayerInterface {
         .reduce((total, frame) => total + frame.gpuBytes, 0);
       this.peakGpuResourceBytes = Math.max(
         this.peakGpuResourceBytes,
-        this.currentGpuResourceBytes() + pendingBytes,
+        this.currentGpuResourceBytes() + pendingBytes + 256 * 4,
       );
+      if (!this.quadBuffer) throw new RadarRendererError("renderer quad buffer is unavailable");
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.quadBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, mercatorQuadVertices(models), gl.STATIC_DRAW);
     } catch (error) {
       deleteFrameResources(gl, pendingFrames.values());
+      if (pendingPalette) gl.deleteTexture(pendingPalette);
       throw error;
     } finally {
       gl.pixelStorei(gl.UNPACK_ALIGNMENT, previousUnpack);
       gl.activeTexture(previousActive);
       gl.bindTexture(gl.TEXTURE_2D, previousTexture);
+      gl.bindBuffer(gl.ARRAY_BUFFER, previousArrayBuffer);
     }
 
     const previousFrames = this.frameResources;
+    const previousPalette = this.paletteTexture;
     this.frameResources = pendingFrames;
+    this.paletteTexture = pendingPalette;
     this.models = [...models];
     this.selectedObservationId = models[0].observationId;
     this.selectionSequence += 1;
     this.selectedAt = performance.now();
     this.textureValidation = pendingFrames.get(this.selectedObservationId)?.textureValidation;
     deleteFrameResources(gl, previousFrames.values());
+    gl.deleteTexture(previousPalette);
     previousFrames.clear();
     this.map?.triggerRepaint();
     this.emit("ready");
@@ -536,18 +546,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
   private createResources(gl: WebGL2RenderingContext) {
     if (!this.program) throw new RadarRendererError("renderer program is unavailable");
     const primary = this.models[0];
-    const bounds = buildMercatorBounds(
-      primary.center,
-      Math.max(...this.models.map((model) => model.maxRangeM)),
-    );
-    const vertices = new Float32Array([
-      bounds.west, bounds.north,
-      bounds.east, bounds.north,
-      bounds.west, bounds.south,
-      bounds.west, bounds.south,
-      bounds.east, bounds.north,
-      bounds.east, bounds.south,
-    ]);
+    const vertices = mercatorQuadVertices(this.models);
     const previousVao = gl.getParameter(gl.VERTEX_ARRAY_BINDING) as WebGLVertexArrayObject | null;
     const previousArrayBuffer = gl.getParameter(gl.ARRAY_BUFFER_BINDING) as WebGLBuffer | null;
     try {
@@ -886,6 +885,22 @@ export function validateResidentModels(models: readonly RadarSweepCpuModel[]): v
     }
     priorObservedAt = model.observedAtUnixMs;
   }
+}
+
+function mercatorQuadVertices(models: readonly RadarSweepCpuModel[]): Float32Array {
+  const primary = models[0];
+  const bounds = buildMercatorBounds(
+    primary.center,
+    Math.max(...models.map((model) => model.maxRangeM)),
+  );
+  return new Float32Array([
+    bounds.west, bounds.north,
+    bounds.east, bounds.north,
+    bounds.west, bounds.south,
+    bounds.west, bounds.south,
+    bounds.east, bounds.north,
+    bounds.east, bounds.south,
+  ]);
 }
 
 export function validateReplacementGeneration(current: number, replacement: number): void {

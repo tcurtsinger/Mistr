@@ -1,3 +1,5 @@
+use crate::acquisition::PublicRadarClient;
+use crate::live_pipeline::{GenerationClock, GenerationToken, LiveSweepSession, SafeSweepEvidence};
 use crate::packed_sweep::{
     PackedSweepIdentity, PackedSweepSummary, encode_packed_sweep, phase2_benchmark_sweep,
     validate_packed_sweep,
@@ -63,6 +65,8 @@ struct TransferState {
     acknowledged_release_ids: BTreeSet<String>,
     in_flight_credits_by_session: BTreeMap<u64, u8>,
     phase4_activity: Phase4ActivitySnapshot,
+    live_generation_token: Option<GenerationToken>,
+    phase5_evidence_by_observation: BTreeMap<String, Phase5LiveTransferEvidence>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
@@ -74,6 +78,16 @@ pub struct Phase4ActivitySnapshot {
     pub normalization_runs: u64,
     pub bulk_ipc_transfers: u64,
     pub bulk_ipc_bytes: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Phase5LiveTransferEvidence {
+    pub observation_id: String,
+    pub source_kind: &'static str,
+    pub packed_bytes: usize,
+    pub published_at_unix_ms: i64,
+    pub safe: SafeSweepEvidence,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -98,6 +112,10 @@ impl TransferBroker {
                 "the current document still owns transfer credits; only a native page-load epoch can reclaim them",
             ));
         }
+        if let Some(token) = state.live_generation_token.take() {
+            token.cancel();
+        }
+        state.phase5_evidence_by_observation.clear();
         state.session = state.session.checked_add(1).ok_or_else(|| {
             TransferError::new("session_exhausted", "frontend session counter exhausted")
         })?;
@@ -118,6 +136,10 @@ impl TransferBroker {
         })?;
         state.session_document_epoch = 0;
         state.active = false;
+        if let Some(token) = state.live_generation_token.take() {
+            token.cancel();
+        }
+        state.phase5_evidence_by_observation.clear();
         // Tauri's native page-load start proves the previous JavaScript
         // document is being replaced. Its delivered buffers are now orphaned;
         // native work remains charged to its exact session until completion.
@@ -144,8 +166,16 @@ impl TransferBroker {
                 ),
             ));
         }
+        if let Some(token) = state.live_generation_token.take() {
+            token.cancel();
+        }
+        let token = GenerationClock::default()
+            .begin(generation)
+            .map_err(|error| TransferError::new("generation_token_failed", error.to_string()))?;
         state.generation = generation;
         state.active = true;
+        state.live_generation_token = Some(token);
+        state.phase5_evidence_by_observation.clear();
         Ok(snapshot(&state))
     }
 
@@ -153,6 +183,9 @@ impl TransferBroker {
         let mut state = self.lock()?;
         ensure_current(&state, session, generation)?;
         state.active = false;
+        if let Some(token) = state.live_generation_token.take() {
+            token.cancel();
+        }
         Ok(snapshot(&state))
     }
 
@@ -214,45 +247,62 @@ impl TransferBroker {
 
     fn complete_for_publish(&self, session: u64, generation: u64) -> Result<(), TransferError> {
         let mut state = self.lock()?;
-        let publication_error = if session != state.session {
-            Some(TransferError::new(
-                "stale_session",
-                format!(
-                    "session {session} is stale; current session is {}",
-                    state.session
-                ),
-            ))
-        } else if generation != state.generation {
-            Some(TransferError::new(
-                "stale_generation",
-                format!(
-                    "generation {generation} is stale; current generation is {}",
-                    state.generation
-                ),
-            ))
-        } else if !state.active {
-            Some(TransferError::new(
+        complete_for_publish_locked(&mut state, session, generation)
+    }
+
+    fn live_generation_token(
+        &self,
+        session: u64,
+        generation: u64,
+    ) -> Result<GenerationToken, TransferError> {
+        let state = self.lock()?;
+        ensure_current(&state, session, generation)?;
+        if !state.active {
+            return Err(TransferError::new(
                 "generation_cancelled",
                 format!("generation {generation} is cancelled"),
-            ))
-        } else {
-            None
-        };
-        if !take_in_flight_credit(&mut state, session) {
-            return Err(TransferError::new(
-                "transfer_state_invalid",
-                format!("session {session} completed work without an in-flight credit"),
             ));
         }
-        if let Some(error) = publication_error {
-            Err(error)
-        } else {
-            *state
-                .held_credits_by_owner
-                .entry((session, generation))
-                .or_default() += 1;
-            Ok(())
-        }
+        state.live_generation_token.clone().ok_or_else(|| {
+            TransferError::new(
+                "generation_token_missing",
+                "active generation has no live acquisition token",
+            )
+        })
+    }
+
+    fn complete_phase5_for_publish(
+        &self,
+        session: u64,
+        generation: u64,
+        evidence: Phase5LiveTransferEvidence,
+    ) -> Result<(), TransferError> {
+        let mut state = self.lock()?;
+        complete_for_publish_locked(&mut state, session, generation)?;
+        state
+            .phase5_evidence_by_observation
+            .insert(evidence.observation_id.clone(), evidence);
+        Ok(())
+    }
+
+    fn phase5_live_evidence(
+        &self,
+        session: u64,
+        generation: u64,
+        observation_id: &str,
+    ) -> Result<Phase5LiveTransferEvidence, TransferError> {
+        let state = self.lock()?;
+        ensure_current(&state, session, generation)?;
+        state
+            .phase5_evidence_by_observation
+            .get(observation_id)
+            .cloned()
+            .ok_or_else(|| {
+                TransferError::new(
+                    "phase5_evidence_not_found",
+                    format!("no live evidence exists for observation {observation_id}"),
+                )
+            })
     }
 
     fn snapshot(&self) -> Result<TransferSnapshot, TransferError> {
@@ -297,6 +347,52 @@ impl TransferBroker {
                 "transfer state is unavailable after an internal panic",
             )
         })
+    }
+}
+
+fn complete_for_publish_locked(
+    state: &mut TransferState,
+    session: u64,
+    generation: u64,
+) -> Result<(), TransferError> {
+    let publication_error = if session != state.session {
+        Some(TransferError::new(
+            "stale_session",
+            format!(
+                "session {session} is stale; current session is {}",
+                state.session
+            ),
+        ))
+    } else if generation != state.generation {
+        Some(TransferError::new(
+            "stale_generation",
+            format!(
+                "generation {generation} is stale; current generation is {}",
+                state.generation
+            ),
+        ))
+    } else if !state.active {
+        Some(TransferError::new(
+            "generation_cancelled",
+            format!("generation {generation} is cancelled"),
+        ))
+    } else {
+        None
+    };
+    if !take_in_flight_credit(state, session) {
+        return Err(TransferError::new(
+            "transfer_state_invalid",
+            format!("session {session} completed work without an in-flight credit"),
+        ));
+    }
+    if let Some(error) = publication_error {
+        Err(error)
+    } else {
+        *state
+            .held_credits_by_owner
+            .entry((session, generation))
+            .or_default() += 1;
+        Ok(())
     }
 }
 
@@ -463,6 +559,16 @@ pub fn phase4_activity_snapshot(
 }
 
 #[tauri::command]
+pub fn phase5_live_evidence(
+    state: tauri::State<'_, TransferBroker>,
+    session: u64,
+    generation: u64,
+    observation_id: String,
+) -> Result<Phase5LiveTransferEvidence, TransferError> {
+    state.phase5_live_evidence(session, generation, &observation_id)
+}
+
+#[tauri::command]
 pub async fn request_phase2_benchmark_sweep(
     state: tauri::State<'_, TransferBroker>,
     session: u64,
@@ -581,6 +687,75 @@ pub async fn request_phase4_fixture_sweep(
     // Publication already converted the in-flight credit into a delivered
     // credit. It remains releasable by the client if this diagnostic update fails.
     broker.record_phase4_bulk_ipc(bytes.len())?;
+    Ok(Response::new(bytes))
+}
+
+#[tauri::command]
+pub async fn request_phase5_live_sweep(
+    state: tauri::State<'_, TransferBroker>,
+    session: u64,
+    generation: u64,
+    site: String,
+    fresh_only: bool,
+    timeout_seconds: u64,
+) -> Result<Response, TransferError> {
+    if !(10..=900).contains(&timeout_seconds) {
+        return Err(TransferError::new(
+            "invalid_live_timeout",
+            "live timeout must be between 10 and 900 seconds",
+        ));
+    }
+    let broker = state.inner().clone();
+    broker.acquire(session, generation)?;
+
+    let result = async {
+        let token = broker.live_generation_token(session, generation)?;
+        let client = PublicRadarClient::new()
+            .map_err(|error| TransferError::new("live_client_failed", error.to_string()))?;
+        let mut live = LiveSweepSession::start(client, token, &site, fresh_only)
+            .await
+            .map_err(|error| TransferError::new("live_start_failed", error.to_string()))?;
+        let safe = live
+            .wait_for_safe_sweep(Duration::from_secs(timeout_seconds))
+            .await
+            .map_err(|error| TransferError::new("live_sweep_failed", error.to_string()))?;
+        let safe_evidence = safe.evidence;
+        let bytes = tauri::async_runtime::spawn_blocking(move || {
+            encode_packed_sweep(&safe.output.sweep, PackedSweepIdentity { generation })
+                .map_err(|error| TransferError::new("wire_encode_failed", error.to_string()))
+        })
+        .await
+        .map_err(|error| TransferError::new("backend_task_failed", error.to_string()))??;
+        let summary = validate_packed_sweep(&bytes)
+            .map_err(|error| TransferError::new("wire_validation_failed", error.to_string()))?;
+        if summary.source_kind != "nexrad_level2_chunks" {
+            return Err(TransferError::new(
+                "live_source_invalid",
+                format!(
+                    "live sweep encoded unexpected source {}",
+                    summary.source_kind
+                ),
+            ));
+        }
+        let evidence = Phase5LiveTransferEvidence {
+            observation_id: summary.observation_id,
+            source_kind: summary.source_kind,
+            packed_bytes: bytes.len(),
+            published_at_unix_ms: chrono::Utc::now().timestamp_millis(),
+            safe: safe_evidence,
+        };
+        Ok::<_, TransferError>((bytes, evidence))
+    }
+    .await;
+
+    let (bytes, evidence) = match result {
+        Ok(value) => value,
+        Err(error) => {
+            broker.finish_without_publish(session);
+            return Err(error);
+        }
+    };
+    broker.complete_phase5_for_publish(session, generation, evidence)?;
     Ok(Response::new(bytes))
 }
 
@@ -956,6 +1131,88 @@ mod tests {
 
     fn release_id(index: u8) -> String {
         format!("phase2-release-{index:02}")
+    }
+
+    fn phase5_evidence(generation: u64, observation_id: &str) -> Phase5LiveTransferEvidence {
+        Phase5LiveTransferEvidence {
+            observation_id: observation_id.into(),
+            source_kind: "nexrad_level2_chunks",
+            packed_bytes: 123,
+            published_at_unix_ms: 9,
+            safe: SafeSweepEvidence {
+                generation,
+                site: "KTLX".into(),
+                volume_index: 7,
+                volume_started_at_unix_ms: 1,
+                safe_sequence: 8,
+                safe_chunk_last_modified_unix_ms: 2,
+                discovered_at_unix_ms: 3,
+                decode_started_at_unix_ms: 4,
+                decode_completed_at_unix_ms: 5,
+                decoder_attempts: 1,
+                gap_observations: 0,
+                duplicate_observations: 0,
+                acquisition_delta: crate::acquisition::AcquisitionCounters {
+                    network_requests: 3,
+                    response_bytes: 456,
+                },
+            },
+        }
+    }
+
+    #[test]
+    fn phase5_generation_control_cancels_superseded_and_explicitly_cancelled_tokens() {
+        let broker = TransferBroker::default();
+        let session = opened(&broker);
+        broker.begin(session, 4).unwrap();
+        let old = broker.live_generation_token(session, 4).unwrap();
+        broker.begin(session, 8).unwrap();
+        assert!(!old.is_current());
+        let current = broker.live_generation_token(session, 8).unwrap();
+        assert!(current.is_current());
+        broker.cancel(session, 8).unwrap();
+        assert!(!current.is_current());
+        assert_eq!(
+            broker.live_generation_token(session, 8).unwrap_err().code,
+            "generation_cancelled"
+        );
+    }
+
+    #[test]
+    fn phase5_evidence_is_published_atomically_only_for_the_current_generation() {
+        let broker = TransferBroker::default();
+        let session = opened(&broker);
+        broker.begin(session, 1).unwrap();
+        broker.acquire(session, 1).unwrap();
+        broker
+            .complete_phase5_for_publish(session, 1, phase5_evidence(1, &"a".repeat(32)))
+            .unwrap();
+        assert_eq!(
+            broker
+                .phase5_live_evidence(session, 1, &"a".repeat(32))
+                .unwrap()
+                .safe
+                .generation,
+            1
+        );
+
+        broker.release(session, 1, &release_id(1)).unwrap();
+        broker.acquire(session, 1).unwrap();
+        broker.begin(session, 2).unwrap();
+        assert_eq!(
+            broker
+                .complete_phase5_for_publish(session, 1, phase5_evidence(1, &"b".repeat(32)),)
+                .unwrap_err()
+                .code,
+            "stale_generation"
+        );
+        assert_eq!(
+            broker
+                .phase5_live_evidence(session, 2, &"b".repeat(32))
+                .unwrap_err()
+                .code,
+            "phase5_evidence_not_found"
+        );
     }
 
     #[test]

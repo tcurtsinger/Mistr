@@ -117,6 +117,12 @@ Decision evidence: corpus inventory and renderer benchmark.
 
 ### Q004 — Real-time publication boundary
 
+**Resolved for Phase 5 reflectivity:** Publish after the decoder proves one complete lowest elevation with an explicit scan/elevation start, an explicit elevation/scan end, known radial statuses, unique source azimuth numbers, and complete reflectivity geometry. Do not wait for the rest of the volume solely for playback.
+
+The accepted boundary is conditional, not a general claim about every future product. Phase 5 compares the early sweep's raw codes, detailed gate statuses, and azimuths with the same sweep decoded again from the completed volume. Any future VCP/message/product that fails those invariants is rejected and falls back; it does not weaken the boundary.
+
+**Accepted record:** [`17_REALTIME_FRESHNESS_AND_FALLBACK_DECISION.md`](17_REALTIME_FRESHNESS_AND_FALLBACK_DECISION.md).
+
 Options:
 
 - Publish after the lowest elevation's end boundary and required metadata are verified.
@@ -218,3 +224,4 @@ Required ADRs before Phase 7:
 Additional accepted prototype ADRs:
 
 - [x] Resident playback, atomic replacement, and paint truth: [`16_RESIDENT_PLAYBACK_DECISION.md`](16_RESIDENT_PLAYBACK_DECISION.md).
+- [x] Real-time publication boundary and fallback: [`17_REALTIME_FRESHNESS_AND_FALLBACK_DECISION.md`](17_REALTIME_FRESHNESS_AND_FALLBACK_DECISION.md).

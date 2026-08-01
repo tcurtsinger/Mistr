@@ -239,3 +239,24 @@ Sources:
 - [MapLibre v6.0.0 release notes](https://github.com/maplibre/maplibre-gl-js/releases/tag/v6.0.0)
 - [WebGL 2.0 specification](https://registry.khronos.org/webgl/specs/latest/2.0/)
 - [Py-ART `antenna_to_cartesian` equations](https://arm-doe.github.io/pyart-docs-travis/API/generated/pyart.core.antenna_to_cartesian.html)
+
+## 7. Phase 5 real-time revalidation (2026-08-01 UTC)
+
+Phase 5 revalidated the source contract immediately before implementation rather than relying on the original proposal.
+
+- The AWS Open Data registry lists `unidata-nexrad-level2-chunks` as the Level II real-time bucket and `unidata-nexrad-level2` as the archive bucket. Both support anonymous access; new Level II data is described as being added when available.
+- NCEI documents that real-time Level II transmission uses several header/data blocks, with BZip2-compressed data sections, and that a full scan is formed by linking blocks in scanning order. Mistr therefore treats S3 objects as ordered source chunks, not independent radar frames.
+- The ROC Archive II/User ICD remains the authoritative binary-protocol reference. Mistr's third-party decoder stays behind a Mistr-owned adapter and never defines acquisition completion by “the decoder happened to return something.”
+- Direct anonymous listings on the implementation date showed the rotating `SITE/VOLUME/DATE-TIME-SEQUENCE-TYPE` key form. A captured KTLX volume contained start, intermediate, and end objects whose bounded concatenation decoded through the Phase 1 adapter. Raw bytes and full listings remain ignored.
+- Direct NOAA WMS and IEM inventory requests confirmed the exact comparison products used for the latency observation: NOAA's named selected-site `sr_bref` layer with second-resolution times, and IEM RIDGE `N0B` with minute-resolution times. These are observation comparators, not dependencies of live publication.
+
+Primary sources:
+
+- [NEXRAD on the AWS Registry of Open Data](https://registry.opendata.aws/noaa-nexrad/)
+- [NCEI radar decoding utilities and real-time BZip2 block description](https://www.ncei.noaa.gov/products/radar/decoding-utilities-examples)
+- [ROC Interface Control Documents](https://www.roc.noaa.gov/interface-control-documents.php)
+- [ROC Archive II/User ICD 2620010J](https://www.roc.noaa.gov/public-documents/icds/2620010J.pdf)
+
+### Revalidated limitation
+
+AWS `Last-Modified`, provider-inventory observation time, local discovery time, decode completion, and GPU receipt are different clocks. The committed Phase 5 dataset preserves those distinctions. NOAA/IEM are polled every five seconds, so a provider comparison has up to five seconds of observation uncertainty and cannot support sub-second ranking claims.

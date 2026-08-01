@@ -12,6 +12,8 @@ import {
   PackedSweepTransferClient,
   tauriInvokeFunction,
   type Phase4ActivitySnapshot,
+  type Phase5LiveTransferEvidence,
+  type TransferTiming,
 } from "./packed-sweep/transferClient";
 import {
   ResidentPlaybackController,
@@ -42,6 +44,14 @@ import {
   type RadarRendererSnapshot,
 } from "./radar-renderer/RadarCustomLayer";
 import { getRuntimeSnapshot, type RuntimeSnapshot } from "./runtime";
+import {
+  beginLiveDisplay,
+  failLiveDisplay,
+  initialLiveDisplay,
+  publishLiveDisplay,
+  type LiveDisplayState,
+  type PaintedFrameTruth,
+} from "./live/liveDisplayState";
 
 const MAP_STYLE = "https://tiles.openfreemap.org/styles/dark";
 const PHASE4_FRAME_COUNT = 20;
@@ -65,6 +75,7 @@ configureMapLibreWorker();
 export function App() {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<MapLibreMap | null>(null);
+  const acquireLiveRef = useRef<((site: string, freshOnly?: boolean) => Promise<Phase5Report>) | null>(null);
   const [runtime, setRuntime] = useState<RuntimeSnapshot>({
     shell: "browser",
     appVersion: "development",
@@ -72,6 +83,9 @@ export function App() {
   const [mapState, setMapState] = useState<MapReadiness>("INITIALIZING");
   const [mapLoaded, setMapLoaded] = useState(false);
   const [phase4, setPhase4] = useState<Phase4State>({ kind: "idle" });
+  const [phase5, setPhase5] = useState<Phase5Report>({
+    display: initialLiveDisplay(),
+  });
   const [interrogation, setInterrogation] = useState<GateInterrogation | null>(null);
 
   useEffect(() => {
@@ -127,7 +141,15 @@ export function App() {
     let clickHandler: ((event: MapMouseEvent) => void) | null = null;
     let latestReport: Phase4Report | null = null;
     let activeScenario: Promise<Phase4ScenarioReport> | null = null;
+    let transferGeneration = 1;
+    let liveDisplay = initialLiveDisplay();
+    let latestPhase5: Phase5Report = { display: liveDisplay };
     const modelsById = new Map<string, RadarSweepCpuModel>();
+
+    const publishPhase5 = (report: Phase5Report) => {
+      latestPhase5 = report;
+      if (!cancelled) setPhase5(report);
+    };
 
     const publish = (patch: Partial<Phase4Report> = {}) => {
       if (!latestReport || cancelled) return;
@@ -309,7 +331,11 @@ export function App() {
           publish({ playback, renderer: layer?.getSnapshot() });
         },
       });
-      await controller.establishInitialPaint();
+      const initialReceipt = await controller.establishInitialPaint();
+      const initialModel = modelsById.get(initialReceipt.observationId);
+      if (!initialModel) throw new Error("initial painted archive frame is unknown");
+      liveDisplay = initialLiveDisplay(frameTruth(initialModel, initialReceipt));
+      publishPhase5({ display: liveDisplay });
       const activityAtResidency = await client.phase4ActivitySnapshot();
       publish({
         renderer: layer.getSnapshot(),
@@ -357,6 +383,94 @@ export function App() {
         },
         layerOrder: () => currentLayerCoexistenceReport(instance).actualDiagnosticOrder,
       };
+      const acquireLive = async (
+        site: string,
+        freshOnly = false,
+        timeoutSeconds = freshOnly ? 900 : 180,
+      ): Promise<Phase5Report> => {
+        if (!layer || !controller || !client) throw new Error("live renderer is unavailable");
+        const activeLayer = layer;
+        const activeController = controller;
+        const activeClient = client;
+        const generation = Math.max(
+          transferGeneration + 1,
+          activeLayer.getSnapshot().generation + 1,
+        );
+        transferGeneration = generation;
+        liveDisplay = beginLiveDisplay(liveDisplay, generation, site, freshOnly);
+        publishPhase5({ display: liveDisplay });
+        let lease: Awaited<ReturnType<PackedSweepTransferClient["requestPhase5Live"]>> | undefined;
+        try {
+          await activeClient.begin(generation);
+          lease = await activeClient.requestPhase5Live(site, freshOnly, timeoutSeconds);
+          const model = createRadarSweepCpuModel(lease.packed);
+          if (model.sourceKind !== "nexrad_level2_chunks" || model.siteIcao !== site) {
+            throw new Error("live response does not match the requested NEXRAD site/source");
+          }
+          const evidence = await activeClient.phase5LiveEvidence(model.observationId);
+          if (
+            evidence.observationId !== model.observationId
+            || evidence.safe.generation !== generation
+            || evidence.safe.site !== site
+          ) {
+            throw new Error("live evidence does not match the decoded response");
+          }
+          if (transferGeneration !== generation) {
+            throw new Error(`live generation ${generation} was superseded before GPU publication`);
+          }
+          const liveAlignment = createAlignmentReport(model);
+          const liveAnchor = liveAlignment.anchors.find((anchor) => anchor.gateIndex > 0)
+            ?? liveAlignment.anchors[0];
+          const receipt = await activeController.replaceResidentFrames([model]);
+          if (receipt.observationId !== model.observationId || receipt.generation !== generation) {
+            throw new Error("GPU paint receipt does not match the live sweep");
+          }
+          modelsById.clear();
+          modelsById.set(model.observationId, model);
+          updateDiagnosticSources(instance, model, liveAlignment);
+          setInterrogation(interrogateLngLat(model, {
+            longitude: liveAnchor.longitude,
+            latitude: liveAnchor.latitude,
+          }));
+          liveDisplay = publishLiveDisplay(
+            liveDisplay,
+            generation,
+            frameTruth(model, receipt),
+          );
+          const report: Phase5Report = {
+            display: liveDisplay,
+            evidence,
+            receipt,
+            transferTiming: lease.timing,
+            renderer: activeLayer.getSnapshot(),
+          };
+          publishPhase5(report);
+          instance.jumpTo({
+            center: [model.center.longitude, model.center.latitude],
+            zoom: 5.8,
+            bearing: 0,
+            pitch: 0,
+          });
+          return report;
+        } catch (error) {
+          const priorDisplay = liveDisplay;
+          const failedDisplay = failLiveDisplay(
+            liveDisplay,
+            generation,
+            error instanceof Error ? error.message : String(error),
+          );
+          liveDisplay = failedDisplay;
+          if (failedDisplay !== priorDisplay) publishPhase5({ display: failedDisplay });
+          throw error;
+        } finally {
+          await lease?.release();
+        }
+      };
+      acquireLiveRef.current = (site, freshOnly) => acquireLive(site, freshOnly);
+      globalThis.__MISTR_PHASE5__ = {
+        report: () => latestPhase5,
+        acquire: acquireLive,
+      };
       controller.play();
     };
 
@@ -376,17 +490,21 @@ export function App() {
       controller?.dispose();
       if (clickHandler) instance.off("click", clickHandler);
       if (globalThis.__MISTR_PHASE4__) delete globalThis.__MISTR_PHASE4__;
+      if (globalThis.__MISTR_PHASE5__) delete globalThis.__MISTR_PHASE5__;
+      acquireLiveRef.current = null;
       removeDiagnosticLayers(instance, layer);
     };
   }, [mapLoaded, runtime.shell]);
 
-  const radarStatus = phase4.kind === "complete"
-    ? overallStatus(phase4.report)
-    : phase4.kind === "error"
-      ? "ERROR"
-      : phase4.kind === "running"
-        ? "RUNNING"
-        : "TAURI ONLY";
+  const radarStatus = phase5.display.kind === "painted"
+    ? "LIVE FRAME"
+    : phase4.kind === "complete"
+      ? overallStatus(phase4.report)
+      : phase4.kind === "error"
+        ? "ERROR"
+        : phase4.kind === "running"
+          ? "RUNNING"
+          : "TAURI ONLY";
 
   return (
     <main className="app-shell">
@@ -394,26 +512,36 @@ export function App() {
       <header className="top-rail">
         <div>
           <p className="eyebrow">NEXRAD RENDERING EXPERIMENT</p>
-          <h1>MISTR <span>PHASE 4</span></h1>
+          <h1>MISTR <span>PHASE 5</span></h1>
         </div>
         <div className="status-cluster" aria-label="Prototype status">
           <Status label="SHELL" value={runtime.shell.toUpperCase()} />
           <Status label="MAP" value={mapState} />
           <Status label="PLAYBACK" value={radarStatus} />
+          <Status label="LIVE" value={liveStatus(phase5.display)} />
         </div>
       </header>
       <section className="checkpoint" aria-labelledby="checkpoint-title">
         <p className="eyebrow">CURRENT CHECKPOINT</p>
-        <h2 id="checkpoint-title">Resident measured playback</h2>
+        <h2 id="checkpoint-title">Real-time Level II acquisition</h2>
         <p>
-          Twenty distinct KTLX observations are decoded once, retained in compact CPU
-          truth, uploaded together, and hard-cut only after a GPU paint receipt.
+          Public NEXRAD chunks are assembled under strict bounds. Only a complete,
+          safely bounded lowest sweep can replace the last GPU-painted frame.
         </p>
-        <Phase4Readout state={phase4} />
+        <button
+          className="live-action"
+          disabled={runtime.shell !== "tauri" || phase4.kind !== "complete" || phase5.display.kind === "acquiring"}
+          onClick={() => void acquireLiveRef.current?.("KTLX", false).catch(() => undefined)}
+          type="button"
+        >
+          ACQUIRE CURRENT KTLX
+        </button>
+        <Phase5Readout report={phase5} />
+        {phase5.display.kind === "idle" ? <Phase4Readout state={phase4} /> : null}
         <InterrogationReadout value={interrogation} />
       </section>
       <footer className="bottom-rail">
-        <span>KTLX / 20 MEASURED OBSERVATIONS / HARD CUT</span>
+        <span>REAL-TIME CHUNKS / SAFE LOWEST SWEEP / GPU PAINT RECEIPT</span>
         <span className="truth-label">PROTOTYPE - NOT OPERATIONAL</span>
       </footer>
     </main>
@@ -457,6 +585,14 @@ interface RendererActivitySnapshot {
   frameUploadBytes: number;
 }
 
+export interface Phase5Report {
+  display: LiveDisplayState;
+  evidence?: Phase5LiveTransferEvidence;
+  receipt?: RadarPaintReceipt;
+  transferTiming?: TransferTiming;
+  renderer?: RadarRendererSnapshot;
+}
+
 export interface Phase4Report {
   frames: Phase4FrameSummary;
   alignment: AlignmentReport;
@@ -472,6 +608,66 @@ type Phase4State =
   | { kind: "running"; stage: string }
   | { kind: "complete"; report: Phase4Report }
   | { kind: "error"; message: string };
+
+function Phase5Readout({ report }: { report: Phase5Report }) {
+  const { display } = report;
+  if (display.kind === "degraded") {
+    return (
+      <dl aria-label="Phase 5 live acquisition report">
+        <div><dt>LIVE RESULT</dt><dd>HOLDING LAST COMPLETE</dd></div>
+        <div><dt>RETAINED</dt><dd>{display.fallback.retainedSource.toUpperCase()}</dd></div>
+        <div><dt>NEXT FALLBACK</dt><dd>LEVEL II ARCHIVE</dd></div>
+        <div><dt>DETAIL</dt><dd>{display.message}</dd></div>
+      </dl>
+    );
+  }
+  if (display.kind !== "painted" || !report.evidence || !report.receipt) {
+    return (
+      <dl aria-label="Phase 5 live acquisition report">
+        <div><dt>LIVE RESULT</dt><dd>{display.kind === "acquiring" ? "ASSEMBLING SAFE SWEEP" : "READY"}</dd></div>
+        <div><dt>DISPLAY TRUTH</dt><dd>{display.lastComplete ? "LAST COMPLETE" : "WAITING"}</dd></div>
+        <div><dt>FALLBACK</dt><dd>ARCHIVE THEN TILES</dd></div>
+      </dl>
+    );
+  }
+  return (
+    <dl aria-label="Phase 5 live acquisition report">
+      <div><dt>LIVE RESULT</dt><dd>SAFE + PAINTED</dd></div>
+      <div><dt>SITE / VOLUME</dt><dd>{report.evidence.safe.site} / {report.evidence.safe.volumeIndex}</dd></div>
+      <div><dt>SAFE THROUGH</dt><dd>CHUNK {report.evidence.safe.safeSequence}</dd></div>
+      <div><dt>RADIALS</dt><dd>{report.renderer?.metrics?.residentFrameCount ? "GPU RESIDENT" : "WAITING"}</dd></div>
+      <div><dt>RAW TO DECODE</dt><dd>{formatMs(report.evidence.safe.decodeCompletedAtUnixMs - report.evidence.safe.safeChunkLastModifiedUnixMs)} ms</dd></div>
+      <div><dt>DECODE TO PAINT</dt><dd>{formatMs(report.receipt.completedAtUnixMs - report.evidence.safe.decodeCompletedAtUnixMs)} ms</dd></div>
+      <div><dt>GAPS / DUPES</dt><dd>{report.evidence.safe.gapObservations} / {report.evidence.safe.duplicateObservations}</dd></div>
+      <div><dt>NETWORK</dt><dd>{report.evidence.safe.acquisitionDelta.networkRequests} REQUESTS</dd></div>
+    </dl>
+  );
+}
+
+function liveStatus(display: LiveDisplayState): string {
+  switch (display.kind) {
+    case "idle": return "READY";
+    case "acquiring": return "ACQUIRING";
+    case "painted": return "SAFE + PAINTED";
+    case "degraded": return "LAST COMPLETE";
+  }
+}
+
+function frameTruth(model: RadarSweepCpuModel, receipt: RadarPaintReceipt): PaintedFrameTruth {
+  if (
+    model.sourceKind !== "nexrad_level2_archive_ii"
+    && model.sourceKind !== "nexrad_level2_chunks"
+  ) {
+    throw new Error(`unsupported display-truth source ${model.sourceKind}`);
+  }
+  return {
+    observationId: model.observationId,
+    site: model.siteIcao,
+    source: model.sourceKind,
+    observedAtUnixMs: model.observedAtUnixMs,
+    paintedAtUnixMs: receipt.completedAtUnixMs,
+  };
+}
 
 function Phase4Readout({ state }: { state: Phase4State }) {
   if (state.kind === "error") {
@@ -614,17 +810,9 @@ function installDiagnosticLayers(
   radarLayer: RadarCustomLayer,
   beforeId: string | undefined,
 ): void {
-  const ring = Array.from({ length: 181 }, (_, index) => {
-    const point = destinationPoint(model.center, index * 2, model.maxRangeM);
-    return [point.longitude, point.latitude];
-  });
   map.addSource(RANGE_SOURCE_ID, {
     type: "geojson",
-    data: {
-      type: "Feature",
-      properties: { role: "range-boundary" },
-      geometry: { type: "LineString", coordinates: ring },
-    },
+    data: rangeFeature(model),
   });
   addLayer(map, {
     id: RANGE_LAYER_ID,
@@ -640,17 +828,7 @@ function installDiagnosticLayers(
   addLayer(map, radarLayer, beforeId);
   map.addSource(ANCHOR_SOURCE_ID, {
     type: "geojson",
-    data: {
-      type: "FeatureCollection",
-      features: alignment.anchors.map((anchor) => ({
-        type: "Feature" as const,
-        properties: { id: anchor.id, radial: anchor.radialIndex, gate: anchor.gateIndex },
-        geometry: {
-          type: "Point" as const,
-          coordinates: [anchor.longitude, anchor.latitude],
-        },
-      })),
-    },
+    data: anchorFeatures(alignment),
   });
   addLayer(map, {
     id: ANCHOR_LAYER_ID,
@@ -664,6 +842,46 @@ function installDiagnosticLayers(
       "circle-opacity": 0.9,
     },
   }, beforeId);
+}
+
+function updateDiagnosticSources(
+  map: MapLibreMap,
+  model: RadarSweepCpuModel,
+  alignment: AlignmentReport,
+): void {
+  const range = map.getSource(RANGE_SOURCE_ID);
+  const anchors = map.getSource(ANCHOR_SOURCE_ID);
+  if (range?.type !== "geojson" || anchors?.type !== "geojson") {
+    throw new Error("radar diagnostic sources are unavailable during site replacement");
+  }
+  (range as maplibregl.GeoJSONSource).setData(rangeFeature(model));
+  (anchors as maplibregl.GeoJSONSource).setData(anchorFeatures(alignment));
+}
+
+function rangeFeature(model: RadarSweepCpuModel) {
+  const ring = Array.from({ length: 181 }, (_, index) => {
+    const point = destinationPoint(model.center, index * 2, model.maxRangeM);
+    return [point.longitude, point.latitude];
+  });
+  return {
+    type: "Feature" as const,
+    properties: { role: "range-boundary" },
+    geometry: { type: "LineString" as const, coordinates: ring },
+  };
+}
+
+function anchorFeatures(alignment: AlignmentReport) {
+  return {
+    type: "FeatureCollection" as const,
+    features: alignment.anchors.map((anchor) => ({
+      type: "Feature" as const,
+      properties: { id: anchor.id, radial: anchor.radialIndex, gate: anchor.gateIndex },
+      geometry: {
+        type: "Point" as const,
+        coordinates: [anchor.longitude, anchor.latitude],
+      },
+    })),
+  };
 }
 
 function removeDiagnosticLayers(map: MapLibreMap, radarLayer: RadarCustomLayer | null) {
@@ -724,5 +942,9 @@ declare global {
     scrub(index: number): Promise<RadarPaintReceipt>;
     setCamera(longitude: number, latitude: number, zoom: number): void;
     layerOrder(): string[];
+  };
+  var __MISTR_PHASE5__: undefined | {
+    report(): Phase5Report;
+    acquire(site: string, freshOnly?: boolean, timeoutSeconds?: number): Promise<Phase5Report>;
   };
 }
