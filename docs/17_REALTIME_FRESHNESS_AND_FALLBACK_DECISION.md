@@ -108,7 +108,7 @@ The release Tauri/WebView2 runner at 3840 by 2160:
 3. observed the KAMX request fail with `live_sweep_failed` and no stale publication;
 4. decoded and transferred a 7,931,840-byte KTLX sweep;
 5. uploaded one live frame; and
-6. received a matching hardware-accelerated GPU receipt 86 ms after safe decode completed.
+6. received a matching hardware-accelerated GPU receipt 80 ms after safe decode completed.
 
 The final observation ID matched backend evidence, packed bytes, display truth, selected renderer state, last-painted renderer state, and the 4K receipt. The existing Phase 4 2,000-transition packaged regression also passed after the renderer was generalized to replace its site/source/bounds atomically.
 

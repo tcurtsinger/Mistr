@@ -14,7 +14,7 @@ Mistr discovered rotating real-time volumes, assembled strict start/intermediate
 
 In this observation window, safe decode completed `26411` ms before NOAA at P50 and `27828` ms before IEM at P50, with a five-second provider-poll uncertainty. This supports proceeding with the raw selected-site architecture; it does not promise that raw always wins.
 
-The release packaged runner also proved the end-to-end path. It cancelled a superseded KAMX request, published only the current KTLX generation, parsed 7,931,840 packed bytes, atomically replaced the prior archive loop with one live frame, and received a matching hardware GPU-complete receipt at 3840 by 2160. Safe-decode-to-paint was 86 ms in that run.
+The release packaged runner also proved the end-to-end path. It cancelled a superseded KAMX request, published only the current KTLX generation, parsed 7,931,840 packed bytes, atomically replaced the prior archive loop with one live frame, and received a matching hardware GPU-complete receipt at 3840 by 2160. Safe-decode-to-paint was 80 ms in that run.
 
 The governing boundary and fallback decision is [`17_REALTIME_FRESHNESS_AND_FALLBACK_DECISION.md`](../17_REALTIME_FRESHNESS_AND_FALLBACK_DECISION.md).
 
@@ -104,16 +104,16 @@ npm run test:phase5:packaged
 | Superseded request | KAMX rejected with `live_sweep_failed` |
 | Current publication | KTLX generation 3 only |
 | Packed live sweep | 7,931,840 bytes |
-| Safe sequence in current catch-up run | 35 |
-| Raw last-modified to safe decode | 5,598 ms |
-| Safe decode to GPU receipt | 86 ms |
+| Safe sequence in current catch-up run | 13 |
+| Raw last-modified to safe decode | 4,702 ms |
+| Safe decode to GPU receipt | 80 ms |
 | GPU receipt observation match | PASS |
 | Renderer selected/last-painted match | PASS |
 | Incomplete UI label present | No |
 
 The packaged run intentionally requests the current volume for a fast deterministic app gate, so its safe sequence is not used as earliest-progressive latency evidence. Fresh steady-state probes establish chunk 7 as the publication boundary. Ignored artifacts are written under `artifacts/phase-5/packaged/`.
 
-The Phase 4 packaged regression was repeated against the generalized replacement path after Phase 5. It again passed both 1,000-transition 4K runs with zero long tasks, zero hot-path work, exact paint truth, at most 6.2 ms frame P95, at most 16.9 ms switch P95, 50.639 MiB current known GPU allocation, and a 101.279 MiB atomic-replacement peak.
+The Phase 4 packaged regression was repeated against the transactional replacement path after review closure. It again passed both 1,000-transition 4K runs with zero long tasks, zero hot-path work, exact paint truth, at most 6.2 ms frame P95, at most 16.7 ms switch P95, 50.639 MiB current known GPU allocation, and a 101.279 MiB atomic-replacement peak.
 
 ## Automated coverage
 

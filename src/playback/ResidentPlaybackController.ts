@@ -36,7 +36,12 @@ export class ResidentPlaybackController {
   constructor(
     private readonly layer: Pick<
       RadarCustomLayer,
-      "getSnapshot" | "replaceResidentFrames" | "selectAndWait" | "waitForPaint"
+      | "commitResidentFrameReplacement"
+      | "getSnapshot"
+      | "replaceResidentFrames"
+      | "rollbackResidentFrameReplacement"
+      | "selectAndWait"
+      | "waitForPaint"
     >,
     private frames: readonly RadarSweepCpuModel[],
     private readonly options: PlaybackControllerOptions = {},
@@ -69,17 +74,31 @@ export class ResidentPlaybackController {
 
   async replaceResidentFrames(
     frames: readonly RadarSweepCpuModel[],
+    beforeCommit?: () => void,
   ): Promise<RadarPaintReceipt> {
     this.assertActive();
     if (frames.length < 1) throw new Error("playback requires at least one resident frame");
     await this.pauseAndWait();
+    beforeCommit?.();
 
     // The renderer swap and controller-frame update are synchronous so no
     // playback operation can observe IDs from different resident loops.
+    const previousFrames = this.frames;
+    const previousReceipt = this.lastReceipt;
     this.layer.replaceResidentFrames(frames);
     this.frames = [...frames];
     this.lastReceipt = undefined;
-    return this.establishInitialPaint();
+    let receipt: RadarPaintReceipt;
+    try {
+      receipt = await this.establishInitialPaint();
+    } catch (error) {
+      this.layer.rollbackResidentFrameReplacement();
+      this.frames = previousFrames;
+      this.lastReceipt = previousReceipt;
+      throw error;
+    }
+    this.layer.commitResidentFrameReplacement(receipt.selectionSequence);
+    return receipt;
   }
 
   play(): void {

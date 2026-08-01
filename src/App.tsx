@@ -421,7 +421,11 @@ export function App() {
           const liveAlignment = createAlignmentReport(model);
           const liveAnchor = liveAlignment.anchors.find((anchor) => anchor.gateIndex > 0)
             ?? liveAlignment.anchors[0];
-          const receipt = await activeController.replaceResidentFrames([model]);
+          const receipt = await activeController.replaceResidentFrames([model], () => {
+            if (transferGeneration !== generation) {
+              throw new Error(`live generation ${generation} was superseded before GPU publication`);
+            }
+          });
           if (receipt.observationId !== model.observationId || receipt.generation !== generation) {
             throw new Error("GPU paint receipt does not match the live sweep");
           }

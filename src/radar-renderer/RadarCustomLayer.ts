@@ -226,6 +226,19 @@ interface PaintWaiter {
   timeout: ReturnType<typeof globalThis.setTimeout>;
 }
 
+interface ResidentFrameReplacement {
+  previousModels: RadarSweepCpuModel[];
+  previousFrames: Map<string, RadarFrameResources>;
+  previousPalette: WebGLTexture;
+  previousSelectedObservationId: string;
+  previousSelectionSequence: number;
+  previousSelectedAt: number;
+  previousTextureValidation?: RadarTextureValidation;
+  previousPaintReceipt?: RadarPaintReceipt;
+  previousPaintReceiptsLength: number;
+  previousSwitchLatencySamplesLength: number;
+}
+
 export class RadarCustomLayer implements CustomLayerInterface {
   readonly id = "mistr-resident-radar";
   readonly type = "custom" as const;
@@ -240,6 +253,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
   private frameResources = new Map<string, RadarFrameResources>();
   private uniforms: Uniforms | null = null;
   private pendingPaint: PendingPaint | null = null;
+  private pendingReplacement: ResidentFrameReplacement | null = null;
   private readonly paintWaiters = new Map<number, PaintWaiter>();
   private contextEpoch = 1;
   private drawCount = 0;
@@ -474,6 +488,9 @@ export class RadarCustomLayer implements CustomLayerInterface {
     if (this.pendingPaint || this.paintReceipt?.selectionSequence !== this.selectionSequence) {
       throw new RadarRendererError("cannot replace a loop while a selection is awaiting paint");
     }
+    if (this.pendingReplacement) {
+      throw new RadarRendererError("cannot replace a loop before the prior replacement is committed");
+    }
     const currentKey = this.models[0];
     const replacementKey = models[0];
     validateReplacementGeneration(generationNumber(currentKey), generationNumber(replacementKey));
@@ -529,6 +546,18 @@ export class RadarCustomLayer implements CustomLayerInterface {
 
     const previousFrames = this.frameResources;
     const previousPalette = this.paletteTexture;
+    this.pendingReplacement = {
+      previousModels: this.models,
+      previousFrames,
+      previousPalette,
+      previousSelectedObservationId: this.selectedObservationId,
+      previousSelectionSequence: this.selectionSequence,
+      previousSelectedAt: this.selectedAt,
+      previousTextureValidation: this.textureValidation,
+      previousPaintReceipt: this.paintReceipt,
+      previousPaintReceiptsLength: this.paintReceipts.length,
+      previousSwitchLatencySamplesLength: this.switchLatencySamples.length,
+    };
     this.frameResources = pendingFrames;
     this.paletteTexture = pendingPalette;
     this.models = [...models];
@@ -536,11 +565,67 @@ export class RadarCustomLayer implements CustomLayerInterface {
     this.selectionSequence += 1;
     this.selectedAt = performance.now();
     this.textureValidation = pendingFrames.get(this.selectedObservationId)?.textureValidation;
-    deleteFrameResources(gl, previousFrames.values());
-    gl.deleteTexture(previousPalette);
-    previousFrames.clear();
+    this.runtimeError = undefined;
     this.map?.triggerRepaint();
     this.emit("ready");
+  }
+
+  commitResidentFrameReplacement(selectionSequence: number): void {
+    const replacement = this.pendingReplacement;
+    if (!replacement) {
+      throw new RadarRendererError("there is no resident-frame replacement to commit");
+    }
+    if (
+      this.pendingPaint
+      || selectionSequence !== this.selectionSequence
+      || this.paintReceipt?.selectionSequence !== selectionSequence
+    ) {
+      throw new RadarRendererError("replacement cannot commit before its GPU paint completes");
+    }
+    if (!this.gl) throw new RadarRendererError("renderer is unavailable during replacement commit");
+    deleteFrameResources(this.gl, replacement.previousFrames.values());
+    this.gl.deleteTexture(replacement.previousPalette);
+    replacement.previousFrames.clear();
+    this.pendingReplacement = null;
+  }
+
+  rollbackResidentFrameReplacement(): void {
+    const replacement = this.pendingReplacement;
+    if (!replacement || !this.gl) {
+      throw new RadarRendererError("there is no resident-frame replacement to roll back");
+    }
+    const gl = this.gl;
+    if (this.pendingPaint) {
+      gl.deleteSync(this.pendingPaint.sync);
+      this.pendingPaint = null;
+    }
+    this.rejectPaintWaiter(this.selectionSequence, "resident-frame replacement rolled back");
+    deleteFrameResources(gl, this.frameResources.values());
+    if (this.paletteTexture) gl.deleteTexture(this.paletteTexture);
+
+    this.models = replacement.previousModels;
+    this.frameResources = replacement.previousFrames;
+    this.paletteTexture = replacement.previousPalette;
+    this.selectedObservationId = replacement.previousSelectedObservationId;
+    this.selectionSequence = replacement.previousSelectionSequence;
+    this.selectedAt = replacement.previousSelectedAt;
+    this.textureValidation = replacement.previousTextureValidation;
+    this.paintReceipt = replacement.previousPaintReceipt;
+    this.paintReceipts.length = replacement.previousPaintReceiptsLength;
+    this.switchLatencySamples.length = replacement.previousSwitchLatencySamplesLength;
+    this.pendingReplacement = null;
+    this.runtimeError = undefined;
+
+    if (!this.quadBuffer) throw new RadarRendererError("renderer quad buffer is unavailable");
+    const previousArrayBuffer = gl.getParameter(gl.ARRAY_BUFFER_BINDING) as WebGLBuffer | null;
+    try {
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.quadBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, mercatorQuadVertices(this.models), gl.STATIC_DRAW);
+    } finally {
+      gl.bindBuffer(gl.ARRAY_BUFFER, previousArrayBuffer);
+    }
+    this.map?.triggerRepaint();
+    this.emit("painted");
   }
 
   private createResources(gl: WebGL2RenderingContext) {
@@ -655,10 +740,16 @@ export class RadarCustomLayer implements CustomLayerInterface {
     if (this.pendingPaint) gl.deleteSync(this.pendingPaint.sync);
     deleteFrameResources(gl, this.frameResources.values());
     if (this.paletteTexture) gl.deleteTexture(this.paletteTexture);
+    if (this.pendingReplacement) {
+      deleteFrameResources(gl, this.pendingReplacement.previousFrames.values());
+      gl.deleteTexture(this.pendingReplacement.previousPalette);
+      this.pendingReplacement.previousFrames.clear();
+    }
     if (this.quadBuffer) gl.deleteBuffer(this.quadBuffer);
     if (this.vao) gl.deleteVertexArray(this.vao);
     if (this.program) gl.deleteProgram(this.program);
     this.pendingPaint = null;
+    this.pendingReplacement = null;
     this.frameResources.clear();
     this.paletteTexture = null;
     this.quadBuffer = null;
@@ -690,6 +781,10 @@ export class RadarCustomLayer implements CustomLayerInterface {
     let total = this.paletteTexture ? 256 * 4 : 0;
     total += this.quadBuffer ? 6 * 2 * Float32Array.BYTES_PER_ELEMENT : 0;
     for (const frame of this.frameResources.values()) total += frame.gpuBytes;
+    if (this.pendingReplacement) {
+      total += 256 * 4;
+      for (const frame of this.pendingReplacement.previousFrames.values()) total += frame.gpuBytes;
+    }
     return total;
   }
 
