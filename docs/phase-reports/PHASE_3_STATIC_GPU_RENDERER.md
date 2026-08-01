@@ -126,12 +126,13 @@ Mistr now imports the worker with Vite's `?worker&url` contract and calls public
 
 ## Automated coverage
 
-The TypeScript suite now contains 41 tests across 11 files, including:
+The TypeScript suite now contains 43 tests across 11 files, including:
 
-- geodesic and Mercator round trips, antimeridian wrap, native gate boundaries, irregular-radial gaps, unordered-radial rejection, and 15 committed Py-ART standard-atmosphere slant/ground references;
+- geodesic and Mercator round trips, antimeridian wrap, native gate boundaries, irregular-radial gaps, unordered-radial rejection, distant-query rejection before beam inversion, and 15 committed Py-ART standard-atmosphere slant/ground references;
 - compact CPU-model sizing and retention, point interrogation, exact anchor selection, status/value/palette semantics, and unsupported product/status rejection;
 - premultiplied palette bytes and below-threshold/range-folded behavior;
 - measured candidate geometry counts/bytes and bounded dimensions;
+- fail-closed hardware-renderer classification when unmasked renderer evidence is unavailable or identifies a common software rasterizer;
 - shader contract checks for compact texture fetches and CPU-matching missing/gate/status rules;
 - exact Phase 3 Tauri command arguments and leased credit release; and
 - explicit MapLibre worker URL configuration.

@@ -98,6 +98,7 @@ export interface RadarRendererCapabilities {
   shadingLanguageVersion: string;
   vendor: string;
   renderer: string;
+  unmaskedRendererAvailable: boolean;
   hardwareAcceleration: boolean;
   maxTextureSize: number;
   maxArrayTextureLayers: number;
@@ -834,15 +835,13 @@ function queryCapabilities(gl: WebGL2RenderingContext): RadarRendererCapabilitie
     UNMASKED_RENDERER_WEBGL: number;
   } | null;
   const renderer = String(gl.getParameter(debug?.UNMASKED_RENDERER_WEBGL ?? gl.RENDERER));
-  const normalizedRenderer = renderer.toLowerCase();
   return {
     webglVersion: String(gl.getParameter(gl.VERSION)),
     shadingLanguageVersion: String(gl.getParameter(gl.SHADING_LANGUAGE_VERSION)),
     vendor: String(gl.getParameter(debug?.UNMASKED_VENDOR_WEBGL ?? gl.VENDOR)),
     renderer,
-    hardwareAcceleration: !normalizedRenderer.includes("swiftshader")
-      && !normalizedRenderer.includes("llvmpipe")
-      && !normalizedRenderer.includes("software"),
+    unmaskedRendererAvailable: debug !== null,
+    hardwareAcceleration: hasVerifiedHardwareAcceleration(debug !== null, renderer),
     maxTextureSize: gl.getParameter(gl.MAX_TEXTURE_SIZE) as number,
     maxArrayTextureLayers: gl.getParameter(gl.MAX_ARRAY_TEXTURE_LAYERS) as number,
     maxVertexTextureImageUnits: gl.getParameter(gl.MAX_VERTEX_TEXTURE_IMAGE_UNITS) as number,
@@ -859,7 +858,9 @@ function validateCapabilities(
   model: RadarSweepCpuModel,
 ) {
   if (!capabilities.hardwareAcceleration) {
-    throw new RadarRendererError(`software WebGL renderer is unsupported: ${capabilities.renderer}`);
+    throw new RadarRendererError(
+      `hardware WebGL renderer could not be verified: ${capabilities.renderer}`,
+    );
   }
   const requiredTextureSize = Math.max(
     model.gateCount,
@@ -874,6 +875,31 @@ function validateCapabilities(
   if (capabilities.maxFragmentTextureImageUnits < 5) {
     throw new RadarRendererError("at least five fragment texture units are required");
   }
+}
+
+export function hasVerifiedHardwareAcceleration(
+  unmaskedRendererAvailable: boolean,
+  renderer: string,
+): boolean {
+  if (!unmaskedRendererAvailable) return false;
+  const normalizedRenderer = renderer.trim().toLowerCase();
+  if (
+    normalizedRenderer.length === 0
+    || normalizedRenderer === "null"
+    || normalizedRenderer === "undefined"
+  ) {
+    return false;
+  }
+  const softwareMarkers = [
+    "swiftshader",
+    "llvmpipe",
+    "lavapipe",
+    "softpipe",
+    "software",
+    "basic render driver",
+    "warp",
+  ];
+  return !softwareMarkers.some((marker) => normalizedRenderer.includes(marker));
 }
 
 function percentile(values: number[], fraction: number): number {

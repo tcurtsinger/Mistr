@@ -147,8 +147,18 @@ export function interrogateLngLat(
   point: LngLatPoint,
 ): GateInterrogation | null {
   const measured = rangeBearing(model.center, point);
+  if (measured.rangeM > model.maxRangeM) {
+    return null;
+  }
   const radialIndex = radialFromLookup(model.azimuthLookup, measured.bearingDegrees);
   if (radialIndex === null) {
+    return null;
+  }
+  const radialMaximumGroundRangeM = groundRangeForSlantRange(
+    model.maxSlantRangeM,
+    model.elevations[radialIndex],
+  );
+  if (measured.rangeM > radialMaximumGroundRangeM) {
     return null;
   }
   const slantRangeM = slantRangeForGroundRange(

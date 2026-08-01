@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { radarShaderSources } from "./RadarCustomLayer";
+import {
+  hasVerifiedHardwareAcceleration,
+  radarShaderSources,
+} from "./RadarCustomLayer";
 
 describe("Radar custom-layer shader contract", () => {
   it("uses public matrix input and compact texture fetches without per-gate geometry", () => {
@@ -21,5 +24,23 @@ describe("Radar custom-layer shader contract", () => {
     expect(fragment).toContain("slantRangeM - u_first_gate_center_m");
     expect(fragment).toContain("status == uint(1)");
     expect(fragment).toContain("status == uint(2)");
+  });
+});
+
+describe("hardware renderer evidence", () => {
+  it("requires unmasked evidence and rejects common software renderers", () => {
+    expect(hasVerifiedHardwareAcceleration(false, "WebKit WebGL")).toBe(false);
+    expect(hasVerifiedHardwareAcceleration(true, "")).toBe(false);
+    expect(hasVerifiedHardwareAcceleration(true, "ANGLE (NVIDIA GeForce RTX 4080, D3D11)"))
+      .toBe(true);
+    expect(hasVerifiedHardwareAcceleration(true, "Google SwiftShader")).toBe(false);
+    expect(hasVerifiedHardwareAcceleration(true, "llvmpipe (LLVM 19.1.7)"))
+      .toBe(false);
+    expect(hasVerifiedHardwareAcceleration(
+      true,
+      "ANGLE (Microsoft, Microsoft Basic Render Driver Direct3D11 vs_5_0 ps_5_0)",
+    )).toBe(false);
+    expect(hasVerifiedHardwareAcceleration(true, "ANGLE (Microsoft WARP Direct3D11)"))
+      .toBe(false);
   });
 });

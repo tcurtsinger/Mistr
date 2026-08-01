@@ -292,7 +292,12 @@ function Phase3Readout({ state }: { state: Phase3State }) {
       <div><dt>ALIGNMENT</dt><dd>{report.alignment.allSelectedCorrectGate ? `${report.alignment.anchors.length}/${report.alignment.anchors.length} GATES` : "FAILED"}</dd></div>
       <div><dt>GPU TRUTH</dt><dd>{report.renderer?.textureValidation?.allPassed ? "READBACK PASS" : "CHECKING"}</dd></div>
       <div><dt>MAP LAYERS</dt><dd>{report.coexistence.standardLayersBeforeAndAfter ? "BEFORE + AFTER" : "FAILED"}</dd></div>
-      <div><dt>GL DEVICE</dt><dd>{report.renderer?.capabilities?.hardwareAcceleration ? "HARDWARE" : "CHECKING"}</dd></div>
+      <div>
+        <dt>GL DEVICE</dt>
+        <dd>{report.renderer?.capabilities
+          ? report.renderer.capabilities.hardwareAcceleration ? "HARDWARE" : "UNVERIFIED"
+          : "CHECKING"}</dd>
+      </div>
     </dl>
   );
 }

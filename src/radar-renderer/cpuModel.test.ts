@@ -78,6 +78,13 @@ describe("RadarSweepCpuModel", () => {
     expect(alignment.maximumBearingErrorDegrees).toBeLessThan(1e-9);
   });
 
+  it("returns null for a point far beyond the sweep before beam inversion", () => {
+    const model = createRadarSweepCpuModel(golden);
+    const distantPoint = destinationPoint(model.center, 45, 15_000_000);
+    expect(() => interrogateLngLat(model, distantPoint)).not.toThrow();
+    expect(interrogateLngLat(model, distantPoint)).toBeNull();
+  });
+
   it("rejects unsupported products and invalid statuses", () => {
     const velocity = {
       ...golden,
