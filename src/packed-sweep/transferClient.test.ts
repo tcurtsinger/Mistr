@@ -49,6 +49,32 @@ describe("PackedSweepTransferClient", () => {
     await lease.release();
   });
 
+  it("passes only a pinned fixture slug to the Phase 4 binary command", async () => {
+    const requests: Array<Record<string, unknown> | undefined> = [];
+    const invoke: InvokeFunction = async <T>(command: string, arguments_?: Record<string, unknown>) => {
+      if (command === "open_phase2_transfer_session") return snapshot(0) as T;
+      if (command === "begin_phase2_generation") return snapshot(7) as T;
+      if (command === "request_phase4_fixture_sweep") {
+        requests.push(arguments_);
+        return goldenBuffer() as T;
+      }
+      if (command === "release_phase2_transfer_credit") return snapshot(7) as T;
+      throw new Error(`unexpected command ${command}`);
+    };
+    const client = new PackedSweepTransferClient(invoke);
+    await client.open();
+    await client.begin(7);
+    const lease = await client.requestPhase4Fixture("ktlx-2024-05-20-230512-v06");
+    expect(requests).toEqual([{
+      session: 1,
+      generation: 7,
+      fixtureId: "ktlx-2024-05-20-230512-v06",
+    }]);
+    await lease.release();
+    await expect(client.requestPhase4Fixture("../private-file"))
+      .rejects.toThrow("lowercase slug");
+  });
+
   it("holds a backend credit until the caller releases the parsed sweep", async () => {
     const calls: string[] = [];
     const releasedGenerations: number[] = [];

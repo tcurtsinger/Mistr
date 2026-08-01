@@ -138,6 +138,8 @@ Render one decoded Level II reflectivity sweep correctly over MapLibre.
 
 ## Phase 4 — Resident 20-frame playback
 
+**Status:** Complete on the primary Windows workstation. See [`phase-reports/PHASE_4_RESIDENT_PLAYBACK.md`](phase-reports/PHASE_4_RESIDENT_PLAYBACK.md) and [`16_RESIDENT_PLAYBACK_DECISION.md`](16_RESIDENT_PLAYBACK_DECISION.md).
+
 ### Objective
 
 Prove the core game-loop property: after loading, playback is GPU-resident and independent of network/tile readiness.

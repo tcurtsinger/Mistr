@@ -115,21 +115,39 @@ export interface RadarRendererCapabilities {
 }
 
 export interface RadarPaintReceipt {
+  generation: number;
   observationId: string;
   contextEpoch: number;
+  selectionSequence: number;
   drawSequence: number;
   completedAtUnixMs: number;
   firstPaintLatencyMs: number;
+  residentSwitchLatencyMs: number;
   framebufferWidth: number;
   framebufferHeight: number;
+}
+
+export interface RadarSelectionRequest {
+  generation: number;
+  observationId: string;
+  selectionSequence: number;
+  requestedAtUnixMs: number;
 }
 
 export interface RadarRendererMetrics {
   shaderCompileLinkMs: number;
   uploadMs: number;
   gpuResourceBytes: number;
+  peakGpuResourceBytes: number;
+  cpuResourceBytes: number;
+  residentFrameCount: number;
+  frameUploadCount: number;
+  frameUploadBytes: number;
   drawCpuP95Ms: number;
   drawCount: number;
+  residentSwitchP50Ms: number;
+  residentSwitchP95Ms: number;
+  residentSwitchP99Ms: number;
 }
 
 export interface RadarTextureValidation {
@@ -149,10 +167,16 @@ export interface RadarTextureValidation {
 export interface RadarRendererSnapshot {
   status: "initializing" | "ready" | "painted" | "removed" | "error";
   observationId: string;
+  selectedObservationId: string;
+  lastPaintedObservationId?: string;
+  generation: number;
+  selectionSequence: number;
+  residentObservationIds: string[];
   contextEpoch: number;
   capabilities?: RadarRendererCapabilities;
   metrics?: RadarRendererMetrics;
   textureValidation?: RadarTextureValidation;
+  textureValidationsPassed: number;
   paintReceipt?: RadarPaintReceipt;
   shaderLog: string[];
   error?: string;
@@ -177,8 +201,33 @@ interface Uniforms {
   rangeFoldedColor: WebGLUniformLocation;
 }
 
+interface RadarFrameResources {
+  model: RadarSweepCpuModel;
+  rawTexture: WebGLTexture;
+  statusTexture: WebGLTexture;
+  lookupTexture: WebGLTexture;
+  radialMetadataTexture: WebGLTexture;
+  textureValidation: RadarTextureValidation;
+  gpuBytes: number;
+}
+
+interface PendingPaint {
+  sync: WebGLSync;
+  generation: number;
+  observationId: string;
+  selectionSequence: number;
+  drawSequence: number;
+  selectedAt: number;
+}
+
+interface PaintWaiter {
+  resolve(receipt: RadarPaintReceipt): void;
+  reject(error: Error): void;
+  timeout: ReturnType<typeof globalThis.setTimeout>;
+}
+
 export class RadarCustomLayer implements CustomLayerInterface {
-  readonly id = "mistr-static-radar";
+  readonly id = "mistr-resident-radar";
   readonly type = "custom" as const;
   readonly renderingMode = "2d" as const;
 
@@ -187,18 +236,24 @@ export class RadarCustomLayer implements CustomLayerInterface {
   private program: WebGLProgram | null = null;
   private vao: WebGLVertexArrayObject | null = null;
   private quadBuffer: WebGLBuffer | null = null;
-  private rawTexture: WebGLTexture | null = null;
-  private statusTexture: WebGLTexture | null = null;
-  private lookupTexture: WebGLTexture | null = null;
   private paletteTexture: WebGLTexture | null = null;
-  private radialMetadataTexture: WebGLTexture | null = null;
+  private frameResources = new Map<string, RadarFrameResources>();
   private uniforms: Uniforms | null = null;
-  private pendingFence: WebGLSync | null = null;
+  private pendingPaint: PendingPaint | null = null;
+  private readonly paintWaiters = new Map<number, PaintWaiter>();
   private contextEpoch = 1;
   private drawCount = 0;
   private drawCpuSamples: number[] = [];
   private uploadCompletedAt = 0;
   private paintReceipt: RadarPaintReceipt | undefined;
+  private paintReceipts: RadarPaintReceipt[] = [];
+  private switchLatencySamples: number[] = [];
+  private selectedObservationId: string;
+  private selectionSequence = 1;
+  private selectedAt = 0;
+  private peakGpuResourceBytes = 0;
+  private frameUploadCount = 0;
+  private frameUploadBytes = 0;
   private shaderCompileLinkMs = 0;
   private uploadMs = 0;
   private capabilities: RadarRendererCapabilities | undefined;
@@ -207,16 +262,33 @@ export class RadarCustomLayer implements CustomLayerInterface {
   private runtimeError: string | undefined;
 
   constructor(
-    readonly model: RadarSweepCpuModel,
+    modelOrModels: RadarSweepCpuModel | readonly RadarSweepCpuModel[],
     private readonly options: RadarCustomLayerOptions,
-  ) {}
+  ) {
+    const models = Array.isArray(modelOrModels) ? [...modelOrModels] : [modelOrModels];
+    validateResidentModels(models);
+    this.models = models;
+    this.selectedObservationId = models[0].observationId;
+  }
+
+  private models: RadarSweepCpuModel[];
+
+  get model(): RadarSweepCpuModel {
+    const model = this.models.find(
+      (candidate) => candidate.observationId === this.selectedObservationId,
+    );
+    if (!model) {
+      throw new RadarRendererError(`selected observation ${this.selectedObservationId} is unknown`);
+    }
+    return model;
+  }
 
   onAdd(map: MapLibreMap, gl: WebGL2RenderingContext): void {
     this.map = map;
     this.gl = gl;
     try {
       this.capabilities = queryCapabilities(gl);
-      validateCapabilities(this.capabilities, this.model);
+      for (const model of this.models) validateCapabilities(this.capabilities, model);
       const compileStarted = performance.now();
       this.program = createProgram(gl, VERTEX_SHADER, FRAGMENT_SHADER, this.shaderLog);
       this.shaderCompileLinkMs = performance.now() - compileStarted;
@@ -225,6 +297,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
       this.createResources(gl);
       this.uploadMs = performance.now() - uploadStarted;
       this.uploadCompletedAt = performance.now();
+      this.selectedAt = this.uploadCompletedAt;
       this.emit("ready");
       map.triggerRepaint();
     } catch (error) {
@@ -240,6 +313,9 @@ export class RadarCustomLayer implements CustomLayerInterface {
       return;
     }
     this.completePendingFence(gl);
+    if (this.runtimeError) return;
+    const frame = this.requireSelectedFrame();
+    const model = frame.model;
     const started = performance.now();
     const state = captureGlState(gl);
     try {
@@ -251,11 +327,11 @@ export class RadarCustomLayer implements CustomLayerInterface {
       gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
       gl.useProgram(this.program);
       gl.bindVertexArray(this.vao);
-      bindTexture(gl, 0, this.rawTexture);
-      bindTexture(gl, 1, this.statusTexture);
-      bindTexture(gl, 2, this.lookupTexture);
+      bindTexture(gl, 0, frame.rawTexture);
+      bindTexture(gl, 1, frame.statusTexture);
+      bindTexture(gl, 2, frame.lookupTexture);
       bindTexture(gl, 3, this.paletteTexture);
-      bindTexture(gl, 4, this.radialMetadataTexture);
+      bindTexture(gl, 4, frame.radialMetadataTexture);
       gl.uniformMatrix4fv(this.uniforms.matrix, false, options.defaultProjectionData.mainMatrix);
       gl.uniform1i(this.uniforms.rawCodes, 0);
       gl.uniform1i(this.uniforms.statuses, 1);
@@ -264,13 +340,13 @@ export class RadarCustomLayer implements CustomLayerInterface {
       gl.uniform1i(this.uniforms.radialMetadata, 4);
       gl.uniform2f(
         this.uniforms.radarLonLat,
-        degreesToRadians(this.model.center.longitude),
-        degreesToRadians(this.model.center.latitude),
+        degreesToRadians(model.center.longitude),
+        degreesToRadians(model.center.latitude),
       );
-      gl.uniform1f(this.uniforms.firstGateCenter, this.model.firstGateCenterM);
-      gl.uniform1f(this.uniforms.gateSpacing, this.model.gateSpacingM);
-      gl.uniform1i(this.uniforms.gateCount, this.model.gateCount);
-      gl.uniform1i(this.uniforms.lookupSize, this.model.azimuthLookup.length);
+      gl.uniform1f(this.uniforms.firstGateCenter, model.firstGateCenterM);
+      gl.uniform1f(this.uniforms.gateSpacing, model.gateSpacingM);
+      gl.uniform1i(this.uniforms.gateCount, model.gateCount);
+      gl.uniform1i(this.uniforms.lookupSize, model.azimuthLookup.length);
       const alpha = RANGE_FOLDED_COLOR[3] / 255;
       gl.uniform4f(
         this.uniforms.rangeFoldedColor,
@@ -281,16 +357,28 @@ export class RadarCustomLayer implements CustomLayerInterface {
       );
       gl.drawArrays(gl.TRIANGLES, 0, 6);
       this.drawCount += 1;
-      if (!this.paintReceipt && !this.pendingFence) {
-        this.pendingFence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
-        if (!this.pendingFence) {
+      if (
+        this.paintReceipt?.selectionSequence !== this.selectionSequence
+        && !this.pendingPaint
+      ) {
+        const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+        if (!sync) {
           throw new RadarRendererError("failed to allocate GPU completion fence");
         }
+        this.pendingPaint = {
+          sync,
+          generation: generationNumber(model),
+          observationId: model.observationId,
+          selectionSequence: this.selectionSequence,
+          drawSequence: this.drawCount,
+          selectedAt: this.selectedAt,
+        };
         gl.flush();
         this.map?.triggerRepaint();
       }
     } catch (error) {
       this.runtimeError = error instanceof Error ? error.message : String(error);
+      this.rejectPaintWaiter(this.selectionSequence, this.runtimeError);
       this.emit("error", this.runtimeError);
       throw error;
     } finally {
@@ -321,9 +409,137 @@ export class RadarCustomLayer implements CustomLayerInterface {
     );
   }
 
+  selectFrame(observationId: string): RadarSelectionRequest {
+    if (!this.frameResources.has(observationId)) {
+      throw new RadarRendererError(`observation ${observationId} is not resident`);
+    }
+    if (this.pendingPaint || this.paintReceipt?.selectionSequence !== this.selectionSequence) {
+      throw new RadarRendererError("the prior frame selection has not produced a paint receipt");
+    }
+    if (observationId === this.selectedObservationId) {
+      return {
+        generation: generationNumber(this.model),
+        observationId,
+        selectionSequence: this.selectionSequence,
+        requestedAtUnixMs: Date.now(),
+      };
+    }
+    this.selectedObservationId = observationId;
+    this.selectionSequence += 1;
+    this.selectedAt = performance.now();
+    this.map?.triggerRepaint();
+    const request = {
+      generation: generationNumber(this.model),
+      observationId,
+      selectionSequence: this.selectionSequence,
+      requestedAtUnixMs: Date.now(),
+    };
+    this.emit("ready");
+    return request;
+  }
+
+  waitForPaint(selectionSequence: number, timeoutMs = 2_000): Promise<RadarPaintReceipt> {
+    if (!Number.isSafeInteger(selectionSequence) || selectionSequence < 1) {
+      return Promise.reject(new RangeError("selectionSequence must be a positive safe integer"));
+    }
+    if (this.paintReceipt?.selectionSequence === selectionSequence) {
+      return Promise.resolve(this.paintReceipt);
+    }
+    if (selectionSequence !== this.selectionSequence || this.paintWaiters.has(selectionSequence)) {
+      return Promise.reject(new RadarRendererError("selection is stale or already has a waiter"));
+    }
+    return new Promise((resolve, reject) => {
+      const timeout = globalThis.setTimeout(() => {
+        this.paintWaiters.delete(selectionSequence);
+        reject(new RadarRendererError(`selection ${selectionSequence} did not paint within ${timeoutMs} ms`));
+      }, timeoutMs);
+      this.paintWaiters.set(selectionSequence, { resolve, reject, timeout });
+    });
+  }
+
+  async selectAndWait(observationId: string, timeoutMs = 2_000): Promise<RadarPaintReceipt> {
+    const request = this.selectFrame(observationId);
+    return this.waitForPaint(request.selectionSequence, timeoutMs);
+  }
+
+  getPaintReceipts(): RadarPaintReceipt[] {
+    return this.paintReceipts.map((receipt) => ({ ...receipt }));
+  }
+
+  replaceResidentFrames(models: readonly RadarSweepCpuModel[]): void {
+    validateResidentModels(models);
+    if (!this.gl || !this.paletteTexture) {
+      throw new RadarRendererError("renderer is not ready for loop replacement");
+    }
+    if (this.pendingPaint || this.paintReceipt?.selectionSequence !== this.selectionSequence) {
+      throw new RadarRendererError("cannot replace a loop while a selection is awaiting paint");
+    }
+    const currentKey = this.models[0];
+    const replacementKey = models[0];
+    validateReplacementGeneration(generationNumber(currentKey), generationNumber(replacementKey));
+    if (
+      currentKey.siteIcao !== replacementKey.siteIcao
+      || currentKey.product !== replacementKey.product
+      || currentKey.sourceKind !== replacementKey.sourceKind
+      || currentKey.scale !== replacementKey.scale
+      || currentKey.offset !== replacementKey.offset
+      || currentKey.center.longitude !== replacementKey.center.longitude
+      || currentKey.center.latitude !== replacementKey.center.latitude
+      || Math.max(...models.map((model) => model.maxRangeM))
+        > Math.max(...this.models.map((model) => model.maxRangeM))
+    ) {
+      throw new RadarRendererError("replacement changes the allocated radar render key or bounds");
+    }
+
+    const gl = this.gl;
+    const palette = buildReflectivityPalette(replacementKey.scale, replacementKey.offset);
+    const pendingFrames = new Map<string, RadarFrameResources>();
+    const previousUnpack = gl.getParameter(gl.UNPACK_ALIGNMENT) as number;
+    const previousActive = gl.getParameter(gl.ACTIVE_TEXTURE) as number;
+    const previousTexture = gl.getParameter(gl.TEXTURE_BINDING_2D) as WebGLTexture | null;
+    try {
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+      for (const model of models) {
+        const frame = createFrameResources(gl, model, this.paletteTexture, palette);
+        pendingFrames.set(model.observationId, frame);
+        this.frameUploadCount += 1;
+        this.frameUploadBytes += frame.gpuBytes;
+      }
+      const pendingBytes = [...pendingFrames.values()]
+        .reduce((total, frame) => total + frame.gpuBytes, 0);
+      this.peakGpuResourceBytes = Math.max(
+        this.peakGpuResourceBytes,
+        this.currentGpuResourceBytes() + pendingBytes,
+      );
+    } catch (error) {
+      deleteFrameResources(gl, pendingFrames.values());
+      throw error;
+    } finally {
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT, previousUnpack);
+      gl.activeTexture(previousActive);
+      gl.bindTexture(gl.TEXTURE_2D, previousTexture);
+    }
+
+    const previousFrames = this.frameResources;
+    this.frameResources = pendingFrames;
+    this.models = [...models];
+    this.selectedObservationId = models[0].observationId;
+    this.selectionSequence += 1;
+    this.selectedAt = performance.now();
+    this.textureValidation = pendingFrames.get(this.selectedObservationId)?.textureValidation;
+    deleteFrameResources(gl, previousFrames.values());
+    previousFrames.clear();
+    this.map?.triggerRepaint();
+    this.emit("ready");
+  }
+
   private createResources(gl: WebGL2RenderingContext) {
     if (!this.program) throw new RadarRendererError("renderer program is unavailable");
-    const bounds = buildMercatorBounds(this.model.center, this.model.maxRangeM);
+    const primary = this.models[0];
+    const bounds = buildMercatorBounds(
+      primary.center,
+      Math.max(...this.models.map((model) => model.maxRangeM)),
+    );
     const vertices = new Float32Array([
       bounds.west, bounds.north,
       bounds.east, bounds.north,
@@ -352,56 +568,10 @@ export class RadarCustomLayer implements CustomLayerInterface {
     const previousUnpack = gl.getParameter(gl.UNPACK_ALIGNMENT) as number;
     const previousActive = gl.getParameter(gl.ACTIVE_TEXTURE) as number;
     const previousTexture = gl.getParameter(gl.TEXTURE_BINDING_2D) as WebGLTexture | null;
+    const pendingFrames = new Map<string, RadarFrameResources>();
     try {
       gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-      this.rawTexture = createTexture2d(
-        gl,
-        this.model.gateCount,
-        this.model.radialCount,
-        gl.R8UI,
-        gl.RED_INTEGER,
-        gl.UNSIGNED_BYTE,
-        this.model.rawCodes,
-      );
-      this.statusTexture = createTexture2d(
-        gl,
-        this.model.gateCount,
-        this.model.radialCount,
-        gl.R8UI,
-        gl.RED_INTEGER,
-        gl.UNSIGNED_BYTE,
-        this.model.statuses,
-      );
-      this.lookupTexture = createTexture2d(
-        gl,
-        this.model.azimuthLookup.length,
-        1,
-        gl.R16UI,
-        gl.RED_INTEGER,
-        gl.UNSIGNED_SHORT,
-        this.model.azimuthLookup,
-      );
-      const radialMetadata = new Float32Array(this.model.radialCount * 3);
-      for (let radialIndex = 0; radialIndex < this.model.radialCount; radialIndex += 1) {
-        const destination = radialIndex * 3;
-        radialMetadata[destination] = degreesToRadians(this.model.azimuths[radialIndex]);
-        radialMetadata[destination + 1] = degreesToRadians(
-          this.model.beamWidths[radialIndex] / 2,
-        );
-        radialMetadata[destination + 2] = degreesToRadians(
-          this.model.elevations[radialIndex],
-        );
-      }
-      this.radialMetadataTexture = createTexture2d(
-        gl,
-        this.model.radialCount,
-        1,
-        gl.RGB32F,
-        gl.RGB,
-        gl.FLOAT,
-        radialMetadata,
-      );
-      const palette = buildReflectivityPalette(this.model.scale, this.model.offset);
+      const palette = buildReflectivityPalette(primary.scale, primary.offset);
       this.paletteTexture = createTexture2d(
         gl,
         256,
@@ -411,15 +581,23 @@ export class RadarCustomLayer implements CustomLayerInterface {
         gl.UNSIGNED_BYTE,
         palette,
       );
-      this.textureValidation = validateTextureUploads(gl, this.model, {
-        raw: this.rawTexture,
-        status: this.statusTexture,
-        lookup: this.lookupTexture,
-        palette: this.paletteTexture,
-      }, palette);
-      if (!this.textureValidation.allPassed) {
-        throw new RadarRendererError("GPU texture readback disagrees with CPU source bytes");
+      for (const model of this.models) {
+        const frame = createFrameResources(gl, model, this.paletteTexture, palette);
+        pendingFrames.set(model.observationId, frame);
+        this.frameUploadCount += 1;
+        this.frameUploadBytes += frame.gpuBytes;
       }
+      this.frameResources = pendingFrames;
+      this.textureValidation = pendingFrames.get(this.selectedObservationId)?.textureValidation;
+      this.peakGpuResourceBytes = Math.max(
+        this.peakGpuResourceBytes,
+        this.currentGpuResourceBytes(),
+      );
+    } catch (error) {
+      deleteFrameResources(gl, pendingFrames.values());
+      if (this.paletteTexture) gl.deleteTexture(this.paletteTexture);
+      this.paletteTexture = null;
+      throw error;
     } finally {
       gl.pixelStorei(gl.UNPACK_ALIGNMENT, previousUnpack);
       gl.activeTexture(previousActive);
@@ -428,8 +606,9 @@ export class RadarCustomLayer implements CustomLayerInterface {
   }
 
   private completePendingFence(gl: WebGL2RenderingContext) {
-    if (!this.pendingFence || this.paintReceipt) return;
-    const result = gl.clientWaitSync(this.pendingFence, 0, 0);
+    const pending = this.pendingPaint;
+    if (!pending) return;
+    const result = gl.clientWaitSync(pending.sync, 0, 0);
     if (result === gl.TIMEOUT_EXPIRED) {
       this.map?.triggerRepaint();
       return;
@@ -437,49 +616,89 @@ export class RadarCustomLayer implements CustomLayerInterface {
     if (result === gl.WAIT_FAILED) {
       this.runtimeError = "GPU completion fence failed";
       this.emit("error", this.runtimeError);
-      gl.deleteSync(this.pendingFence);
-      this.pendingFence = null;
+      gl.deleteSync(pending.sync);
+      this.pendingPaint = null;
+      this.rejectPaintWaiter(pending.selectionSequence, this.runtimeError);
       return;
     }
-    gl.deleteSync(this.pendingFence);
-    this.pendingFence = null;
+    gl.deleteSync(pending.sync);
+    this.pendingPaint = null;
     const completedAt = performance.now();
     this.paintReceipt = {
-      observationId: this.model.observationId,
+      generation: pending.generation,
+      observationId: pending.observationId,
       contextEpoch: this.contextEpoch,
-      drawSequence: this.drawCount,
+      selectionSequence: pending.selectionSequence,
+      drawSequence: pending.drawSequence,
       completedAtUnixMs: Date.now(),
-      firstPaintLatencyMs: completedAt - this.uploadCompletedAt,
+      firstPaintLatencyMs: this.paintReceipts.length === 0
+        ? completedAt - this.uploadCompletedAt
+        : this.paintReceipts[0].firstPaintLatencyMs,
+      residentSwitchLatencyMs: completedAt - pending.selectedAt,
       framebufferWidth: gl.drawingBufferWidth,
       framebufferHeight: gl.drawingBufferHeight,
     };
+    this.paintReceipts.push(this.paintReceipt);
+    if (this.paintReceipts.length > 64) this.paintReceipts.shift();
+    this.switchLatencySamples.push(this.paintReceipt.residentSwitchLatencyMs);
+    if (this.switchLatencySamples.length > 240) this.switchLatencySamples.shift();
+    const waiter = this.paintWaiters.get(pending.selectionSequence);
+    if (waiter) {
+      globalThis.clearTimeout(waiter.timeout);
+      this.paintWaiters.delete(pending.selectionSequence);
+      waiter.resolve(this.paintReceipt);
+    }
     this.emit("painted");
   }
 
   private deleteResources(gl: WebGL2RenderingContext) {
-    if (this.pendingFence) gl.deleteSync(this.pendingFence);
-    if (this.rawTexture) gl.deleteTexture(this.rawTexture);
-    if (this.statusTexture) gl.deleteTexture(this.statusTexture);
-    if (this.lookupTexture) gl.deleteTexture(this.lookupTexture);
+    if (this.pendingPaint) gl.deleteSync(this.pendingPaint.sync);
+    deleteFrameResources(gl, this.frameResources.values());
     if (this.paletteTexture) gl.deleteTexture(this.paletteTexture);
-    if (this.radialMetadataTexture) gl.deleteTexture(this.radialMetadataTexture);
     if (this.quadBuffer) gl.deleteBuffer(this.quadBuffer);
     if (this.vao) gl.deleteVertexArray(this.vao);
     if (this.program) gl.deleteProgram(this.program);
-    this.pendingFence = null;
-    this.rawTexture = null;
-    this.statusTexture = null;
-    this.lookupTexture = null;
+    this.pendingPaint = null;
+    this.frameResources.clear();
     this.paletteTexture = null;
-    this.radialMetadataTexture = null;
     this.quadBuffer = null;
     this.vao = null;
     this.program = null;
     this.uniforms = null;
+    for (const [sequence, waiter] of this.paintWaiters) {
+      globalThis.clearTimeout(waiter.timeout);
+      waiter.reject(new RadarRendererError(`renderer removed before selection ${sequence} painted`));
+    }
+    this.paintWaiters.clear();
   }
 
   private emit(status: RadarRendererSnapshot["status"], error?: string) {
     this.options.onSnapshot(this.buildSnapshot(status, error));
+  }
+
+  private requireSelectedFrame(): RadarFrameResources {
+    const frame = this.frameResources.get(this.selectedObservationId);
+    if (!frame) {
+      throw new RadarRendererError(
+        `selected observation ${this.selectedObservationId} has no current-context resources`,
+      );
+    }
+    return frame;
+  }
+
+  private currentGpuResourceBytes(): number {
+    let total = this.paletteTexture ? 256 * 4 : 0;
+    total += this.quadBuffer ? 6 * 2 * Float32Array.BYTES_PER_ELEMENT : 0;
+    for (const frame of this.frameResources.values()) total += frame.gpuBytes;
+    return total;
+  }
+
+  private rejectPaintWaiter(selectionSequence: number, message: string) {
+    const waiter = this.paintWaiters.get(selectionSequence);
+    if (!waiter) return;
+    globalThis.clearTimeout(waiter.timeout);
+    this.paintWaiters.delete(selectionSequence);
+    waiter.reject(new RadarRendererError(message));
   }
 
   private buildSnapshot(
@@ -488,19 +707,34 @@ export class RadarCustomLayer implements CustomLayerInterface {
   ): RadarRendererSnapshot {
     return {
       status,
-      observationId: this.model.observationId,
+      observationId: this.selectedObservationId,
+      selectedObservationId: this.selectedObservationId,
+      lastPaintedObservationId: this.paintReceipt?.observationId,
+      generation: generationNumber(this.model),
+      selectionSequence: this.selectionSequence,
+      residentObservationIds: [...this.frameResources.keys()],
       contextEpoch: this.contextEpoch,
       capabilities: this.capabilities,
       metrics: this.capabilities
         ? {
             shaderCompileLinkMs: this.shaderCompileLinkMs,
             uploadMs: this.uploadMs,
-            gpuResourceBytes: this.model.estimatedGpuBytes,
+            gpuResourceBytes: this.currentGpuResourceBytes(),
+            peakGpuResourceBytes: this.peakGpuResourceBytes,
+            cpuResourceBytes: this.models.reduce((total, model) => total + model.cpuBytes, 0),
+            residentFrameCount: this.frameResources.size,
+            frameUploadCount: this.frameUploadCount,
+            frameUploadBytes: this.frameUploadBytes,
             drawCpuP95Ms: percentile(this.drawCpuSamples, 0.95),
             drawCount: this.drawCount,
+            residentSwitchP50Ms: percentile(this.switchLatencySamples, 0.5),
+            residentSwitchP95Ms: percentile(this.switchLatencySamples, 0.95),
+            residentSwitchP99Ms: percentile(this.switchLatencySamples, 0.99),
           }
         : undefined,
       textureValidation: this.textureValidation,
+      textureValidationsPassed: [...this.frameResources.values()]
+        .filter((frame) => frame.textureValidation.allPassed).length,
       paintReceipt: this.paintReceipt,
       shaderLog: [...this.shaderLog],
       error: error ?? this.runtimeError,
@@ -513,6 +747,159 @@ interface RadarTextures {
   status: WebGLTexture | null;
   lookup: WebGLTexture | null;
   palette: WebGLTexture | null;
+}
+
+function createFrameResources(
+  gl: WebGL2RenderingContext,
+  model: RadarSweepCpuModel,
+  paletteTexture: WebGLTexture,
+  palette: Uint8Array,
+): RadarFrameResources {
+  let rawTexture: WebGLTexture | null = null;
+  let statusTexture: WebGLTexture | null = null;
+  let lookupTexture: WebGLTexture | null = null;
+  let radialMetadataTexture: WebGLTexture | null = null;
+  try {
+    rawTexture = createTexture2d(
+      gl,
+      model.gateCount,
+      model.radialCount,
+      gl.R8UI,
+      gl.RED_INTEGER,
+      gl.UNSIGNED_BYTE,
+      model.rawCodes,
+    );
+    statusTexture = createTexture2d(
+      gl,
+      model.gateCount,
+      model.radialCount,
+      gl.R8UI,
+      gl.RED_INTEGER,
+      gl.UNSIGNED_BYTE,
+      model.statuses,
+    );
+    lookupTexture = createTexture2d(
+      gl,
+      model.azimuthLookup.length,
+      1,
+      gl.R16UI,
+      gl.RED_INTEGER,
+      gl.UNSIGNED_SHORT,
+      model.azimuthLookup,
+    );
+    const radialMetadata = new Float32Array(model.radialCount * 3);
+    for (let radialIndex = 0; radialIndex < model.radialCount; radialIndex += 1) {
+      const destination = radialIndex * 3;
+      radialMetadata[destination] = degreesToRadians(model.azimuths[radialIndex]);
+      radialMetadata[destination + 1] = degreesToRadians(
+        model.beamWidths[radialIndex] / 2,
+      );
+      radialMetadata[destination + 2] = degreesToRadians(model.elevations[radialIndex]);
+    }
+    radialMetadataTexture = createTexture2d(
+      gl,
+      model.radialCount,
+      1,
+      gl.RGB32F,
+      gl.RGB,
+      gl.FLOAT,
+      radialMetadata,
+    );
+    const textureValidation = validateTextureUploads(gl, model, {
+      raw: rawTexture,
+      status: statusTexture,
+      lookup: lookupTexture,
+      palette: paletteTexture,
+    }, palette);
+    if (!textureValidation.allPassed) {
+      throw new RadarRendererError(
+        `GPU texture readback disagrees with CPU bytes for ${model.observationId}`,
+      );
+    }
+    return {
+      model,
+      rawTexture,
+      statusTexture,
+      lookupTexture,
+      radialMetadataTexture,
+      textureValidation,
+      gpuBytes: model.rawCodes.byteLength
+        + model.statuses.byteLength
+        + model.azimuthLookup.byteLength
+        + radialMetadata.byteLength,
+    };
+  } catch (error) {
+    if (rawTexture) gl.deleteTexture(rawTexture);
+    if (statusTexture) gl.deleteTexture(statusTexture);
+    if (lookupTexture) gl.deleteTexture(lookupTexture);
+    if (radialMetadataTexture) gl.deleteTexture(radialMetadataTexture);
+    throw error;
+  }
+}
+
+function deleteFrameResources(
+  gl: WebGL2RenderingContext,
+  frames: Iterable<RadarFrameResources>,
+) {
+  for (const frame of frames) {
+    gl.deleteTexture(frame.rawTexture);
+    gl.deleteTexture(frame.statusTexture);
+    gl.deleteTexture(frame.lookupTexture);
+    gl.deleteTexture(frame.radialMetadataTexture);
+  }
+}
+
+export function validateResidentModels(models: readonly RadarSweepCpuModel[]): void {
+  if (models.length < 1 || models.length > 20) {
+    throw new RadarRendererError("a resident loop must contain between 1 and 20 frames");
+  }
+  const primary = models[0];
+  const generation = generationNumber(primary);
+  const observations = new Set<string>();
+  let priorObservedAt = -Infinity;
+  for (const model of models) {
+    if (observations.has(model.observationId)) {
+      throw new RadarRendererError(`duplicate resident observation ${model.observationId}`);
+    }
+    observations.add(model.observationId);
+    if (generationNumber(model) !== generation) {
+      throw new RadarRendererError("all resident frames must belong to one generation");
+    }
+    if (
+      model.siteIcao !== primary.siteIcao
+      || model.product !== primary.product
+      || model.sourceKind !== primary.sourceKind
+      || model.scale !== primary.scale
+      || model.offset !== primary.offset
+      || model.center.longitude !== primary.center.longitude
+      || model.center.latitude !== primary.center.latitude
+    ) {
+      throw new RadarRendererError("resident frames must share one site/product/render key");
+    }
+    if (!Number.isSafeInteger(model.observedAtUnixMs) || model.observedAtUnixMs <= priorObservedAt) {
+      throw new RadarRendererError("resident frames must have strictly increasing measurement times");
+    }
+    priorObservedAt = model.observedAtUnixMs;
+  }
+}
+
+export function validateReplacementGeneration(current: number, replacement: number): void {
+  if (
+    !Number.isSafeInteger(current)
+    || !Number.isSafeInteger(replacement)
+    || current < 1
+    || replacement <= current
+  ) {
+    throw new RadarRendererError("replacement generation must advance monotonically");
+  }
+}
+
+function generationNumber(model: RadarSweepCpuModel): number {
+  const value = Number(model.generation);
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new RadarRendererError("generation must be a positive safe integer");
+  }
+  return value;
 }
 
 function validateTextureUploads(

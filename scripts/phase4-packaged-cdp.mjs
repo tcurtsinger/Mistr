@@ -1,0 +1,201 @@
+import { mkdir, writeFile } from "node:fs/promises";
+import { resolve } from "node:path";
+
+const port = Number(process.env.MISTR_CDP_PORT ?? 9337);
+const transitions = Number(process.env.MISTR_PHASE4_TRANSITIONS ?? 1_000);
+const stabilityRuns = Number(process.env.MISTR_PHASE4_STABILITY_RUNS ?? 2);
+const output = resolve(process.env.MISTR_PHASE4_OUTPUT ?? "artifacts/phase-4");
+if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) throw new Error("invalid CDP port");
+if (!Number.isSafeInteger(transitions) || transitions < 1 || transitions > 10_000) {
+  throw new Error("invalid transition count");
+}
+if (!Number.isSafeInteger(stabilityRuns) || stabilityRuns < 1 || stabilityRuns > 5) {
+  throw new Error("invalid stability run count");
+}
+
+await mkdir(output, { recursive: true });
+const target = await waitForTarget();
+const socket = new WebSocket(target.webSocketDebuggerUrl);
+await new Promise((resolveOpen, rejectOpen) => {
+  socket.onopen = resolveOpen;
+  socket.onerror = rejectOpen;
+});
+
+let nextId = 0;
+const pending = new Map();
+socket.onmessage = (event) => {
+  const message = JSON.parse(event.data);
+  const resolveCall = pending.get(message.id);
+  if (resolveCall) {
+    pending.delete(message.id);
+    resolveCall(message);
+  }
+};
+
+try {
+  await call("Runtime.enable");
+  await call("Page.enable");
+  await call("HeapProfiler.enable");
+  await waitForPhase4Api();
+  await evaluate("window.__MISTR_PHASE4__.pause()");
+  const windowInfo = await call("Browser.getWindowForTarget", { targetId: target.id });
+  assertProtocolResult(windowInfo, "Browser.getWindowForTarget");
+  const windowId = windowInfo.result.windowId;
+  const resize = await call("Browser.setWindowBounds", {
+    windowId,
+    bounds: { left: 0, top: 0, width: 3_840, height: 2_160, windowState: "normal" },
+  });
+  assertProtocolResult(resize, "Browser.setWindowBounds");
+  await delay(1_500);
+
+  const scenarios = [];
+  for (let run = 1; run <= stabilityRuns; run += 1) {
+    const scenario = await evaluate(
+      `(async()=>{window.__MISTR_PHASE4__.pause();await new Promise(r=>setTimeout(r,750));return window.__MISTR_PHASE4__.runScenario(${transitions})})()`,
+      true,
+    );
+    await call("HeapProfiler.collectGarbage");
+    await delay(500);
+    scenario.stabilizedHeapBytes = await evaluate(
+      "performance.memory?.usedJSHeapSize ?? null",
+    );
+    scenarios.push(scenario);
+  }
+  const report = await evaluate("window.__MISTR_PHASE4__.report()");
+  const bodyText = await evaluate("document.body.innerText");
+  const finalBounds = await call("Browser.getWindowForTarget", { targetId: target.id });
+  assertProtocolResult(finalBounds, "Browser.getWindowForTarget");
+  const screenshot = await call("Page.captureScreenshot", {
+    format: "png",
+    captureBeyondViewport: false,
+    fromSurface: true,
+  });
+  assertProtocolResult(screenshot, "Page.captureScreenshot");
+
+  await writeFile(resolve(output, "packaged-report-4k.json"), `${JSON.stringify(report, null, 2)}\n`);
+  await writeFile(resolve(output, "packaged-scenarios-4k.json"), `${JSON.stringify(scenarios, null, 2)}\n`);
+  await writeFile(resolve(output, "packaged-ui-4k.txt"), `${bodyText}\n`);
+  await writeFile(
+    resolve(output, "packaged-4k.png"),
+    Buffer.from(screenshot.result.data, "base64"),
+  );
+
+  const failures = validate(report, scenarios, finalBounds.result.bounds);
+  const summary = {
+    status: failures.length === 0 ? "PASS" : "FAIL",
+    bounds: finalBounds.result.bounds,
+    scenarios: scenarios.map((scenario) => ({
+      transitions: scenario.completedTransitions,
+      frameP95Ms: scenario.frameTiming.p95Ms,
+      longTaskCount: scenario.frameTiming.longTaskCount,
+      longTaskObserverAvailable: scenario.frameTiming.longTaskObserverAvailable,
+      hotPathActivityZero: scenario.hotPathActivityZero,
+      heapBeforeBytes: scenario.heapBeforeBytes,
+      heapAfterBytes: scenario.heapAfterBytes,
+      stabilizedHeapBytes: scenario.stabilizedHeapBytes,
+    })),
+    renderer: report.renderer?.metrics,
+    failures,
+  };
+  await writeFile(resolve(output, "packaged-summary-4k.json"), `${JSON.stringify(summary, null, 2)}\n`);
+  console.log(JSON.stringify(summary, null, 2));
+  if (failures.length > 0) process.exitCode = 1;
+} finally {
+  socket.close();
+}
+
+function call(method, params = {}) {
+  const id = ++nextId;
+  return new Promise((resolveCall) => {
+    pending.set(id, resolveCall);
+    socket.send(JSON.stringify({ id, method, params }));
+  });
+}
+
+async function evaluate(expression, awaitPromise = false) {
+  const response = await call("Runtime.evaluate", {
+    expression,
+    awaitPromise,
+    returnByValue: true,
+  });
+  assertProtocolResult(response, "Runtime.evaluate");
+  if (response.result.exceptionDetails) {
+    throw new Error(JSON.stringify(response.result.exceptionDetails));
+  }
+  return response.result.result.value;
+}
+
+async function waitForTarget() {
+  const deadline = Date.now() + 60_000;
+  while (Date.now() < deadline) {
+    try {
+      const targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
+      const page = targets.find((candidate) => candidate.type === "page");
+      if (page) return page;
+    } catch {
+      // The packaged process and WebView2 child are still starting.
+    }
+    await delay(250);
+  }
+  throw new Error(`Mistr page target did not appear on CDP port ${port}`);
+}
+
+async function waitForPhase4Api() {
+  const deadline = Date.now() + 120_000;
+  while (Date.now() < deadline) {
+    const ready = await evaluate("Boolean(window.__MISTR_PHASE4__)");
+    if (ready) return;
+    const errorText = await evaluate(
+      "document.querySelector('.benchmark-error')?.textContent ?? null",
+    );
+    if (errorText) throw new Error(`packaged app failed before residency: ${errorText}`);
+    await delay(250);
+  }
+  throw new Error("Phase 4 diagnostic API did not become ready");
+}
+
+function validate(report, scenarios, bounds) {
+  const failures = [];
+  const metrics = report.renderer?.metrics;
+  if (bounds.width !== 3_840 || bounds.height !== 2_160) failures.push("window_not_4k");
+  if (report.renderer?.paintReceipt?.framebufferWidth < 3_840) failures.push("paint_not_4k_width");
+  if (report.renderer?.paintReceipt?.framebufferHeight < 2_160) failures.push("paint_not_4k_height");
+  if (metrics?.residentFrameCount !== 20) failures.push("resident_count");
+  if (report.renderer?.textureValidationsPassed !== 20) failures.push("texture_readback");
+  if (!report.renderer?.capabilities?.hardwareAcceleration) failures.push("hardware_renderer");
+  if ((metrics?.gpuResourceBytes ?? Infinity) > 200 * 1024 * 1024) failures.push("gpu_target");
+  if ((metrics?.peakGpuResourceBytes ?? Infinity) > 256 * 1024 * 1024) failures.push("gpu_ceiling");
+  for (const [index, scenario] of scenarios.entries()) {
+    const prefix = `run_${index + 1}`;
+    if (scenario.completedTransitions !== transitions) failures.push(`${prefix}_transitions`);
+    if (!scenario.receiptTruthPassed) failures.push(`${prefix}_paint_truth`);
+    if (!scenario.hotPathActivityZero) failures.push(`${prefix}_hot_path_activity`);
+    if (!scenario.replacementStable) failures.push(`${prefix}_replacement_growth`);
+    if (scenario.frameTiming.p95Ms >= 16.7) failures.push(`${prefix}_frame_p95`);
+    if (!scenario.frameTiming.longTaskObserverAvailable) {
+      failures.push(`${prefix}_long_task_observer_unavailable`);
+    }
+    if (scenario.frameTiming.longTaskCount !== 0) failures.push(`${prefix}_long_tasks`);
+    if (scenario.framebufferWidth < 3_840 || scenario.framebufferHeight < 2_160) {
+      failures.push(`${prefix}_framebuffer`);
+    }
+  }
+  const stabilizedHeaps = scenarios
+    .map((scenario) => scenario.stabilizedHeapBytes)
+    .filter((value) => typeof value === "number");
+  if (
+    stabilizedHeaps.length > 1
+    && stabilizedHeaps.at(-1) > stabilizedHeaps[0] + 5 * 1024 * 1024
+  ) {
+    failures.push("stabilized_heap_growth");
+  }
+  return failures;
+}
+
+function assertProtocolResult(response, method) {
+  if (response.error) throw new Error(`${method}: ${JSON.stringify(response.error)}`);
+}
+
+function delay(milliseconds) {
+  return new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds));
+}

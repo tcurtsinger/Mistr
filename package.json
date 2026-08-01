@@ -18,6 +18,7 @@
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
+    "test:phase4:packaged": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-phase4-packaged.ps1",
     "env:capture": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/capture-environment.ps1",
     "fixture:download": "node scripts/verify-fixtures.mjs --download",
     "fixture:verify": "node scripts/verify-fixtures.mjs",
