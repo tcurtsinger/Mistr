@@ -12,7 +12,7 @@
 
 The packaged Tauri/WebView2 executable decoded 20 distinct hash-pinned public Level II archives through the existing Rust adapter and two-credit transfer broker. After each transfer, the frontend copied only compact CPU truth and released the bulk transfer lease. The custom layer then uploaded all 20 frames before playback began.
 
-Two consecutive packaged 3840 by 2160 scenarios each completed 1,000 receipt-gated hard cuts while deterministic pan/zoom actions exercised MapLibre. Both runs recorded zero radar network, disk, decode, normalization, or bulk IPC activity; zero long tasks; 6.2 ms P95 frame duration; exact selected/painted/playhead agreement; and stable known resource allocations through five atomic loop replacements per run.
+Two consecutive packaged 3840 by 2160 scenarios each completed 1,000 receipt-gated hard cuts while deterministic pan/zoom actions exercised MapLibre. Both runs recorded zero radar network, disk, decode, normalization, or bulk IPC activity; zero long tasks; 6.1 ms P95 frame duration; exact selected/painted/playhead agreement; and stable known resource allocations through five atomic loop replacements per run.
 
 The durable playback contract is recorded in [`16_RESIDENT_PLAYBACK_DECISION.md`](../16_RESIDENT_PLAYBACK_DECISION.md).
 
@@ -67,8 +67,8 @@ After the final paused, garbage-collected scenario, the seven-process Tauri/WebV
 
 | Whole process tree | Result |
 |---|---:|
-| Aggregate working set | 879,587,328 bytes (838.84 MiB) |
-| Aggregate private bytes | 1,059,655,680 bytes (1,010.57 MiB) |
+| Aggregate working set | 814,141,440 bytes (776.43 MiB) |
+| Aggregate private bytes | 976,736,256 bytes (931.49 MiB) |
 
 Those whole-process figures include the 4K browser and GPU surfaces, MapLibre, basemap tiles/cache, WebView2, UI, diagnostics, and radar. They are not radar-only allocations. The exact Mistr-owned ledger above is the enforceable radar budget.
 
@@ -109,32 +109,32 @@ The final repeatable runner performs two independent 1,000-transition scenarios.
 | Measurement | Run 1 | Run 2 | Gate |
 |---|---:|---:|---:|
 | Completed hard cuts | 1,000 | 1,000 | 1,000 |
-| Frame-duration P95 | 6.2 ms | 6.2 ms | < 16.7 ms |
+| Frame-duration P95 | 6.1 ms | 6.1 ms | < 16.7 ms |
 | Main-thread tasks ≥ 50 ms | 0 | 0 | 0 recurring |
 | Radar hot-path counter delta | all zero | all zero | all zero |
 | Paint-truth sequence | PASS | PASS | PASS |
 | Atomic replacements | 5/5 stable | 5/5 stable | stable |
-| Stabilized JS heap after explicit diagnostic GC | 84,218,915 bytes | 89,206,275 bytes | ≤ 5 MiB bounded delta |
+| Stabilized JS heap after explicit diagnostic GC | 83,703,075 bytes | 87,751,825 bytes | ≤ 5 MiB bounded delta |
 
-The 4,987,360-byte stabilized heap difference is 4.76 MiB and remains within the runner's 5 MiB bounded-stability tolerance. Raw pre-GC heap snapshots are retained in the evidence because they show why uncollected heap size is not treated as an allocation ledger.
+The 4,048,750-byte stabilized heap difference is 3.86 MiB and remains within the runner's 5 MiB bounded-stability tolerance. Raw pre-GC heap snapshots are retained in the evidence because they show why uncollected heap size is not treated as an allocation ledger.
 
 Final renderer metrics after the second run:
 
 | Renderer measurement | Result |
 |---|---:|
-| All-frame upload plus readback validation | 76.4 ms |
-| First paint after upload | 8.5 ms |
+| All-frame upload plus readback validation | 121.9 ms |
+| First paint after upload | 10.6 ms |
 | Resident switch-to-GPU-receipt P50 | 10.5 ms |
-| Resident switch-to-GPU-receipt P95 | 11.9 ms |
-| Resident switch-to-GPU-receipt P99 | 14.8 ms |
-| Custom-layer draw CPU P95 | 0.9 ms |
-| Total custom-layer draws in final process | 4,326 |
+| Resident switch-to-GPU-receipt P95 | 11.8 ms |
+| Resident switch-to-GPU-receipt P99 | 14.4 ms |
+| Custom-layer draw CPU P95 | 1.0 ms |
+| Total custom-layer draws in final process | 4,385 |
 
 Frame duration is measured from `requestAnimationFrame` timestamps over the full packaged interaction window. Switch latency is the stronger per-transition value: it begins at selection and ends only when the selected draw's GPU fence completes.
 
 ## Automated regression coverage
 
-TypeScript contains 54 tests across 14 files. Phase 4 additions cover:
+JavaScript/TypeScript contains 59 tests across 15 files. Phase 4 additions cover:
 
 - playhead hold until a matching paint receipt;
 - rejection of non-resident scrub targets;
@@ -143,6 +143,8 @@ TypeScript contains 54 tests across 14 files. Phase 4 additions cover:
 - monotonic generation advancement across atomic replacements;
 - nearest-rank frame timing and 50 ms long-task classification;
 - draining buffered long-task observer records before the scenario is certified;
+- refusal to weaken the two-run, 1,000-transition packaged workload;
+- packaged rejection of alignment, layer-coexistence, or renderer-status failure;
 - exact Phase 4 fixture ID forwarding through the leased binary path; and
 - rejection of path-like fixture input.
 

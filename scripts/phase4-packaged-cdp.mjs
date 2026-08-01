@@ -1,17 +1,14 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import {
+  parseAcceptanceWorkload,
+  validatePhase4Acceptance,
+} from "./phase4-packaged-validation.mjs";
 
 const port = Number(process.env.MISTR_CDP_PORT ?? 9337);
-const transitions = Number(process.env.MISTR_PHASE4_TRANSITIONS ?? 1_000);
-const stabilityRuns = Number(process.env.MISTR_PHASE4_STABILITY_RUNS ?? 2);
+const { transitions, stabilityRuns } = parseAcceptanceWorkload();
 const output = resolve(process.env.MISTR_PHASE4_OUTPUT ?? "artifacts/phase-4");
 if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) throw new Error("invalid CDP port");
-if (!Number.isSafeInteger(transitions) || transitions < 1 || transitions > 10_000) {
-  throw new Error("invalid transition count");
-}
-if (!Number.isSafeInteger(stabilityRuns) || stabilityRuns < 1 || stabilityRuns > 5) {
-  throw new Error("invalid stability run count");
-}
 
 await mkdir(output, { recursive: true });
 const target = await waitForTarget();
@@ -80,7 +77,13 @@ try {
     Buffer.from(screenshot.result.data, "base64"),
   );
 
-  const failures = validate(report, scenarios, finalBounds.result.bounds);
+  const failures = validatePhase4Acceptance(
+    report,
+    scenarios,
+    finalBounds.result.bounds,
+    transitions,
+    stabilityRuns,
+  );
   const summary = {
     status: failures.length === 0 ? "PASS" : "FAIL",
     bounds: finalBounds.result.bounds,
@@ -152,44 +155,6 @@ async function waitForPhase4Api() {
     await delay(250);
   }
   throw new Error("Phase 4 diagnostic API did not become ready");
-}
-
-function validate(report, scenarios, bounds) {
-  const failures = [];
-  const metrics = report.renderer?.metrics;
-  if (bounds.width !== 3_840 || bounds.height !== 2_160) failures.push("window_not_4k");
-  if (report.renderer?.paintReceipt?.framebufferWidth < 3_840) failures.push("paint_not_4k_width");
-  if (report.renderer?.paintReceipt?.framebufferHeight < 2_160) failures.push("paint_not_4k_height");
-  if (metrics?.residentFrameCount !== 20) failures.push("resident_count");
-  if (report.renderer?.textureValidationsPassed !== 20) failures.push("texture_readback");
-  if (!report.renderer?.capabilities?.hardwareAcceleration) failures.push("hardware_renderer");
-  if ((metrics?.gpuResourceBytes ?? Infinity) > 200 * 1024 * 1024) failures.push("gpu_target");
-  if ((metrics?.peakGpuResourceBytes ?? Infinity) > 256 * 1024 * 1024) failures.push("gpu_ceiling");
-  for (const [index, scenario] of scenarios.entries()) {
-    const prefix = `run_${index + 1}`;
-    if (scenario.completedTransitions !== transitions) failures.push(`${prefix}_transitions`);
-    if (!scenario.receiptTruthPassed) failures.push(`${prefix}_paint_truth`);
-    if (!scenario.hotPathActivityZero) failures.push(`${prefix}_hot_path_activity`);
-    if (!scenario.replacementStable) failures.push(`${prefix}_replacement_growth`);
-    if (scenario.frameTiming.p95Ms >= 16.7) failures.push(`${prefix}_frame_p95`);
-    if (!scenario.frameTiming.longTaskObserverAvailable) {
-      failures.push(`${prefix}_long_task_observer_unavailable`);
-    }
-    if (scenario.frameTiming.longTaskCount !== 0) failures.push(`${prefix}_long_tasks`);
-    if (scenario.framebufferWidth < 3_840 || scenario.framebufferHeight < 2_160) {
-      failures.push(`${prefix}_framebuffer`);
-    }
-  }
-  const stabilizedHeaps = scenarios
-    .map((scenario) => scenario.stabilizedHeapBytes)
-    .filter((value) => typeof value === "number");
-  if (
-    stabilizedHeaps.length > 1
-    && stabilizedHeaps.at(-1) > stabilizedHeaps[0] + 5 * 1024 * 1024
-  ) {
-    failures.push("stabilized_heap_growth");
-  }
-  return failures;
 }
 
 function assertProtocolResult(response, method) {
