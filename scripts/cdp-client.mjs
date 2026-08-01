@@ -58,3 +58,30 @@ export class CdpClient {
     this.pending.clear();
   }
 }
+
+export function openWebSocketWithTimeout(socket, timeoutMs = 15_000) {
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1) {
+    return Promise.reject(new RangeError("WebSocket handshake timeout must be positive"));
+  }
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (complete) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      socket.onopen = null;
+      socket.onerror = null;
+      socket.onclose = null;
+      complete();
+    };
+    const timeout = setTimeout(() => finish(() => {
+      socket.close();
+      reject(new Error(`CDP WebSocket handshake timed out after ${timeoutMs} ms`));
+    }), timeoutMs);
+    socket.onopen = () => finish(resolve);
+    socket.onerror = () => finish(() => reject(new Error("CDP WebSocket handshake failed")));
+    socket.onclose = () => finish(() => reject(
+      new Error("CDP WebSocket closed before the handshake completed"),
+    ));
+  });
+}

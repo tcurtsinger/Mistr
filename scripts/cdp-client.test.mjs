@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CdpClient } from "./cdp-client.mjs";
+import { CdpClient, openWebSocketWithTimeout } from "./cdp-client.mjs";
 
 describe("bounded CDP requests", () => {
   it("rejects a request that receives no response", async () => {
@@ -22,6 +22,26 @@ describe("bounded CDP requests", () => {
     socket[`on${event}`]();
 
     await expect(pending).rejects.toThrow(message);
+  });
+});
+
+describe("bounded CDP WebSocket handshake", () => {
+  it("rejects a handshake that never opens", async () => {
+    const socket = fakeSocket();
+    await expect(openWebSocketWithTimeout(socket, 5)).rejects.toThrow(
+      "CDP WebSocket handshake timed out after 5 ms",
+    );
+  });
+
+  it("rejects a clean close before the handshake opens", async () => {
+    const socket = fakeSocket();
+    const pending = openWebSocketWithTimeout(socket);
+
+    socket.onclose();
+
+    await expect(pending).rejects.toThrow(
+      "CDP WebSocket closed before the handshake completed",
+    );
   });
 });
 

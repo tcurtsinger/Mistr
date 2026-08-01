@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   parseAcceptanceWorkload,
+  phase4ScenarioTimeoutMs,
   validatePhase4Acceptance,
 } from "./phase4-packaged-validation.mjs";
 
@@ -14,6 +15,8 @@ describe("Phase 4 packaged acceptance validation", () => {
       MISTR_PHASE4_TRANSITIONS: "1500",
       MISTR_PHASE4_STABILITY_RUNS: "3",
     })).toEqual({ transitions: 1_500, stabilityRuns: 3 });
+    expect(phase4ScenarioTimeoutMs(1_000)).toBe(60_000);
+    expect(phase4ScenarioTimeoutMs(10_000)).toBe(600_000);
   });
 
   it.each([

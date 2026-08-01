@@ -1,8 +1,9 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { CdpClient } from "./cdp-client.mjs";
+import { CdpClient, openWebSocketWithTimeout } from "./cdp-client.mjs";
 import {
   parseAcceptanceWorkload,
+  phase4ScenarioTimeoutMs,
   validatePhase4Acceptance,
 } from "./phase4-packaged-validation.mjs";
 
@@ -14,10 +15,7 @@ if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) throw new Error("i
 await mkdir(output, { recursive: true });
 const target = await waitForTarget();
 const socket = new WebSocket(target.webSocketDebuggerUrl);
-await new Promise((resolveOpen, rejectOpen) => {
-  socket.onopen = resolveOpen;
-  socket.onerror = rejectOpen;
-});
+await openWebSocketWithTimeout(socket);
 
 const client = new CdpClient(socket);
 
@@ -42,7 +40,7 @@ try {
     const scenario = await evaluate(
       `(async()=>{window.__MISTR_PHASE4__.pause();await new Promise(r=>setTimeout(r,750));return window.__MISTR_PHASE4__.runScenario(${transitions})})()`,
       true,
-      60_000,
+      phase4ScenarioTimeoutMs(transitions),
     );
     await call("HeapProfiler.collectGarbage");
     await delay(500);

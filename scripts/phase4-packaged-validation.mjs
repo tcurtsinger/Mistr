@@ -29,6 +29,13 @@ export function parseAcceptanceWorkload(environment = process.env) {
   return { transitions, stabilityRuns };
 }
 
+export function phase4ScenarioTimeoutMs(transitions) {
+  if (!Number.isSafeInteger(transitions) || transitions < MIN_PHASE4_TRANSITIONS) {
+    throw new RangeError("scenario timeout requires an accepted transition count");
+  }
+  return Math.max(60_000, transitions * 60);
+}
+
 export function validatePhase4Acceptance(
   report,
   scenarios,
