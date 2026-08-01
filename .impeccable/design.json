@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-01T19:00:00Z",
+  "title": "Design System: Mistr",
+  "extensions": {
+    "colorMeta": {
+      "night": { "role": "neutral", "displayName": "Night", "canonical": "#050506", "tonalRamp": ["#020203", "#050506", "#0B0B0E"] },
+      "stage-black": { "role": "neutral", "displayName": "Stage Black", "canonical": "#080B12", "tonalRamp": ["#04060A", "#080B12", "#101725"] },
+      "cobalt-horizon": { "role": "primary", "displayName": "Cobalt Horizon", "canonical": "#0A2BFF", "tonalRamp": ["#06116A", "#0A2BFF", "#7183FF"] },
+      "rose-gather": { "role": "secondary", "displayName": "Rose Gather", "canonical": "#D24BFF", "tonalRamp": ["#66207F", "#D24BFF", "#E6A2FF"] },
+      "rose-light": { "role": "secondary", "displayName": "Rose Light", "canonical": "#FF7BAE", "tonalRamp": ["#8F3659", "#FF7BAE", "#FFB8D1"] },
+      "dawn-wash": { "role": "secondary", "displayName": "Dawn Wash", "canonical": "#FFD7E6", "tonalRamp": ["#8C747D", "#FFD7E6", "#FFF0F5"] },
+      "fresh": { "role": "tertiary", "displayName": "Fresh", "canonical": "#73E6B2", "tonalRamp": ["#2A7557", "#73E6B2", "#B8F5D8"] }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Cue Display", "purpose": "Mistr identity and rare sequence markers only." },
+      "body": { "displayName": "Operational Body", "purpose": "Readable interface and recovery copy." },
+      "label": { "displayName": "Cue Label", "purpose": "Short uppercase equipment labels." },
+      "numeric": { "displayName": "Measured Readout", "purpose": "Tabular time, freshness, position, and dBZ values." }
+    },
+    "shadows": [
+      { "name": "instrument", "value": "0 12px 36px rgba(0, 0, 0, 0.44)", "purpose": "Separates the compact control instruments from the map." },
+      { "name": "panel", "value": "0 20px 50px rgba(0, 0, 0, 0.52)", "purpose": "Separates the one open transient panel without creating a card hierarchy." }
+    ],
+    "motion": [
+      { "name": "instrument-state", "value": "180ms cubic-bezier(0.22, 1, 0.36, 1)", "purpose": "Focus and selection changes." },
+      { "name": "panel-reveal", "value": "220ms cubic-bezier(0.22, 1, 0.36, 1)", "purpose": "Compact side-panel entrance and exit." }
+    ],
+    "breakpoints": [
+      { "name": "compact-desktop", "value": "1100px" },
+      { "name": "standard-desktop", "value": "1440px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Radar Context Bar",
+      "kind": "nav",
+      "refersTo": "context-bar",
+      "description": "The compact top-center control for what radar is displayed.",
+      "html": "<nav class=\"ds-context\"><strong>MISTR</strong><button>KTLX</button><button>REFLECTIVITY</button><button>0.5&deg;</button></nav>",
+      "css": ".ds-context{height:50px;padding:6px 10px;border-radius:16px;background:rgba(8,11,18,.88);color:#F4F7FA;border:1px solid rgba(255,255,255,.16);box-shadow:0 12px 36px rgba(0,0,0,.44);backdrop-filter:blur(14px);display:flex;align-items:center;gap:6px}.ds-context strong{font:400 16px 'Saira Stencil One',sans-serif;letter-spacing:.12em;padding:0 10px}.ds-context button{height:36px;padding:0 12px;border:0;border-left:1px solid rgba(255,255,255,.1);background:transparent;color:#F4F7FA;font:600 12px 'Barlow Semi Condensed',sans-serif;letter-spacing:.08em}.ds-context button:hover,.ds-context button:focus-visible{background:linear-gradient(90deg,rgba(10,43,255,.22),rgba(210,75,255,.14));outline:none}"
+    },
+    {
+      "name": "Menu Trigger",
+      "kind": "button",
+      "refersTo": "edge-trigger",
+      "description": "The single small trigger for global application tools.",
+      "html": "<button class=\"ds-menu-trigger\" aria-label=\"Open Mistr menu\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M5 7h14M5 12h14M5 17h14\"/></svg></button>",
+      "css": ".ds-menu-trigger{width:48px;height:48px;border-radius:16px;border:1px solid rgba(255,255,255,.16);background:rgba(8,11,18,.88);color:#F4F7FA;box-shadow:0 12px 36px rgba(0,0,0,.44);backdrop-filter:blur(14px)}.ds-menu-trigger svg{width:21px;fill:none;stroke:currentColor;stroke-width:1.5}.ds-menu-trigger:hover,.ds-menu-trigger:focus-visible{border-color:#D24BFF;box-shadow:0 0 18px rgba(210,75,255,.22);outline:none}"
+    },
+    {
+      "name": "Compact Tool Menu",
+      "kind": "custom",
+      "description": "A grouped temporary menu growing from the left trigger.",
+      "html": "<aside class=\"ds-tool-menu\"><p>MISTR</p><button>RADAR SITES</button><button>MAP APPEARANCE</button><button>SETTINGS</button><button>HELP &amp; ABOUT</button></aside>",
+      "css": ".ds-tool-menu{width:260px;padding:12px;border-radius:16px;background:#080B12;color:#F4F7FA;border:1px solid rgba(255,255,255,.14);box-shadow:0 20px 50px rgba(0,0,0,.52)}.ds-tool-menu p{margin:6px 8px 12px;color:#8F96A8;font:500 11px 'Barlow Condensed',sans-serif;letter-spacing:.16em}.ds-tool-menu button{width:100%;padding:12px;border:0;border-top:1px solid rgba(255,255,255,.08);background:transparent;color:#F4F7FA;text-align:left;font:500 13px 'Barlow Semi Condensed',sans-serif;letter-spacing:.05em}.ds-tool-menu button:hover,.ds-tool-menu button:focus-visible{background:linear-gradient(90deg,rgba(10,43,255,.2),rgba(210,75,255,.12));outline:none}"
+    },
+    {
+      "name": "Playback Bar",
+      "kind": "custom",
+      "refersTo": "playback-bar",
+      "description": "The stable bottom-center control for observation time and playback truth.",
+      "html": "<section class=\"ds-playback\"><button aria-label=\"Play radar loop\">&#9654;</button><input aria-label=\"Displayed scan\" type=\"range\"><output>12:29:26 CDT · PAUSED · FRESH 00:41</output></section>",
+      "css": ".ds-playback{min-height:62px;padding:8px 15px;border-radius:18px;background:rgba(8,11,18,.88);color:#F4F7FA;border:1px solid rgba(255,255,255,.16);box-shadow:0 14px 40px rgba(0,0,0,.48);backdrop-filter:blur(14px);display:flex;align-items:center;gap:14px}.ds-playback:before{content:'';position:absolute;inset:0;border-radius:inherit;padding:1px;background:linear-gradient(90deg,#0A2BFF,#D24BFF,#FFD7E6);opacity:.48;pointer-events:none}.ds-playback input{flex:1;accent-color:#D24BFF}.ds-playback button{background:#0A2BFF;color:#F4F7FA;border:0;border-radius:8px;width:40px;height:40px}.ds-playback button:focus-visible{outline:2px solid #FFD7E6;outline-offset:2px}"
+    },
+    {
+      "name": "Measured Readout",
+      "kind": "custom",
+      "description": "A textual and numeric state block for observation truth.",
+      "html": "<output class=\"ds-readout\"><span>DISPLAYED SCAN</span><strong>12:29:26 CDT</strong><small>FRESH · 00:41</small></output>",
+      "css": ".ds-readout{display:grid;grid-template-columns:auto auto;gap:3px 10px;color:#F4F7FA;font:500 13px Recursive,'Cascadia Mono',monospace}.ds-readout span{grid-column:1/-1;color:#8F96A8;font:500 10px 'Barlow Condensed',sans-serif;letter-spacing:.16em}.ds-readout small{color:#73E6B2;font:500 11px 'Barlow Condensed',sans-serif;letter-spacing:.08em}"
+    },
+    {
+      "name": "Inspection Reticle",
+      "kind": "custom",
+      "description": "A map crosshair paired with a playback-bar dBZ readout rather than a floating tooltip.",
+      "html": "<span class=\"ds-reticle\" aria-label=\"Selected radar sample\"></span>",
+      "css": ".ds-reticle{display:block;width:28px;height:28px;border:1px solid #F4F7FA;border-radius:50%;position:relative;filter:drop-shadow(0 0 4px rgba(0,0,0,.9))}.ds-reticle:before,.ds-reticle:after{content:'';position:absolute;background:#F4F7FA}.ds-reticle:before{width:42px;height:1px;left:-7px;top:13px}.ds-reticle:after{width:1px;height:42px;left:13px;top:-7px}"
+    }
+  ],
+  "narrative": {
+    "northStar": "Stormlight Cyclorama",
+    "overview": "The radar is the stage. Four disciplined control zones frame it: radar context at the top, global tools at left, future alerts at right, and observation time at the bottom.",
+    "keyCharacteristics": ["full-screen radar", "compact top context bar", "one side trigger per edge", "stable bottom playback bar", "bounded spectral light"],
+    "rules": [
+      { "name": "The Weather Separation Rule", "body": "Cyclorama color never overlays radar pixels or imitates weather severity.", "section": "colors" },
+      { "name": "The One Panel Rule", "body": "Only one side panel may be open and it never resizes the map.", "section": "elevation" },
+      { "name": "The Cue, Not Costume Rule", "body": "Stencil type is reserved for identity and rare sequence markers.", "section": "typography" }
+    ],
+    "dos": ["Keep each spatial zone responsible for one class of task.", "Keep the playback bar stationary.", "Keep temporary menus short and grouped."],
+    "donts": ["Do not build a permanent sidebar.", "Do not add chains of side buttons.", "Do not show alerts before alerts exist.", "Do not wash radar with decorative color."]
+  }
+}

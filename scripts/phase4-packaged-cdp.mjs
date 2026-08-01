@@ -54,6 +54,8 @@ try {
     scenarios.push(scenario);
   }
   const report = await evaluate("window.__MISTR_PHASE4__.report()");
+  await evaluate("window.__MISTR_PHASE4__.recenter()");
+  await delay(500);
   const bodyText = await evaluate("document.body.innerText");
   const finalBounds = await call("Browser.getWindowForTarget", { targetId: target.id });
   assertProtocolResult(finalBounds, "Browser.getWindowForTarget");
