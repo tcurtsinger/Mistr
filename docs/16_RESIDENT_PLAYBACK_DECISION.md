@@ -89,9 +89,9 @@ On the primary packaged Windows workstation:
 - 20 distinct KTLX observations occupied 53,098,240 CPU bytes and 53,099,312 known GPU bytes;
 - atomic replacement peaked at 106,197,552 known GPU bytes;
 - two independent 4K runs completed 1,000 transitions each with no radar hot-path activity and no long tasks;
-- the runs measured 6.1 ms and 6.2 ms P95 frame duration;
-- resident switch-to-receipt P95 was 11.8 ms; and
-- stabilized JavaScript heap was 84,341,726 bytes after run one and 83,713,294 bytes after run two, a 0.60 MiB decrease.
+- both runs measured 6.2 ms P95 frame duration;
+- resident switch-to-receipt P95 was 11.3 ms; and
+- stabilized JavaScript heap was 86,318,335 bytes after run one and 85,886,833 bytes after run two, a 0.41 MiB decrease.
 
 ## Consequences
 

@@ -188,12 +188,17 @@ export class ResidentPlaybackController {
     completesCycle = false,
   ): Promise<RadarPaintReceipt> {
     if (this.operation) throw new Error("a frame selection is already awaiting paint");
+    const priorSelectionSequence = this.layer.getSnapshot().selectionSequence;
     const operation = this.layer.selectAndWait(observationId);
     this.operation = operation;
     this.emit();
     try {
       const receipt = await operation;
-      this.acceptReceipt(receipt, completesCycle);
+      const producedNewPaint = receipt.selectionSequence > priorSelectionSequence;
+      if (producedNewPaint && receipt.selectionSequence !== priorSelectionSequence + 1) {
+        throw new Error("paint receipt skipped a selection sequence");
+      }
+      this.acceptReceipt(receipt, completesCycle, producedNewPaint);
       return receipt;
     } finally {
       this.operation = null;
@@ -201,11 +206,17 @@ export class ResidentPlaybackController {
     }
   }
 
-  private acceptReceipt(receipt: RadarPaintReceipt, completesCycle: boolean) {
+  private acceptReceipt(
+    receipt: RadarPaintReceipt,
+    completesCycle: boolean,
+    producedNewPaint: boolean,
+  ) {
     this.assertReceipt(receipt);
     this.lastReceipt = receipt;
-    this.transitionCount += 1;
-    if (completesCycle) this.completedCycles += 1;
+    if (producedNewPaint) {
+      this.transitionCount += 1;
+      if (completesCycle) this.completedCycles += 1;
+    }
     this.emit();
   }
 

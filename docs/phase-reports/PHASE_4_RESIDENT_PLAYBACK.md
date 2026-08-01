@@ -67,8 +67,8 @@ After the final paused, garbage-collected scenario, the seven-process Tauri/WebV
 
 | Whole process tree | Result |
 |---|---:|
-| Aggregate working set | 789,356,544 bytes (752.79 MiB) |
-| Aggregate private bytes | 972,840,960 bytes (927.77 MiB) |
+| Aggregate working set | 806,400,000 bytes (769.04 MiB) |
+| Aggregate private bytes | 983,343,104 bytes (937.79 MiB) |
 
 Those whole-process figures include the 4K browser and GPU surfaces, MapLibre, basemap tiles/cache, WebView2, UI, diagnostics, and radar. They are not radar-only allocations. The exact Mistr-owned ledger above is the enforceable radar budget.
 
@@ -109,35 +109,36 @@ The final repeatable runner performs two independent 1,000-transition scenarios.
 | Measurement | Run 1 | Run 2 | Gate |
 |---|---:|---:|---:|
 | Completed hard cuts | 1,000 | 1,000 | 1,000 |
-| Frame-duration P95 | 6.1 ms | 6.2 ms | < 16.7 ms |
+| Frame-duration P95 | 6.2 ms | 6.2 ms | < 16.7 ms |
 | Main-thread tasks ≥ 50 ms | 0 | 0 | 0 recurring |
 | Radar hot-path counter delta | all zero | all zero | all zero |
 | Paint-truth sequence | PASS | PASS | PASS |
 | Atomic replacements | 5/5 stable | 5/5 stable | stable |
-| Stabilized JS heap after explicit diagnostic GC | 84,341,726 bytes | 83,713,294 bytes | ≤ 5 MiB bounded growth |
+| Stabilized JS heap after explicit diagnostic GC | 86,318,335 bytes | 85,886,833 bytes | ≤ 5 MiB bounded growth |
 
-The second stabilized heap was 628,432 bytes (0.60 MiB) smaller than the first, so measured growth was zero and remained within the runner's 5 MiB bounded-stability tolerance. Raw pre-GC heap snapshots are retained in the evidence because they show why uncollected heap size is not treated as an allocation ledger.
+The second stabilized heap was 431,502 bytes (0.41 MiB) smaller than the first, so measured growth was zero and remained within the runner's 5 MiB bounded-stability tolerance. Raw pre-GC heap snapshots are retained in the evidence because they show why uncollected heap size is not treated as an allocation ledger.
 
 Final renderer metrics after the second run:
 
 | Renderer measurement | Result |
 |---|---:|
-| All-frame upload plus readback validation | 84.3 ms |
-| First paint after upload | 6.4 ms |
-| Resident switch-to-GPU-receipt P50 | 10.6 ms |
-| Resident switch-to-GPU-receipt P95 | 11.8 ms |
-| Resident switch-to-GPU-receipt P99 | 13.4 ms |
+| All-frame upload plus readback validation | 87.6 ms |
+| First paint after upload | 6.6 ms |
+| Resident switch-to-GPU-receipt P50 | 10.4 ms |
+| Resident switch-to-GPU-receipt P95 | 11.3 ms |
+| Resident switch-to-GPU-receipt P99 | 11.9 ms |
 | Custom-layer draw CPU P95 | 1.0 ms |
-| Total custom-layer draws in final process | 4,315 |
+| Total custom-layer draws in final process | 4,336 |
 
 Frame duration is measured from `requestAnimationFrame` timestamps over the full packaged interaction window. Switch latency is the stronger per-transition value: it begins at selection and ends only when the selected draw's GPU fence completes.
 
 ## Automated regression coverage
 
-JavaScript/TypeScript contains 61 tests across 15 files. Phase 4 additions cover:
+JavaScript/TypeScript contains 63 tests across 15 files. Phase 4 additions cover:
 
 - playhead hold until a matching paint receipt;
 - cycle completion only after a successful wraparound paint receipt;
+- unchanged selections and one-frame loops remaining uncounted no-ops;
 - rejection of non-resident scrub targets;
 - controller/render-loop synchronization when replacement observations use new IDs;
 - ordered, unique, same-generation/same-render-key loop validation;

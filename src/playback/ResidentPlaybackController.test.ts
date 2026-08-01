@@ -34,6 +34,7 @@ class FakeLayer {
   }
 
   selectAndWait(observationId: string): Promise<RadarPaintReceipt> {
+    if (observationId === this.selected) return Promise.resolve(this.receipt());
     this.selected = observationId;
     this.sequence += 1;
     return new Promise((resolve, reject) => {
@@ -156,6 +157,36 @@ describe("resident playback truth", () => {
       transitionCount: 1,
       completedCycles: 0,
       lastPaintedObservationId: "frame-c",
+    });
+  });
+
+  it("does not count scrubbing to the already-selected frame as a transition", async () => {
+    const layer = new FakeLayer();
+    const controller = new ResidentPlaybackController(layer, frames());
+    await controller.establishInitialPaint();
+
+    await controller.scrub(0);
+
+    expect(controller.snapshot()).toMatchObject({
+      transitionCount: 0,
+      completedCycles: 0,
+      selectedObservationId: "frame-a",
+      lastPaintedObservationId: "frame-a",
+    });
+  });
+
+  it("does not invent transitions or cycles for a one-frame loop", async () => {
+    const layer = new FakeLayer();
+    const controller = new ResidentPlaybackController(layer, [frame("frame-a", 100)]);
+    await controller.establishInitialPaint();
+
+    await controller.step();
+
+    expect(controller.snapshot()).toMatchObject({
+      transitionCount: 0,
+      completedCycles: 0,
+      selectedObservationId: "frame-a",
+      lastPaintedObservationId: "frame-a",
     });
   });
 });
