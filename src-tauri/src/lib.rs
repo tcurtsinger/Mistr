@@ -27,6 +27,7 @@ pub fn run() {
             phase2_ipc::release_phase2_transfer_credit,
             phase2_ipc::phase2_transfer_snapshot,
             phase2_ipc::request_phase2_benchmark_sweep,
+            phase2_ipc::request_phase3_fixture_sweep,
             phase2_ipc::benchmark_phase2_encoder,
         ])
         .run(tauri::generate_context!())

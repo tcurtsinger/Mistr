@@ -1,6 +1,6 @@
 # Mistr
 
-**Status:** Implementation in progress. Phases 0 through 2 are complete on the primary Windows workstation. Phase 3 static GPU rendering is not yet implemented.
+**Status:** Implementation in progress. Phases 0 through 3 are complete on the primary Windows workstation. Phase 4 resident playback is next.
 
 Mistr is the bounded raw-radar feasibility prototype for GustAVO. Its purpose is to determine whether selected-site NEXRAD playback can move from provider-rendered map tiles to decoded, GPU-resident radar data without rewriting the full GustAVO desktop application.
 
@@ -42,7 +42,9 @@ Mistr will test a targeted retrofit before any Electron, Qt, game-engine, or ful
 | [12_FINAL_REPORT_TEMPLATE.md](12_FINAL_REPORT_TEMPLATE.md) | Required structure for the final evidence-backed feasibility decision |
 | [13_DECODER_DECISION.md](13_DECODER_DECISION.md) | Phase 1 decoder selection, pinning, ownership boundary, and safety limits |
 | [14_PACKED_SWEEP_V1.md](14_PACKED_SWEEP_V1.md) | Phase 2 binary layout, integrity, generation, and transfer-credit contract |
+| [15_GPU_RENDERER_DECISION.md](15_GPU_RENDERER_DECISION.md) | Phase 3 renderer representation, native-grid semantics, and retention ADR |
 | [phase-reports/PHASE_2_PACKED_WIRE_AND_IPC.md](phase-reports/PHASE_2_PACKED_WIRE_AND_IPC.md) | Phase 2 cross-language, packaged IPC, timing, and memory evidence |
+| [phase-reports/PHASE_3_STATIC_GPU_RENDERER.md](phase-reports/PHASE_3_STATIC_GPU_RENDERER.md) | Phase 3 packaged GPU, alignment, palette, coexistence, and performance evidence |
 | [DEFERRED_REVIEW_FINDINGS.md](DEFERRED_REVIEW_FINDINGS.md) | Non-blocking review edge cases deliberately recorded for later work |
 | [GLOSSARY.md](GLOSSARY.md) | Radar, rendering, and test terminology |
 

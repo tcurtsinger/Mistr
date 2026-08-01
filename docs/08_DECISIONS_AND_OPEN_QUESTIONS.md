@@ -42,9 +42,11 @@
 
 ### D007 — Texture-oriented GPU representation
 
-**Decision:** Reject a naïve six-vertices-per-bin mesh as the primary renderer. Benchmark shared geometry versus polar sampling and select one compact design.
+**Decision:** Reject a naïve six-vertices-per-bin mesh as the primary renderer. The measured Phase 3 production candidate is a six-vertex screen-space polar-sampling quad with native raw/status textures, a bounded irregular-azimuth lookup, and a palette texture.
 
 **Reason:** The 20-frame memory goal depends on not duplicating geometry per gate and frame.
+
+**Accepted record:** [`15_GPU_RENDERER_DECISION.md`](15_GPU_RENDERER_DECISION.md).
 
 ### D008 — Hard cuts establish correctness
 
@@ -91,6 +93,8 @@ Decision evidence: fixture correctness, malformed-input behavior, API stability,
 
 ### Q002 — Production renderer representation
 
+**Resolved:** Screen-space/bounding-quad polar sampling. The shared indexed grid remains a reference alternative; it measured 42,229,704 bytes and 2,638,080 triangles for the accepted fixture before value/status textures.
+
 Candidates:
 
 - Shared indexed radial geometry with value textures.
@@ -99,6 +103,8 @@ Candidates:
 Decision evidence: geospatial correctness, irregular-radial support, GPU/CPU time, memory, GL complexity, and context recovery.
 
 ### Q003 — Normalization grid
+
+**Resolved:** Preserve native per-observation dimensions. Missing bearings are zero entries in a 4,096-bin azimuth lookup and remain transparent; do not pad or bridge them into invented coverage. Compatible observations may be grouped later, but Phase 4 may use separate bounded texture sets.
 
 Questions:
 
@@ -129,6 +135,8 @@ Options:
 Preferred architectural direction is one Rust normalization boundary, but evidence and dependency maturity decide.
 
 ### Q006 — CPU retention for context restoration
+
+**Resolved for the resident-loop baseline:** Retain compact raw codes, detailed statuses, radial metadata (azimuth, beam width, and elevation), and azimuth lookup for every resident observation; release the packed float-value transfer after upload. The current 20-observation projection is about 50.64 MiB CPU and 50.66 MiB known GPU allocations. Phase 4 must confirm actual residency and revise visibly if another product/layout exceeds budget.
 
 Options:
 
@@ -196,9 +204,9 @@ Required ADRs before Phase 3:
 
 - [x] Decoder selection/pinning: [`13_DECODER_DECISION.md`](13_DECODER_DECISION.md).
 - [x] `PackedSweep v1` layout: [`14_PACKED_SWEEP_V1.md`](14_PACKED_SWEEP_V1.md).
-- [ ] GPU renderer representation.
-- [ ] Normalization grid and missing-data semantics.
-- [ ] CPU/GPU retention policy.
+- [x] GPU renderer representation: [`15_GPU_RENDERER_DECISION.md`](15_GPU_RENDERER_DECISION.md).
+- [x] Normalization grid and missing-data semantics: [`15_GPU_RENDERER_DECISION.md`](15_GPU_RENDERER_DECISION.md).
+- [x] CPU/GPU retention policy: [`15_GPU_RENDERER_DECISION.md`](15_GPU_RENDERER_DECISION.md).
 
 Required ADRs before Phase 7:
 

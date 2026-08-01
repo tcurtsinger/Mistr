@@ -2,8 +2,12 @@ use crate::packed_sweep::{
     PackedSweepIdentity, PackedSweepSummary, encode_packed_sweep, phase2_benchmark_sweep,
     validate_packed_sweep,
 };
-use serde::Serialize;
+use crate::radar::{MAX_LEVEL2_INPUT_BYTES, RadarProduct, decode_level2};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::Read;
+use std::path::PathBuf;
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 use tauri::ipc::Response;
@@ -11,6 +15,9 @@ use tauri::ipc::Response;
 pub const TRANSFER_CREDIT_LIMIT: u8 = 2;
 const MAX_BENCHMARK_ITERATIONS: u8 = 20;
 const MAX_DIAGNOSTIC_HOLD_MS: u64 = 2_000;
+const PHASE3_FIXTURE_NAME: &str = "KTLX20240520_230512_V06";
+const PHASE3_FIXTURE_ID: &str = "ktlx-2024-05-20-230512-v06";
+const FIXTURE_MANIFEST_JSON: &str = include_str!("../../fixtures/manifest.json");
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -444,6 +451,167 @@ pub async fn request_phase2_benchmark_sweep(
     Ok(Response::new(bytes))
 }
 
+#[tauri::command]
+pub async fn request_phase3_fixture_sweep(
+    state: tauri::State<'_, TransferBroker>,
+    session: u64,
+    generation: u64,
+) -> Result<Response, TransferError> {
+    let broker = state.inner().clone();
+    broker.acquire(session, generation)?;
+    let task = tauri::async_runtime::spawn_blocking(move || {
+        let path = phase3_fixture_path()?;
+        let input = read_phase3_archive(&path)?;
+        verify_phase3_archive_hash(&input)?;
+        let decoded = decode_level2(&input, RadarProduct::Reflectivity)
+            .map_err(|error| TransferError::new("fixture_decode_failed", error.to_string()))?;
+        encode_packed_sweep(&decoded.sweep, PackedSweepIdentity { generation })
+            .map_err(|error| TransferError::new("wire_encode_failed", error.to_string()))
+    })
+    .await;
+
+    let encoded = match task {
+        Ok(encoded) => encoded,
+        Err(error) => {
+            broker.finish_without_publish(session);
+            return Err(TransferError::new("backend_task_failed", error.to_string()));
+        }
+    };
+    let bytes = match encoded {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            broker.finish_without_publish(session);
+            return Err(error);
+        }
+    };
+    broker.complete_for_publish(session, generation)?;
+    Ok(Response::new(bytes))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FixtureManifest {
+    schema_version: u8,
+    fixtures: Vec<FixtureManifestEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FixtureManifestEntry {
+    id: String,
+    size_bytes: u64,
+    sha256: String,
+}
+
+fn phase3_fixture_expectation() -> Result<FixtureManifestEntry, TransferError> {
+    let manifest: FixtureManifest =
+        serde_json::from_str(FIXTURE_MANIFEST_JSON).map_err(|error| {
+            TransferError::new(
+                "fixture_manifest_invalid",
+                format!("embedded fixture manifest is invalid: {error}"),
+            )
+        })?;
+    if manifest.schema_version != 1 {
+        return Err(TransferError::new(
+            "fixture_manifest_invalid",
+            format!(
+                "embedded fixture manifest schema {} is unsupported",
+                manifest.schema_version
+            ),
+        ));
+    }
+    manifest
+        .fixtures
+        .into_iter()
+        .find(|fixture| fixture.id == PHASE3_FIXTURE_ID)
+        .ok_or_else(|| {
+            TransferError::new(
+                "fixture_manifest_invalid",
+                format!("embedded fixture manifest is missing {PHASE3_FIXTURE_ID}"),
+            )
+        })
+}
+
+fn verify_phase3_archive_hash(input: &[u8]) -> Result<(), TransferError> {
+    let expected = phase3_fixture_expectation()?;
+    let actual_sha256 = format!("{:x}", Sha256::digest(input));
+    if input.len() as u64 != expected.size_bytes || actual_sha256 != expected.sha256 {
+        return Err(TransferError::new(
+            "fixture_hash_mismatch",
+            format!(
+                "Phase 3 fixture does not match manifest entry {PHASE3_FIXTURE_ID}: expected {} bytes / {}, got {} bytes / {actual_sha256}",
+                expected.size_bytes,
+                expected.sha256,
+                input.len()
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn read_phase3_archive(path: &std::path::Path) -> Result<Vec<u8>, TransferError> {
+    let file = std::fs::File::open(path).map_err(|error| {
+        TransferError::new(
+            "fixture_unavailable",
+            format!("Phase 3 fixture {} is unavailable: {error}", path.display()),
+        )
+    })?;
+    let metadata = file.metadata().map_err(|error| {
+        TransferError::new(
+            "fixture_unavailable",
+            format!(
+                "failed to inspect Phase 3 fixture {}: {error}",
+                path.display()
+            ),
+        )
+    })?;
+    if metadata.len() > MAX_LEVEL2_INPUT_BYTES as u64 {
+        return Err(TransferError::new(
+            "fixture_too_large",
+            format!(
+                "Phase 3 fixture is {} bytes; limit is {MAX_LEVEL2_INPUT_BYTES}",
+                metadata.len()
+            ),
+        ));
+    }
+    read_bounded(file, MAX_LEVEL2_INPUT_BYTES).map_err(|error| {
+        TransferError::new(
+            "fixture_read_failed",
+            format!("failed to read Phase 3 fixture {}: {error}", path.display()),
+        )
+    })
+}
+
+fn read_bounded(reader: impl Read, limit: usize) -> Result<Vec<u8>, String> {
+    let mut input = Vec::new();
+    reader
+        .take((limit as u64).saturating_add(1))
+        .read_to_end(&mut input)
+        .map_err(|error| error.to_string())?;
+    if input.len() > limit {
+        return Err(format!(
+            "input grew beyond the {limit}-byte limit while it was being read"
+        ));
+    }
+    Ok(input)
+}
+
+fn phase3_fixture_path() -> Result<PathBuf, TransferError> {
+    if let Some(path) = std::env::var_os("MISTR_PHASE3_FIXTURE_PATH") {
+        return Ok(PathBuf::from(path));
+    }
+    let current = std::env::current_dir().map_err(|error| {
+        TransferError::new(
+            "fixture_path_failed",
+            format!("failed to resolve current directory: {error}"),
+        )
+    })?;
+    Ok(current
+        .join("fixtures")
+        .join("cache")
+        .join(PHASE3_FIXTURE_NAME))
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EncoderBenchmarkReport {
@@ -579,6 +747,29 @@ mod tests {
 
     fn release_id(index: u8) -> String {
         format!("phase2-release-{index:02}")
+    }
+
+    #[test]
+    fn phase3_fixture_reader_enforces_the_limit_even_if_the_file_grows() {
+        let error = read_bounded(std::io::repeat(7), 128).unwrap_err();
+        assert_eq!(
+            error,
+            "input grew beyond the 128-byte limit while it was being read"
+        );
+        assert_eq!(read_bounded(&[7_u8; 128][..], 128).unwrap().len(), 128);
+    }
+
+    #[test]
+    fn phase3_fixture_hash_is_pinned_to_the_embedded_manifest() {
+        let expected = phase3_fixture_expectation().unwrap();
+        assert_eq!(expected.id, PHASE3_FIXTURE_ID);
+        assert_eq!(expected.size_bytes, 7_936_679);
+        assert_eq!(
+            expected.sha256,
+            "99c189c327307da6a26a9f265ee84bf9fc690dc1a7358db941949805afa4a0d3"
+        );
+        let error = verify_phase3_archive_hash(b"another valid archive could decode").unwrap_err();
+        assert_eq!(error.code, "fixture_hash_mismatch");
     }
 
     #[test]
