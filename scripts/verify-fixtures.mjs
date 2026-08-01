@@ -4,11 +4,15 @@ import { mkdir, readFile, rename, rm, stat } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
+import {
+  parseFixtureVerificationArgs,
+  selectFixturesForVerification,
+} from "./fixture-selection.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const fixtureRoot = join(root, "fixtures");
 const manifest = JSON.parse(await readFile(join(fixtureRoot, "manifest.json"), "utf8"));
-const shouldDownload = process.argv.includes("--download");
+const { shouldDownload, setName } = parseFixtureVerificationArgs(process.argv.slice(2));
 
 if (
   manifest.schemaVersion !== 1 ||
@@ -27,16 +31,23 @@ for (const fixture of manifest.fixtures) {
     throw new Error(`${fixture.id}: localPath escapes fixtures/cache`);
   }
 
-  if (shouldDownload) {
-    await downloadIfNeeded(fixture, destination);
-  }
-
-  await verifyFixture(fixture, destination);
 }
 
 validateFixtureSets(manifest.fixtureSets, fixtureIds);
+const selectedFixtures = selectFixturesForVerification(
+  manifest.fixtures,
+  manifest.fixtureSets,
+  setName,
+);
+for (const fixture of selectedFixtures) {
+  const destination = resolve(fixtureRoot, fixture.localPath);
+  if (shouldDownload) await downloadIfNeeded(fixture, destination);
+  await verifyFixture(fixture, destination);
+}
 
-console.log(`Verified ${manifest.fixtures.length} fixture(s).`);
+console.log(
+  `Verified ${selectedFixtures.length} fixture(s)${setName ? ` from ${setName}` : ""}.`,
+);
 
 function validateFixture(fixture, knownIds) {
   if (

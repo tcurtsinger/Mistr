@@ -12,7 +12,7 @@
 
 The packaged Tauri/WebView2 executable decoded 20 distinct hash-pinned public Level II archives through the existing Rust adapter and two-credit transfer broker. After each transfer, the frontend copied only compact CPU truth and released the bulk transfer lease. The custom layer then uploaded all 20 frames before playback began.
 
-Two consecutive packaged 3840 by 2160 scenarios each completed 1,000 receipt-gated hard cuts while deterministic pan/zoom actions exercised MapLibre. Both runs recorded zero radar network, disk, decode, normalization, or bulk IPC activity; zero long tasks; 6.1 ms P95 frame duration; at most 11.8 ms selection-to-GPU-receipt P95; exact selected/painted/playhead agreement; and stable known resource allocations through five atomic loop replacements per run.
+Two consecutive packaged 3840 by 2160 scenarios each completed 1,000 receipt-gated hard cuts while deterministic pan/zoom actions exercised MapLibre. Both runs recorded zero radar network, disk, decode, normalization, or bulk IPC activity; zero long tasks; at most 6.2 ms P95 frame duration; at most 11.6 ms selection-to-GPU-receipt P95; exact selected/painted/playhead agreement; and stable known resource allocations through five atomic loop replacements per run.
 
 The durable playback contract is recorded in [`16_RESIDENT_PLAYBACK_DECISION.md`](../16_RESIDENT_PLAYBACK_DECISION.md).
 
@@ -67,8 +67,8 @@ After the final paused, garbage-collected scenario, the seven-process Tauri/WebV
 
 | Whole process tree | Result |
 |---|---:|
-| Aggregate working set | 831,385,600 bytes (792.87 MiB) |
-| Aggregate private bytes | 1,008,525,312 bytes (961.80 MiB) |
+| Aggregate working set | 776,716,288 bytes (740.73 MiB) |
+| Aggregate private bytes | 947,138,560 bytes (903.26 MiB) |
 
 Those whole-process figures include the 4K browser and GPU surfaces, MapLibre, basemap tiles/cache, WebView2, UI, diagnostics, and radar. They are not radar-only allocations. The exact Mistr-owned ledger above is the enforceable radar budget.
 
@@ -109,37 +109,38 @@ The final repeatable runner performs two independent 1,000-transition scenarios.
 | Measurement | Run 1 | Run 2 | Gate |
 |---|---:|---:|---:|
 | Completed hard cuts | 1,000 | 1,000 | 1,000 |
-| Frame-duration P95 | 6.1 ms | 6.1 ms | < 16.7 ms |
-| Selection-to-GPU-receipt P95 | 11.5 ms | 11.8 ms | < 33.4 ms |
+| Frame-duration P95 | 6.1 ms | 6.2 ms | < 16.7 ms |
+| Selection-to-GPU-receipt P95 | 11.3 ms | 11.6 ms | < 33.4 ms |
 | Main-thread tasks ≥ 50 ms | 0 | 0 | 0 recurring |
 | Radar hot-path counter delta | all zero | all zero | all zero |
 | Paint-truth sequence | PASS | PASS | PASS |
 | Atomic replacements | 5/5 stable | 5/5 stable | stable |
-| Stabilized JS heap after explicit diagnostic GC | 83,257,458 bytes | 83,050,123 bytes | ≤ 5 MiB bounded growth |
+| Stabilized JS heap after explicit diagnostic GC | 80,421,602 bytes | 78,809,404 bytes | ≤ 5 MiB bounded growth |
 
-The second stabilized heap was 207,335 bytes (0.20 MiB) smaller than the first, so measured growth was zero and remained within the runner's 5 MiB bounded-stability tolerance. Raw pre-GC heap snapshots are retained in the evidence because they show why uncollected heap size is not treated as an allocation ledger.
+The second stabilized heap was 1,612,198 bytes (1.54 MiB) smaller than the first, so measured growth was zero and remained within the runner's 5 MiB bounded-stability tolerance. Raw pre-GC heap snapshots are retained in the evidence because they show why uncollected heap size is not treated as an allocation ledger.
 
 Final renderer metrics after the second run:
 
 | Renderer measurement | Result |
 |---|---:|
-| All-frame upload plus readback validation | 99.2 ms |
-| First paint after upload | 14.5 ms |
-| Resident switch-to-GPU-receipt P50 | 10.4 ms |
-| Resident switch-to-GPU-receipt P95 | 11.8 ms |
-| Resident switch-to-GPU-receipt P99 | 12.8 ms |
-| Custom-layer draw CPU P95 | 0.9 ms |
-| Total custom-layer draws in final process | 4,367 |
+| All-frame upload plus readback validation | 103.1 ms |
+| First paint after upload | 7.0 ms |
+| Resident switch-to-GPU-receipt P50 | 10.1 ms |
+| Resident switch-to-GPU-receipt P95 | 11.5 ms |
+| Resident switch-to-GPU-receipt P99 | 14.2 ms |
+| Custom-layer draw CPU P95 | 1.2 ms |
+| Total custom-layer draws in final process | 4,310 |
 
 Frame duration is measured from `requestAnimationFrame` timestamps over the full packaged interaction window. Switch latency is the stronger per-transition value: it begins at selection and ends only when the selected draw's GPU fence completes. Acceptance computes that distribution independently for every run and requires all 1,000 receipt samples with P95 below 33.4 ms, covering the selected draw and non-blocking fence observation by the following 60 Hz opportunity.
 
 ## Automated regression coverage
 
-JavaScript/TypeScript contains 70 tests across 16 files. Phase 4 additions cover:
+JavaScript/TypeScript contains 73 tests across 17 files. Phase 4 additions cover:
 
 - playhead hold until a matching paint receipt;
 - cycle completion only after a successful wraparound paint receipt;
 - unchanged selections and one-frame loops remaining uncounted no-ops;
+- Play deferral while a manual selection is awaiting its paint receipt;
 - rejection of non-resident scrub targets;
 - controller/render-loop synchronization when replacement observations use new IDs;
 - ordered, unique, same-generation/same-render-key loop validation;
@@ -151,7 +152,8 @@ JavaScript/TypeScript contains 70 tests across 16 files. Phase 4 additions cover
 - refusal to weaken the two-run, 1,000-transition packaged workload;
 - packaged rejection of alignment, layer-coexistence, or renderer-status failure;
 - bounded CDP target discovery, handshake, and requests, including socket-error/close rejection and workload-scaled scenario deadlines;
-- exact Phase 4 fixture ID forwarding through the leased binary path; and
+- exact Phase 4 fixture ID forwarding through the leased binary path;
+- set-scoped Phase 4 fixture verification despite unrelated manifest entries; and
 - rejection of path-like fixture input.
 
 Rust contains 38 library tests plus five binary tests. Phase 4 additions cover:

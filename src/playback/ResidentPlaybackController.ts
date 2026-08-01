@@ -87,7 +87,22 @@ export class ResidentPlaybackController {
     if (this.playing) return;
     this.playing = true;
     this.emit();
-    this.scheduleNext(this.dwellForCurrent());
+    const pending = this.operation;
+    if (!pending) {
+      this.scheduleNext(this.dwellForCurrent());
+      return;
+    }
+    void pending.then(
+      () => {
+        globalThis.queueMicrotask(() => {
+          if (this.playing && !this.operation) this.scheduleNext(this.dwellForCurrent());
+        });
+      },
+      () => {
+        this.playing = false;
+        this.emit();
+      },
+    );
   }
 
   pause(): void {

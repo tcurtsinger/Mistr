@@ -9,7 +9,7 @@ $executable = Join-Path $root "src-tauri\target\release\mistr.exe"
 
 Push-Location $root
 try {
-    npm run fixture:verify
+    npm run fixture:verify:phase4
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     if (-not $SkipBuild) {
         npm run tauri:build -- --no-bundle

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   RadarPaintReceipt,
   RadarRendererSnapshot,
@@ -85,6 +85,7 @@ class FakeLayer {
 }
 
 describe("resident playback truth", () => {
+  afterEach(() => vi.useRealTimers());
   it("does not advance the playhead until the selected frame produces a paint receipt", async () => {
     const layer = new FakeLayer();
     const controller = new ResidentPlaybackController(layer, frames());
@@ -188,6 +189,40 @@ describe("resident playback truth", () => {
       selectedObservationId: "frame-a",
       lastPaintedObservationId: "frame-a",
     });
+  });
+
+  it("starts playback after a pending manual selection paints", async () => {
+    vi.useFakeTimers();
+    const layer = new FakeLayer();
+    const controller = new ResidentPlaybackController(layer, frames(), {
+      dwellMs: 1,
+      latestDwellMs: 1,
+    });
+    const scrub = controller.scrub(1);
+    await Promise.resolve();
+
+    controller.play();
+    vi.advanceTimersByTime(5);
+    expect(controller.snapshot()).toMatchObject({
+      playing: true,
+      selectedObservationId: "frame-b",
+      holdReason: "AWAITING_GPU_PAINT",
+    });
+
+    layer.completePaint();
+    await scrub;
+    await Promise.resolve();
+    vi.advanceTimersByTime(1);
+    await Promise.resolve();
+    expect(controller.snapshot()).toMatchObject({
+      playing: true,
+      selectedObservationId: "frame-c",
+      holdReason: "AWAITING_GPU_PAINT",
+    });
+
+    controller.pause();
+    layer.completePaint();
+    await controller.pauseAndWait();
   });
 });
 
