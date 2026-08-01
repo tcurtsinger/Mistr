@@ -185,6 +185,69 @@ describe("context recovery truth", () => {
       error: "recovery upload failed",
     });
   });
+
+  it("restarts per-context truth for a second loss during recovery", () => {
+    const layer = new RadarCustomLayer([model(0), model(1)], { onSnapshot: vi.fn() });
+    const internals = layer as unknown as {
+      beginContextRecovery(): void;
+      contextLossActive: boolean;
+      recoveryPhase: string;
+      recoverySync: WebGLSync | null;
+      paintReceipt: RadarPaintReceipt | undefined;
+    };
+
+    internals.beginContextRecovery();
+    internals.beginContextRecovery();
+    expect(layer.getSnapshot().contextEpoch).toBe(2);
+
+    internals.contextLossActive = false;
+    internals.recoveryPhase = "rehydrating_loop";
+    internals.recoverySync = {} as WebGLSync;
+    internals.paintReceipt = receipt(0);
+    internals.beginContextRecovery();
+
+    expect(layer.getSnapshot()).toMatchObject({
+      status: "recovering",
+      contextEpoch: 3,
+      lastPaintedObservationId: undefined,
+      recovery: { phase: "context_lost", visibleFramePainted: false },
+    });
+    expect(internals.recoverySync).toBeNull();
+  });
+
+  it("rejects the abandoned replacement sequence before restoring prior CPU truth", async () => {
+    const prior = model(0);
+    const replacement = { ...model(1), generation: 2n };
+    const layer = new RadarCustomLayer(replacement, { onSnapshot: vi.fn() });
+    const internals = layer as unknown as {
+      beginContextRecovery(): void;
+      pendingReplacement: Record<string, unknown> | null;
+      selectionSequence: number;
+    };
+    internals.selectionSequence = 2;
+    internals.pendingReplacement = {
+      previousModels: [prior],
+      previousFrames: new Map(),
+      previousPalette: {} as WebGLTexture,
+      previousSelectedObservationId: prior.observationId,
+      previousSelectionSequence: 1,
+      previousTextureValidation: undefined,
+      previousPaintReceipts: [],
+      previousSwitchLatencySamples: [],
+    };
+    const abandoned = expect(layer.waitForPaint(2, 1_000)).rejects.toThrow(
+      "abandoned by WebGL context loss",
+    );
+
+    internals.beginContextRecovery();
+
+    await abandoned;
+    expect(layer.getSnapshot()).toMatchObject({
+      selectedObservationId: prior.observationId,
+      selectionSequence: 1,
+      recovery: { phase: "context_lost" },
+    });
+  });
 });
 
 function model(index: number): RadarSweepCpuModel {

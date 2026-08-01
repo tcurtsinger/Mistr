@@ -306,6 +306,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
   private readonly recoveryWaiters = new Set<RecoveryWaiter>();
   private contextListenersAttached = false;
   private styleListenerAttached = false;
+  private contextLossActive = false;
 
   constructor(
     modelOrModels: RadarSweepCpuModel | readonly RadarSweepCpuModel[],
@@ -664,6 +665,10 @@ export class RadarCustomLayer implements CustomLayerInterface {
     this.emit("ready");
   }
 
+  hasPendingResidentFrameReplacement(): boolean {
+    return this.pendingReplacement !== null;
+  }
+
   commitResidentFrameReplacement(selectionSequence: number): void {
     const replacement = this.pendingReplacement;
     if (!replacement) {
@@ -877,8 +882,11 @@ export class RadarCustomLayer implements CustomLayerInterface {
   }
 
   private beginContextRecovery() {
-    if (this.recoveryPhase !== "ready") return;
+    if (this.contextLossActive) return;
+    this.contextLossActive = true;
+    let abandonedReplacementSequence: number | undefined;
     if (this.pendingReplacement) {
+      abandonedReplacementSequence = this.selectionSequence;
       this.models = this.pendingReplacement.previousModels;
       this.selectedObservationId = this.pendingReplacement.previousSelectedObservationId;
       this.selectionSequence = this.pendingReplacement.previousSelectionSequence;
@@ -893,6 +901,12 @@ export class RadarCustomLayer implements CustomLayerInterface {
     this.paintReceipt = undefined;
     this.runtimeError = undefined;
     this.textureValidation = undefined;
+    if (abandonedReplacementSequence !== undefined) {
+      this.rejectPaintWaiter(
+        abandonedReplacementSequence,
+        "resident-frame replacement was abandoned by WebGL context loss",
+      );
+    }
     for (const waiter of this.paintWaiters.values()) {
       if (waiter.timeout !== null) globalThis.clearTimeout(waiter.timeout);
       waiter.timeout = null;
@@ -909,6 +923,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
   };
 
   private readonly handleContextRestored = () => {
+    this.contextLossActive = false;
     if (!this.map || this.recoveryPhase === "ready") return;
     this.recoveryPhase = "waiting_for_style";
     for (const [sequence, waiter] of this.paintWaiters) {

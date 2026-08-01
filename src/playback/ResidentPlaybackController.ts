@@ -39,6 +39,7 @@ export class ResidentPlaybackController {
       RadarCustomLayer,
       | "commitResidentFrameReplacement"
       | "getSnapshot"
+      | "hasPendingResidentFrameReplacement"
       | "replaceResidentFrames"
       | "rollbackResidentFrameReplacement"
       | "selectAndWait"
@@ -121,11 +122,13 @@ export class ResidentPlaybackController {
     } catch (error) {
       this.frames = previousFrames;
       this.lastReceipt = undefined;
-      const rollback = this.layer.rollbackResidentFrameReplacement();
-      this.operation = rollback;
+      const restoration = this.layer.hasPendingResidentFrameReplacement()
+        ? this.layer.rollbackResidentFrameReplacement()
+        : this.waitForRecoveredAuthoritativePaint();
+      this.operation = restoration;
       this.emit();
       try {
-        const restoredReceipt = await rollback;
+        const restoredReceipt = await restoration;
         this.assertReceipt(restoredReceipt);
         this.lastReceipt = restoredReceipt;
       } catch (rollbackError) {
@@ -139,6 +142,18 @@ export class ResidentPlaybackController {
       throw error;
     }
     return receipt;
+  }
+
+  private async waitForRecoveredAuthoritativePaint(): Promise<RadarPaintReceipt> {
+    let snapshot = this.layer.getSnapshot();
+    if (snapshot.recovery.phase !== "ready") {
+      await this.layer.waitForRecovery();
+      snapshot = this.layer.getSnapshot();
+    }
+    if (!snapshot.paintReceipt) {
+      throw new Error("abandoned replacement recovery completed without a paint receipt");
+    }
+    return snapshot.paintReceipt;
   }
 
   play(): void {

@@ -15,6 +15,8 @@ class FakeLayer {
   private paintedGeneration = 7;
   private residentObservationIds = ["frame-a", "frame-b", "frame-c"];
   private pending: { complete(): void; fail(error: Error): void } | null = null;
+  private recoveryPhase: RadarRendererSnapshot["recovery"]["phase"] = "ready";
+  private recoveryWaiter: (() => void) | null = null;
   private replacement: {
     selected: string;
     painted: string | undefined;
@@ -36,7 +38,7 @@ class FakeLayer {
       residentObservationIds: this.residentObservationIds,
       contextEpoch: 3,
       recovery: {
-        phase: "ready",
+        phase: this.recoveryPhase,
         targetResidentCount: this.residentObservationIds.length,
         currentResidentCount: this.residentObservationIds.length,
         visibleObservationId: this.selected,
@@ -44,6 +46,7 @@ class FakeLayer {
       },
       textureValidationsPassed: 3,
       shaderLog: [],
+      paintReceipt: this.painted ? this.receipt() : undefined,
     };
   }
 
@@ -55,7 +58,10 @@ class FakeLayer {
   }
 
   waitForRecovery() {
-    return Promise.resolve(this.getSnapshot().recovery);
+    if (this.recoveryPhase === "ready") return Promise.resolve(this.getSnapshot().recovery);
+    return new Promise<RadarRendererSnapshot["recovery"]>((resolve) => {
+      this.recoveryWaiter = () => resolve(this.getSnapshot().recovery);
+    });
   }
 
   selectAndWait(observationId: string): Promise<RadarPaintReceipt> {
@@ -106,6 +112,10 @@ class FakeLayer {
     this.replacement = null;
   }
 
+  hasPendingResidentFrameReplacement(): boolean {
+    return this.replacement !== null;
+  }
+
   rollbackResidentFrameReplacement(): Promise<RadarPaintReceipt> {
     if (!this.replacement) throw new Error("replacement is not pending");
     this.selected = this.replacement.selected;
@@ -125,6 +135,30 @@ class FakeLayer {
 
   failPaint(error = new Error("paint failed")) {
     this.pending?.fail(error);
+  }
+
+  loseContextDuringReplacement() {
+    if (!this.replacement) throw new Error("replacement is not pending");
+    const prior = this.replacement;
+    this.selected = prior.selected;
+    this.painted = undefined;
+    this.sequence = prior.sequence;
+    this.paintedSequence = 0;
+    this.generation = prior.generation;
+    this.paintedGeneration = 0;
+    this.residentObservationIds = prior.residentObservationIds;
+    this.replacement = null;
+    this.recoveryPhase = "context_lost";
+    this.pending?.fail(new Error("resident-frame replacement was abandoned by WebGL context loss"));
+  }
+
+  completeRecovery() {
+    this.painted = this.selected;
+    this.paintedSequence = this.sequence;
+    this.paintedGeneration = this.generation;
+    this.recoveryPhase = "ready";
+    this.recoveryWaiter?.();
+    this.recoveryWaiter = null;
   }
 
   private receipt(): RadarPaintReceipt {
@@ -266,6 +300,43 @@ describe("resident playback truth", () => {
     expect(controller.snapshot()).toMatchObject({
       generation: 7,
       residentCount: 3,
+      selectedObservationId: "frame-a",
+      lastPaintedObservationId: "frame-a",
+      playheadObservedAtUnixMs: 100,
+    });
+  });
+
+  it("waits for context recovery instead of rolling back an already abandoned replacement", async () => {
+    const layer = new FakeLayer();
+    const controller = new ResidentPlaybackController(layer, frames());
+    await controller.establishInitialPaint();
+
+    const replacement = controller.replaceResidentFrames([frame("replacement-a", 400)]);
+    const replacementFailure = expect(replacement).rejects.toThrow(
+      "abandoned by WebGL context loss",
+    );
+    await vi.waitFor(() => {
+      expect(controller.snapshot()).toMatchObject({
+        generation: 8,
+        selectedObservationId: "replacement-a",
+        holdReason: "AWAITING_GPU_PAINT",
+      });
+    });
+
+    layer.loseContextDuringReplacement();
+    await vi.waitFor(() => {
+      expect(controller.snapshot()).toMatchObject({
+        generation: 7,
+        selectedObservationId: "frame-a",
+        lastPaintedObservationId: undefined,
+        holdReason: "GPU_RECOVERY_CONTEXT_LOST",
+      });
+    });
+    layer.completeRecovery();
+
+    await replacementFailure;
+    expect(controller.snapshot()).toMatchObject({
+      generation: 7,
       selectedObservationId: "frame-a",
       lastPaintedObservationId: "frame-a",
       playheadObservedAtUnixMs: 100,
