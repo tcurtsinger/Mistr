@@ -61,7 +61,7 @@ The latter two hosts are comparison observers only; they do not decide whether a
 | Objects per volume | 256 |
 | S3/provider inventory body | 2 MiB / 8 MiB |
 | Concurrent packed transfers | 2 global credits |
-| Packaged live request timeout | 10â€“900 seconds |
+| Complete packaged live request timeout | 10-900 seconds, including discovery and in-flight polling |
 
 ### State behavior
 
@@ -108,7 +108,7 @@ The release Tauri/WebView2 runner at 3840 by 2160:
 3. observed the KAMX request fail with `live_sweep_failed` and no stale publication;
 4. decoded and transferred a 7,931,840-byte KTLX sweep;
 5. uploaded one live frame; and
-6. received a matching hardware-accelerated GPU receipt 78 ms after safe decode completed.
+6. received a matching hardware-accelerated GPU receipt 88 ms after safe decode completed.
 
 The final observation ID matched backend evidence, packed bytes, display truth, selected renderer state, last-painted renderer state, and the 4K receipt. The existing Phase 4 2,000-transition packaged regression also passed after the renderer was generalized to replace its site/source/bounds atomically.
 

@@ -8,6 +8,7 @@ use crate::radar::{MAX_LEVEL2_INPUT_BYTES, RadarProduct, decode_level2};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
+use std::future::Future;
 use std::io::Read;
 use std::path::PathBuf;
 use std::sync::{Arc, LazyLock, Mutex};
@@ -708,7 +709,8 @@ pub async fn request_phase5_live_sweep(
     let broker = state.inner().clone();
     broker.acquire(session, generation)?;
 
-    let result = async {
+    let timeout = Duration::from_secs(timeout_seconds);
+    let result = enforce_live_request_timeout(timeout, async {
         let token = broker.live_generation_token(session, generation)?;
         let client = PublicRadarClient::new()
             .map_err(|error| TransferError::new("live_client_failed", error.to_string()))?;
@@ -716,7 +718,7 @@ pub async fn request_phase5_live_sweep(
             .await
             .map_err(|error| TransferError::new("live_start_failed", error.to_string()))?;
         let safe = live
-            .wait_for_safe_sweep(Duration::from_secs(timeout_seconds))
+            .wait_for_safe_sweep(timeout)
             .await
             .map_err(|error| TransferError::new("live_sweep_failed", error.to_string()))?;
         let safe_evidence = safe.evidence;
@@ -745,7 +747,7 @@ pub async fn request_phase5_live_sweep(
             safe: safe_evidence,
         };
         Ok::<_, TransferError>((bytes, evidence))
-    }
+    })
     .await;
 
     let (bytes, evidence) = match result {
@@ -757,6 +759,23 @@ pub async fn request_phase5_live_sweep(
     };
     broker.complete_phase5_for_publish(session, generation, evidence)?;
     Ok(Response::new(bytes))
+}
+
+async fn enforce_live_request_timeout<F, T>(
+    timeout: Duration,
+    operation: F,
+) -> Result<T, TransferError>
+where
+    F: Future<Output = Result<T, TransferError>>,
+{
+    tokio::time::timeout(timeout, operation)
+        .await
+        .map_err(|_| {
+            TransferError::new(
+                "live_sweep_failed",
+                "live acquisition exceeded the complete request timeout",
+            )
+        })?
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1212,6 +1231,21 @@ mod tests {
                 .unwrap_err()
                 .code,
             "phase5_evidence_not_found"
+        );
+    }
+
+    #[tokio::test]
+    async fn phase5_timeout_bounds_the_complete_live_operation() {
+        let error = enforce_live_request_timeout(Duration::from_millis(5), async {
+            std::future::pending::<()>().await;
+            Ok::<(), TransferError>(())
+        })
+        .await
+        .unwrap_err();
+        assert_eq!(error.code, "live_sweep_failed");
+        assert_eq!(
+            error.message,
+            "live acquisition exceeded the complete request timeout"
         );
     }
 

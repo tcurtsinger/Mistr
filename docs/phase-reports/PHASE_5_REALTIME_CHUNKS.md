@@ -14,7 +14,7 @@ Mistr discovered rotating real-time volumes, assembled strict start/intermediate
 
 In this observation window, safe decode completed `26411` ms before NOAA at P50 and `27828` ms before IEM at P50, with a five-second provider-poll uncertainty. This supports proceeding with the raw selected-site architecture; it does not promise that raw always wins.
 
-The release packaged runner also proved the end-to-end path. It cancelled a superseded KAMX request, published only the current KTLX generation, parsed 7,931,840 packed bytes, atomically replaced the prior archive loop with one live frame, and received a matching hardware GPU-complete receipt at 3840 by 2160. Safe-decode-to-paint was 78 ms in that run.
+The release packaged runner also proved the end-to-end path. It cancelled a superseded KAMX request, published only the current KTLX generation, parsed 7,931,840 packed bytes, atomically replaced the prior archive loop with one live frame, and received a matching hardware GPU-complete receipt at 3840 by 2160. Safe-decode-to-paint was 88 ms in that run.
 
 The governing boundary and fallback decision is [`17_REALTIME_FRESHNESS_AND_FALLBACK_DECISION.md`](../17_REALTIME_FRESHNESS_AND_FALLBACK_DECISION.md).
 
@@ -76,7 +76,7 @@ The Mistr-owned assembler enforces:
 
 The progressive decoder additionally requires a physical first-radial start and last-radial end, rejects unknown statuses and duplicate source azimuth numbers, and permits publication only once for a volume. Missing reflectivity or an incomplete boundary means â€œnot safe yetâ€; other decoder errors fail closed.
 
-Deterministic tests cover gaps, out-of-order delivery, duplicates, terminal ordering, rollover, late chunks, payload mismatch, site/generation mismatch, single-use publication, fixed-host rejection, bounded XML/provider parsing, rotating-index wrap, cancellation, atomic evidence publication, and the display fallback reducer.
+Deterministic tests cover gaps, out-of-order delivery, duplicates, terminal ordering, rollover, late chunks, payload mismatch, site/generation mismatch, single-use publication, fixed-host rejection, bounded XML/provider parsing, rotating-index wrap, complete-request timeout enforcement, cancellation, atomic evidence publication, and the display fallback reducer.
 
 ## Fallback and truth
 
@@ -104,9 +104,9 @@ npm run test:phase5:packaged
 | Superseded request | KAMX rejected with `live_sweep_failed` |
 | Current publication | KTLX generation 3 only |
 | Packed live sweep | 7,931,840 bytes |
-| Safe sequence in current catch-up run | 8 |
-| Raw last-modified to safe decode | 4,905 ms |
-| Safe decode to GPU receipt | 78 ms |
+| Safe sequence in current catch-up run | 38 |
+| Raw last-modified to safe decode | 7,926 ms |
+| Safe decode to GPU receipt | 88 ms |
 | GPU receipt observation match | PASS |
 | Renderer selected/last-painted match | PASS |
 | Incomplete UI label present | No |
