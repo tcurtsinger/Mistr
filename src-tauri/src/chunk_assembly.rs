@@ -242,7 +242,7 @@ pub enum ChunkAssemblyError {
     StartChunkRequired,
     #[error("volume identity conflicts with another object at the same start time")]
     VolumeIdentityConflict,
-    #[error("sequence {sequence} has conflicting content")]
+    #[error("sequence {sequence} has conflicting content or metadata")]
     ConflictingDuplicate { sequence: u16 },
     #[error("chunk sequence/type is invalid: {0}")]
     InvalidSequence(String),
@@ -346,7 +346,10 @@ impl ChunkAssembler {
             .ok_or(ChunkAssemblyError::NoActiveVolume)?;
         if let Some(existing) = volume.chunks.get(&metadata.sequence) {
             let sha256 = format!("{:x}", Sha256::digest(&bytes));
-            return if existing.sha256 == sha256 && existing.bytes == bytes {
+            return if existing.metadata.kind == metadata.kind
+                && existing.sha256 == sha256
+                && existing.bytes == bytes
+            {
                 Ok(ChunkIngestOutcome::Duplicate {
                     volume: volume.identity.clone(),
                     sequence: metadata.sequence,
@@ -692,6 +695,26 @@ mod tests {
             assembler.ingest(1, conflict_meta, conflict),
             Err(ChunkAssemblyError::ConflictingDuplicate { sequence: 1 })
         ));
+    }
+
+    #[test]
+    fn byte_identical_duplicate_with_conflicting_kind_fails_in_both_directions() {
+        for (first_kind, second_kind) in [
+            (ChunkKind::Intermediate, ChunkKind::End),
+            (ChunkKind::End, ChunkKind::Intermediate),
+        ] {
+            let mut assembler = ChunkAssembler::new(1, "KTLX").unwrap();
+            ingest(&mut assembler, 7, "20260801-010203", 1, ChunkKind::Start).unwrap();
+            let payload = bytes(ChunkKind::Intermediate, 2);
+            let first = metadata(7, "20260801-010203", 2, first_kind);
+            let mut second = metadata(7, "20260801-010203", 2, second_kind);
+            second.size_bytes = payload.len();
+            assembler.ingest(1, first, payload.clone()).unwrap();
+            assert!(matches!(
+                assembler.ingest(1, second, payload.clone()),
+                Err(ChunkAssemblyError::ConflictingDuplicate { sequence: 2 })
+            ));
+        }
     }
 
     #[test]

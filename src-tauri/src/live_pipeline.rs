@@ -244,61 +244,8 @@ impl LiveSweepSession {
                     stage: "safe_lowest_sweep",
                 });
             }
-            let advanced = self.poll_chunks_once().await?;
-            if advanced && self.assembler.contiguous_through() > 0 {
-                let bytes = self.assembler.assembled_contiguous()?;
-                let decode_started_at_unix_ms = Utc::now().timestamp_millis();
-                self.decoder_attempts = self.decoder_attempts.saturating_add(1);
-                let decoded = tokio::task::spawn_blocking(move || {
-                    decode_safe_lowest_sweep(&bytes, RadarProduct::Reflectivity)
-                })
-                .await
-                .map_err(|error| LivePipelineError::DecodeTask(error.to_string()))?;
-                let decode_completed_at_unix_ms = Utc::now().timestamp_millis();
-                match decoded {
-                    Ok(output) => {
-                        self.token.ensure_current()?;
-                        let volume = self.assembler.active_volume().cloned().ok_or_else(|| {
-                            LivePipelineError::Assembly(
-                                "safe decode completed without an active volume".into(),
-                            )
-                        })?;
-                        self.assembler.mark_safe_sweep_published()?;
-                        let fingerprint = SweepFingerprint::from_output(&output);
-                        self.safe_fingerprint = Some(fingerprint);
-                        return Ok(SafeSweepCandidate {
-                            evidence: SafeSweepEvidence {
-                                generation: self.token.generation(),
-                                site: self.site.clone(),
-                                volume_index: volume.volume_index,
-                                volume_started_at_unix_ms: volume.started_at_unix_ms,
-                                safe_sequence: self.assembler.contiguous_through(),
-                                safe_chunk_last_modified_unix_ms: self
-                                    .assembler
-                                    .latest_contiguous_last_modified_unix_ms()
-                                    .ok_or_else(|| {
-                                        LivePipelineError::Assembly(
-                                            "safe sequence has no last-modified timestamp".into(),
-                                        )
-                                    })?,
-                                discovered_at_unix_ms: decode_started_at_unix_ms,
-                                decode_started_at_unix_ms,
-                                decode_completed_at_unix_ms,
-                                decoder_attempts: self.decoder_attempts,
-                                gap_observations: self.gap_observations,
-                                duplicate_observations: self.duplicate_observations,
-                                acquisition_delta: subtract_counters(
-                                    self.client.counters(),
-                                    self.counters_at_start,
-                                ),
-                            },
-                            output,
-                        });
-                    }
-                    Err(DecodeError::MissingProduct { .. })
-                    | Err(DecodeError::IncompleteSweep(_)) => {}
-                    Err(error) => return Err(LivePipelineError::Decode(error.to_string())),
-                }
+            if let Some(candidate) = self.poll_chunks_once(true).await? {
+                return Ok(candidate);
             }
             sleep(
                 self.poll_interval
@@ -320,7 +267,7 @@ impl LiveSweepSession {
                     stage: "complete_volume",
                 });
             }
-            self.poll_chunks_once().await?;
+            self.poll_chunks_once(false).await?;
             if self.assembler.is_complete() {
                 let discovered_at_unix_ms = Utc::now().timestamp_millis();
                 let bytes = self.assembler.assembled_complete()?;
@@ -374,7 +321,10 @@ impl LiveSweepSession {
         }
     }
 
-    async fn poll_chunks_once(&mut self) -> Result<bool, LivePipelineError> {
+    async fn poll_chunks_once(
+        &mut self,
+        attempt_safe_decode: bool,
+    ) -> Result<Option<SafeSweepCandidate>, LivePipelineError> {
         self.token.ensure_current()?;
         let objects = self
             .client
@@ -403,7 +353,6 @@ impl LiveSweepSession {
             candidates.retain(|(_, _, candidate)| *candidate == started);
         }
         candidates.sort_by_key(|(sequence, _, _)| *sequence);
-        let mut advanced = false;
         for (_, object, _) in candidates {
             if self.downloaded_keys.contains(&object.key) {
                 continue;
@@ -413,16 +362,17 @@ impl LiveSweepSession {
                 .download_realtime_chunk(&object, &self.site)
                 .await?;
             self.token.ensure_current()?;
+            let previous_contiguous = self.assembler.contiguous_through();
             let outcome = self
                 .assembler
                 .ingest(self.token.generation(), metadata, bytes)?;
             self.downloaded_keys.insert(object.key);
+            let contiguous_advanced = contiguous_prefix_advanced(previous_contiguous, &outcome);
             match outcome {
                 ChunkIngestOutcome::Accepted {
                     waiting_for_sequence,
                     ..
                 } => {
-                    advanced = true;
                     if waiting_for_sequence.is_some() {
                         self.gap_observations = self.gap_observations.saturating_add(1);
                     }
@@ -431,13 +381,91 @@ impl LiveSweepSession {
                     self.duplicate_observations = self.duplicate_observations.saturating_add(1);
                 }
                 ChunkIngestOutcome::Late { .. } => {}
-                ChunkIngestOutcome::Rollover { .. } => advanced = true,
+                ChunkIngestOutcome::Rollover { .. } => {}
+            }
+            if attempt_safe_decode
+                && contiguous_advanced
+                && let Some(candidate) = self.try_safe_sweep().await?
+            {
+                // Do not download a later listed chunk after the earliest safe
+                // contiguous boundary has produced publishable radar truth.
+                return Ok(Some(candidate));
             }
         }
         if self.assembler.waiting_for_sequence().is_some() {
             self.gap_observations = self.gap_observations.saturating_add(1);
         }
-        Ok(advanced)
+        Ok(None)
+    }
+
+    async fn try_safe_sweep(&mut self) -> Result<Option<SafeSweepCandidate>, LivePipelineError> {
+        if self.assembler.contiguous_through() == 0 {
+            return Ok(None);
+        }
+        let bytes = self.assembler.assembled_contiguous()?;
+        let decode_started_at_unix_ms = Utc::now().timestamp_millis();
+        self.decoder_attempts = self.decoder_attempts.saturating_add(1);
+        let decoded = tokio::task::spawn_blocking(move || {
+            decode_safe_lowest_sweep(&bytes, RadarProduct::Reflectivity)
+        })
+        .await
+        .map_err(|error| LivePipelineError::DecodeTask(error.to_string()))?;
+        let decode_completed_at_unix_ms = Utc::now().timestamp_millis();
+        match decoded {
+            Ok(output) => {
+                self.token.ensure_current()?;
+                let volume = self.assembler.active_volume().cloned().ok_or_else(|| {
+                    LivePipelineError::Assembly(
+                        "safe decode completed without an active volume".into(),
+                    )
+                })?;
+                self.assembler.mark_safe_sweep_published()?;
+                let fingerprint = SweepFingerprint::from_output(&output);
+                self.safe_fingerprint = Some(fingerprint);
+                Ok(Some(SafeSweepCandidate {
+                    evidence: SafeSweepEvidence {
+                        generation: self.token.generation(),
+                        site: self.site.clone(),
+                        volume_index: volume.volume_index,
+                        volume_started_at_unix_ms: volume.started_at_unix_ms,
+                        safe_sequence: self.assembler.contiguous_through(),
+                        safe_chunk_last_modified_unix_ms: self
+                            .assembler
+                            .latest_contiguous_last_modified_unix_ms()
+                            .ok_or_else(|| {
+                                LivePipelineError::Assembly(
+                                    "safe sequence has no last-modified timestamp".into(),
+                                )
+                            })?,
+                        discovered_at_unix_ms: decode_started_at_unix_ms,
+                        decode_started_at_unix_ms,
+                        decode_completed_at_unix_ms,
+                        decoder_attempts: self.decoder_attempts,
+                        gap_observations: self.gap_observations,
+                        duplicate_observations: self.duplicate_observations,
+                        acquisition_delta: subtract_counters(
+                            self.client.counters(),
+                            self.counters_at_start,
+                        ),
+                    },
+                    output,
+                }))
+            }
+            Err(DecodeError::MissingProduct { .. }) | Err(DecodeError::IncompleteSweep(_)) => {
+                Ok(None)
+            }
+            Err(error) => Err(LivePipelineError::Decode(error.to_string())),
+        }
+    }
+}
+
+fn contiguous_prefix_advanced(previous: u16, outcome: &ChunkIngestOutcome) -> bool {
+    match outcome {
+        ChunkIngestOutcome::Accepted {
+            contiguous_through, ..
+        } => *contiguous_through > previous,
+        ChunkIngestOutcome::Rollover { .. } => true,
+        ChunkIngestOutcome::Duplicate { .. } | ChunkIngestOutcome::Late { .. } => false,
     }
 }
 
@@ -527,6 +555,34 @@ mod tests {
             ),
             AcquisitionCounters::default()
         );
+    }
+
+    #[test]
+    fn safe_decode_trigger_tracks_each_contiguous_prefix_advance() {
+        let volume = crate::chunk_assembly::VolumeIdentity {
+            site: "KTLX".into(),
+            volume_index: 7,
+            started_at_unix_ms: 1_800_000_000_000,
+        };
+        let contiguous = ChunkIngestOutcome::Accepted {
+            volume: volume.clone(),
+            contiguous_through: 7,
+            waiting_for_sequence: None,
+            volume_complete: false,
+        };
+        let gap = ChunkIngestOutcome::Accepted {
+            volume: volume.clone(),
+            contiguous_through: 7,
+            waiting_for_sequence: Some(8),
+            volume_complete: false,
+        };
+        let duplicate = ChunkIngestOutcome::Duplicate {
+            volume,
+            sequence: 7,
+        };
+        assert!(contiguous_prefix_advanced(6, &contiguous));
+        assert!(!contiguous_prefix_advanced(7, &gap));
+        assert!(!contiguous_prefix_advanced(7, &duplicate));
     }
 
     // Compile-time coverage for the test-only poll override without using the
