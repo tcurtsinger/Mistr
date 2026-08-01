@@ -91,13 +91,14 @@ export class ResidentPlaybackController {
     let receipt: RadarPaintReceipt;
     try {
       receipt = await this.establishInitialPaint();
+      beforeCommit?.();
+      this.layer.commitResidentFrameReplacement(receipt.selectionSequence);
     } catch (error) {
       this.layer.rollbackResidentFrameReplacement();
       this.frames = previousFrames;
       this.lastReceipt = previousReceipt;
       throw error;
     }
-    this.layer.commitResidentFrameReplacement(receipt.selectionSequence);
     return receipt;
   }
 

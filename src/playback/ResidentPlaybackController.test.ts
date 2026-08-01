@@ -241,6 +241,32 @@ describe("resident playback truth", () => {
     });
   });
 
+  it("rolls back a replacement superseded while its GPU paint is pending", async () => {
+    const layer = new FakeLayer();
+    const controller = new ResidentPlaybackController(layer, frames());
+    await controller.establishInitialPaint();
+    let ownsGeneration = true;
+
+    const replacement = controller.replaceResidentFrames(
+      [frame("replacement-a", 400)],
+      () => {
+        if (!ownsGeneration) throw new Error("generation was superseded");
+      },
+    );
+    await Promise.resolve();
+    ownsGeneration = false;
+    layer.completePaint();
+
+    await expect(replacement).rejects.toThrow("generation was superseded");
+    expect(controller.snapshot()).toMatchObject({
+      generation: 7,
+      residentCount: 3,
+      selectedObservationId: "frame-a",
+      lastPaintedObservationId: "frame-a",
+      playheadObservedAtUnixMs: 100,
+    });
+  });
+
   it("counts a completed cycle only after the wraparound frame paints", async () => {
     const layer = new FakeLayer();
     const controller = new ResidentPlaybackController(layer, frames());

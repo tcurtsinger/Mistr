@@ -590,12 +590,14 @@ where
         return Ok(None);
     }
     let target_ref = Some(&target);
-    let mut nearest = None;
     let mut first_value = probe(0).await?;
     let mut first_ref = first_value.as_ref();
     if first_ref == target_ref {
         return Ok(Some(0));
     }
+    let mut nearest = first_ref
+        .filter(|candidate| Some(*candidate) <= target_ref)
+        .map(|candidate| (0usize, candidate.clone()));
     let mut low = 0usize;
     let mut high = element_count;
     let mut queue = VecDeque::from([(0usize, element_count - 1)]);
@@ -615,11 +617,17 @@ where
             }
             continue;
         }
-        if value_ref <= target_ref {
-            nearest = Some(mid);
+        if let Some(candidate) = value_ref.filter(|candidate| Some(*candidate) <= target_ref) {
+            let is_nearer = match nearest.as_ref() {
+                Some((_, current)) => candidate > current,
+                None => true,
+            };
+            if is_nearer {
+                nearest = Some((mid, candidate.clone()));
+            }
         }
         if value_ref == target_ref {
-            return Ok(nearest);
+            return Ok(nearest.map(|(index, _)| index));
         }
         if should_search_right(first_ref, value_ref, target_ref) {
             low = mid + 1;
@@ -629,7 +637,7 @@ where
         break;
     }
     if low >= high {
-        return Ok(nearest);
+        return Ok(nearest.map(|(index, _)| index));
     }
     first_value = probe(low).await?;
     first_ref = first_value.as_ref();
@@ -637,8 +645,14 @@ where
         let mid = low + (high - low) / 2;
         let value = probe(mid).await?;
         let value_ref = value.as_ref();
-        if value_ref.is_some() && value_ref <= target_ref {
-            nearest = Some(mid);
+        if let Some(candidate) = value_ref.filter(|candidate| Some(*candidate) <= target_ref) {
+            let is_nearer = match nearest.as_ref() {
+                Some((_, current)) => candidate > current,
+                None => true,
+            };
+            if is_nearer {
+                nearest = Some((mid, candidate.clone()));
+            }
         }
         if value_ref == target_ref {
             return Ok(Some(mid));
@@ -649,7 +663,7 @@ where
             high = mid;
         }
     }
-    Ok(nearest)
+    Ok(nearest.map(|(index, _)| index))
 }
 
 fn should_search_right<V: PartialOrd>(first: V, value: V, target: V) -> bool {
@@ -737,6 +751,31 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(found, Some(2));
+    }
+
+    #[tokio::test]
+    async fn rotated_search_preserves_the_newest_candidate_across_every_pivot() {
+        for length in 2..=32 {
+            let ordered = (1..=length).collect::<Vec<_>>();
+            for pivot in 0..length {
+                let values = ordered[pivot..]
+                    .iter()
+                    .chain(ordered[..pivot].iter())
+                    .copied()
+                    .map(Some)
+                    .collect::<Vec<_>>();
+                let expected = values
+                    .iter()
+                    .position(|value| *value == Some(length))
+                    .unwrap();
+                let found = rotated_search(values.len(), usize::MAX, |index| {
+                    std::future::ready(Ok(values[index]))
+                })
+                .await
+                .unwrap();
+                assert_eq!(found, Some(expected), "length {length}, pivot {pivot}");
+            }
+        }
     }
 
     #[test]
