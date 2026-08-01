@@ -19,6 +19,10 @@ import {
 } from "./radar-renderer/cpuModel";
 import { destinationPoint } from "./radar-renderer/geo";
 import {
+  evaluateLayerCoexistence,
+  type LayerCoexistenceReport,
+} from "./radar-renderer/layerCoexistence";
+import {
   RadarCustomLayer,
   type RadarRendererSnapshot,
 } from "./radar-renderer/RadarCustomLayer";
@@ -29,6 +33,11 @@ const RANGE_SOURCE_ID = "mistr-range-source";
 const RANGE_LAYER_ID = "mistr-range-before-radar";
 const ANCHOR_SOURCE_ID = "mistr-anchor-source";
 const ANCHOR_LAYER_ID = "mistr-anchors-after-radar";
+const DIAGNOSTIC_LAYER_IDS = {
+  range: RANGE_LAYER_ID,
+  radar: "mistr-static-radar",
+  anchor: ANCHOR_LAYER_ID,
+};
 
 configureMapLibreWorker();
 
@@ -134,7 +143,7 @@ export function App() {
           },
         });
         const beforeId = firstSymbolLayer(instance);
-        const insertionOrder = installDiagnosticLayers(
+        installDiagnosticLayers(
           instance,
           model,
           alignment,
@@ -143,7 +152,7 @@ export function App() {
         );
         baseReport = {
           ...baseReport,
-          coexistence: layerCoexistenceReport(instance, insertionOrder),
+          coexistence: currentLayerCoexistenceReport(instance),
         };
         clickHandler = (event) => {
           setInterrogation(interrogateLngLat(model, {
@@ -251,14 +260,6 @@ export interface Phase3Report {
   renderer?: RadarRendererSnapshot;
 }
 
-export interface LayerCoexistenceReport {
-  rangeLayerPresent: boolean;
-  radarLayerPresent: boolean;
-  anchorLayerPresent: boolean;
-  expectedInsertionOrder: string[];
-  standardLayersBeforeAndAfter: boolean;
-}
-
 type Phase3State =
   | { kind: "idle" }
   | { kind: "running"; stage: string }
@@ -344,8 +345,7 @@ function installDiagnosticLayers(
   alignment: AlignmentReport,
   radarLayer: RadarCustomLayer,
   beforeId: string | undefined,
-): string[] {
-  const insertionOrder: string[] = [];
+): void {
   const ring = Array.from({ length: 181 }, (_, index) => {
     const point = destinationPoint(model.center, index * 2, model.maxRangeM);
     return [point.longitude, point.latitude];
@@ -369,9 +369,7 @@ function installDiagnosticLayers(
       "line-dasharray": [3, 3],
     },
   }, beforeId);
-  insertionOrder.push(RANGE_LAYER_ID);
   addLayer(map, radarLayer, beforeId);
-  insertionOrder.push(radarLayer.id);
   map.addSource(ANCHOR_SOURCE_ID, {
     type: "geojson",
     data: {
@@ -402,8 +400,6 @@ function installDiagnosticLayers(
       "circle-opacity": 0.9,
     },
   }, beforeId);
-  insertionOrder.push(ANCHOR_LAYER_ID);
-  return insertionOrder;
 }
 
 function removeDiagnosticLayers(map: MapLibreMap, radarLayer: RadarCustomLayer | null) {
@@ -421,34 +417,18 @@ function firstSymbolLayer(map: MapLibreMap): string | undefined {
 }
 
 function emptyLayerCoexistenceReport(): LayerCoexistenceReport {
-  return {
-    rangeLayerPresent: false,
-    radarLayerPresent: false,
-    anchorLayerPresent: false,
-    expectedInsertionOrder: [RANGE_LAYER_ID, "mistr-static-radar", ANCHOR_LAYER_ID],
-    standardLayersBeforeAndAfter: false,
-  };
+  return evaluateLayerCoexistence([], DIAGNOSTIC_LAYER_IDS);
 }
 
-function layerCoexistenceReport(
-  map: MapLibreMap,
-  insertionOrder = [RANGE_LAYER_ID, "mistr-static-radar", ANCHOR_LAYER_ID],
-): LayerCoexistenceReport {
-  const expectedInsertionOrder = [RANGE_LAYER_ID, "mistr-static-radar", ANCHOR_LAYER_ID];
-  const rangeLayerPresent = map.getLayer(RANGE_LAYER_ID)?.type === "line";
-  const radarLayerPresent = map.getLayer("mistr-static-radar")?.type === "custom";
-  const anchorLayerPresent = map.getLayer(ANCHOR_LAYER_ID)?.type === "circle";
-  return {
-    rangeLayerPresent,
-    radarLayerPresent,
-    anchorLayerPresent,
-    expectedInsertionOrder: insertionOrder,
-    standardLayersBeforeAndAfter:
-      rangeLayerPresent
-      && radarLayerPresent
-      && anchorLayerPresent
-      && insertionOrder.every((id, index) => id === expectedInsertionOrder[index]),
-  };
+function currentLayerCoexistenceReport(map: MapLibreMap): LayerCoexistenceReport {
+  const orderedLayers = map.getLayersOrder().flatMap((id) => {
+    const layer = map.getLayer(id);
+    return layer ? [{ id, type: layer.type }] : [];
+  });
+  return evaluateLayerCoexistence(
+    orderedLayers,
+    DIAGNOSTIC_LAYER_IDS,
+  );
 }
 
 function addLayer(map: MapLibreMap, layer: AddLayerObject, beforeId?: string) {
@@ -470,7 +450,7 @@ function installDiagnosticApi(
       return interrogateLngLat(model, { longitude, latitude });
     },
     layerOrder() {
-      return layerCoexistenceReport(map).expectedInsertionOrder;
+      return currentLayerCoexistenceReport(map).actualDiagnosticOrder;
     },
   };
 }

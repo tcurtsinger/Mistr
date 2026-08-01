@@ -136,7 +136,7 @@ Preferred architectural direction is one Rust normalization boundary, but eviden
 
 ### Q006 — CPU retention for context restoration
 
-**Resolved for the resident-loop baseline:** Retain compact raw codes, detailed statuses, radial metadata (including measured elevation), and azimuth lookup for every resident observation; release the packed float-value transfer after upload. The current 20-observation projection is about 50.64 MiB CPU and 50.55 MiB known GPU allocations. Phase 4 must confirm actual residency and revise visibly if another product/layout exceeds budget.
+**Resolved for the resident-loop baseline:** Retain compact raw codes, detailed statuses, radial metadata (azimuth, beam width, and elevation), and azimuth lookup for every resident observation; release the packed float-value transfer after upload. The current 20-observation projection is about 50.64 MiB CPU and 50.66 MiB known GPU allocations. Phase 4 must confirm actual residency and revise visibly if another product/layout exceeds budget.
 
 Options:
 

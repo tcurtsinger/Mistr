@@ -30,7 +30,7 @@ describe("RadarSweepCpuModel", () => {
       radialCount: 2,
       gateCount: 3,
       cpuBytes: 8_228,
-      estimatedGpuBytes: 9_284,
+      estimatedGpuBytes: 9_300,
     });
     expect([...model.rawCodes]).toEqual([0, 1, 68, 2, 86, 193]);
     expect([...model.statuses]).toEqual([1, 2, 0, 0, 0, 0]);
@@ -78,11 +78,26 @@ describe("RadarSweepCpuModel", () => {
     expect(alignment.maximumBearingErrorDegrees).toBeLessThan(1e-9);
   });
 
-  it("returns null for a point far beyond the sweep before beam inversion", () => {
+  it("returns null outside the sweep range or exact radial beam", () => {
     const model = createRadarSweepCpuModel(golden);
     const distantPoint = destinationPoint(model.center, 45, 15_000_000);
     expect(() => interrogateLngLat(model, distantPoint)).not.toThrow();
     expect(interrogateLngLat(model, distantPoint)).toBeNull();
+
+    model.azimuths[1] = 10;
+    model.beamWidths[1] = 1;
+    model.azimuthLookup.fill(0);
+    const falsePositiveBearing = 10.54;
+    const lookupIndex = Math.floor(
+      falsePositiveBearing / 360 * model.azimuthLookup.length,
+    );
+    model.azimuthLookup[lookupIndex] = 2;
+    const outsideBeamPoint = destinationPoint(
+      model.center,
+      falsePositiveBearing,
+      groundRangeForSlantRange(model.firstGateCenterM, model.elevations[1]),
+    );
+    expect(interrogateLngLat(model, outsideBeamPoint)).toBeNull();
   });
 
   it("rejects unsupported products and invalid statuses", () => {

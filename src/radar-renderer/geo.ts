@@ -177,6 +177,15 @@ export function radialFromLookup(
   return encoded === 0 ? null : encoded - 1;
 }
 
+export function bearingWithinRadial(
+  bearingDegrees: number,
+  radialAzimuthDegrees: number,
+  beamWidthDegrees: number,
+): boolean {
+  return angularDistanceDegrees(bearingDegrees, radialAzimuthDegrees)
+    <= beamWidthDegrees / 2;
+}
+
 export function gateIndexForRange(
   rangeM: number,
   firstGateCenterM: number,

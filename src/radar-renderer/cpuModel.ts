@@ -2,6 +2,7 @@ import type { PackedSweep } from "../packed-sweep/packedSweep";
 import {
   AZIMUTH_LOOKUP_SIZE,
   angularDistanceDegrees,
+  bearingWithinRadial,
   buildAzimuthLookup,
   destinationPoint,
   gateIndexForRange,
@@ -110,7 +111,7 @@ export function createRadarSweepCpuModel(sweep: PackedSweep): RadarSweepCpuModel
   const cpuBytes = rawCodes.byteLength + statuses.byteLength + azimuths.byteLength
     + beamWidths.byteLength + elevations.byteLength + azimuthLookup.byteLength;
   const estimatedGpuBytes = rawCodes.byteLength + statuses.byteLength
-    + azimuthLookup.byteLength + elevations.byteLength
+    + azimuthLookup.byteLength + metadata.radialCount * 3 * Float32Array.BYTES_PER_ELEMENT
     + PALETTE_WIDTH * 4 + 6 * 2 * 4;
   return {
     observationId: metadata.observationId,
@@ -152,6 +153,13 @@ export function interrogateLngLat(
   }
   const radialIndex = radialFromLookup(model.azimuthLookup, measured.bearingDegrees);
   if (radialIndex === null) {
+    return null;
+  }
+  if (!bearingWithinRadial(
+    measured.bearingDegrees,
+    model.azimuths[radialIndex],
+    model.beamWidths[radialIndex],
+  )) {
     return null;
   }
   const radialMaximumGroundRangeM = groundRangeForSlantRange(

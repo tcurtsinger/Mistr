@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { PackedRadial } from "../packed-sweep/packedSweep";
 import {
   angularDistanceDegrees,
+  bearingWithinRadial,
   buildAzimuthLookup,
   buildMercatorBounds,
   destinationPoint,
@@ -69,6 +70,9 @@ describe("native polar indexing", () => {
     expect(radialFromLookup(lookup, 10)).toBe(1);
     expect(radialFromLookup(lookup, 359.75)).toBe(2);
     expect(radialFromLookup(lookup, 180)).toBeNull();
+    expect(radialFromLookup(lookup, 10.54)).toBe(1);
+    expect(bearingWithinRadial(10.5, 10, 1)).toBe(true);
+    expect(bearingWithinRadial(10.54, 10, 1)).toBe(false);
   });
 
   it("rejects unordered or duplicate radial azimuths", () => {

@@ -10,7 +10,7 @@ describe("Radar custom-layer shader contract", () => {
     expect(radarShaderSources.fragment).toContain("usampler2D u_raw_codes");
     expect(radarShaderSources.fragment).toContain("usampler2D u_statuses");
     expect(radarShaderSources.fragment).toContain("usampler2D u_azimuth_lookup");
-    expect(radarShaderSources.fragment).toContain("sampler2D u_elevations");
+    expect(radarShaderSources.fragment).toContain("sampler2D u_radial_metadata");
     expect(radarShaderSources.fragment).toContain("texelFetch(u_raw_codes");
     expect(radarShaderSources.fragment).toContain("texelFetch(u_palette");
   });
@@ -20,6 +20,7 @@ describe("Radar custom-layer shader contract", () => {
     expect(fragment).toContain("gateCoordinate < -0.5");
     expect(fragment).toContain("float(u_gate_count) - 0.5");
     expect(fragment).toContain("encodedRadial == uint(0)");
+    expect(fragment).toContain("bearingDifference > radialMetadata.g");
     expect(fragment).toContain("float slantRangeM = EFFECTIVE_EARTH_RADIUS_M");
     expect(fragment).toContain("slantRangeM - u_first_gate_center_m");
     expect(fragment).toContain("status == uint(1)");

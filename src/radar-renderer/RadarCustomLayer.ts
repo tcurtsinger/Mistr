@@ -29,7 +29,7 @@ uniform usampler2D u_raw_codes;
 uniform usampler2D u_statuses;
 uniform usampler2D u_azimuth_lookup;
 uniform sampler2D u_palette;
-uniform sampler2D u_elevations;
+uniform sampler2D u_radial_metadata;
 uniform vec2 u_radar_lon_lat_radians;
 uniform float u_first_gate_center_m;
 uniform float u_gate_spacing_m;
@@ -71,7 +71,11 @@ void main() {
   uint encodedRadial = texelFetch(u_azimuth_lookup, ivec2(lookupIndex, 0), 0).r;
   if (encodedRadial == uint(0)) discard;
   int radialIndex = int(encodedRadial - uint(1));
-  float elevation = texelFetch(u_elevations, ivec2(radialIndex, 0), 0).r;
+  vec3 radialMetadata = texelFetch(u_radial_metadata, ivec2(radialIndex, 0), 0).rgb;
+  float bearingDifference = abs(bearing - radialMetadata.r);
+  bearingDifference = min(bearingDifference, TWO_PI - bearingDifference);
+  if (bearingDifference > radialMetadata.g) discard;
+  float elevation = radialMetadata.b;
   float groundAngle = groundRangeM / EFFECTIVE_EARTH_RADIUS_M;
   float beamDenominator = cos(elevation + groundAngle);
   if (beamDenominator <= 0.0) discard;
@@ -169,7 +173,7 @@ interface Uniforms {
   gateSpacing: WebGLUniformLocation;
   gateCount: WebGLUniformLocation;
   lookupSize: WebGLUniformLocation;
-  elevations: WebGLUniformLocation;
+  radialMetadata: WebGLUniformLocation;
   rangeFoldedColor: WebGLUniformLocation;
 }
 
@@ -187,7 +191,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
   private statusTexture: WebGLTexture | null = null;
   private lookupTexture: WebGLTexture | null = null;
   private paletteTexture: WebGLTexture | null = null;
-  private elevationTexture: WebGLTexture | null = null;
+  private radialMetadataTexture: WebGLTexture | null = null;
   private uniforms: Uniforms | null = null;
   private pendingFence: WebGLSync | null = null;
   private contextEpoch = 1;
@@ -251,13 +255,13 @@ export class RadarCustomLayer implements CustomLayerInterface {
       bindTexture(gl, 1, this.statusTexture);
       bindTexture(gl, 2, this.lookupTexture);
       bindTexture(gl, 3, this.paletteTexture);
-      bindTexture(gl, 4, this.elevationTexture);
+      bindTexture(gl, 4, this.radialMetadataTexture);
       gl.uniformMatrix4fv(this.uniforms.matrix, false, options.defaultProjectionData.mainMatrix);
       gl.uniform1i(this.uniforms.rawCodes, 0);
       gl.uniform1i(this.uniforms.statuses, 1);
       gl.uniform1i(this.uniforms.azimuthLookup, 2);
       gl.uniform1i(this.uniforms.palette, 3);
-      gl.uniform1i(this.uniforms.elevations, 4);
+      gl.uniform1i(this.uniforms.radialMetadata, 4);
       gl.uniform2f(
         this.uniforms.radarLonLat,
         degreesToRadians(this.model.center.longitude),
@@ -377,18 +381,25 @@ export class RadarCustomLayer implements CustomLayerInterface {
         gl.UNSIGNED_SHORT,
         this.model.azimuthLookup,
       );
-      const elevationsRadians = Float32Array.from(
-        this.model.elevations,
-        degreesToRadians,
-      );
-      this.elevationTexture = createTexture2d(
+      const radialMetadata = new Float32Array(this.model.radialCount * 3);
+      for (let radialIndex = 0; radialIndex < this.model.radialCount; radialIndex += 1) {
+        const destination = radialIndex * 3;
+        radialMetadata[destination] = degreesToRadians(this.model.azimuths[radialIndex]);
+        radialMetadata[destination + 1] = degreesToRadians(
+          this.model.beamWidths[radialIndex] / 2,
+        );
+        radialMetadata[destination + 2] = degreesToRadians(
+          this.model.elevations[radialIndex],
+        );
+      }
+      this.radialMetadataTexture = createTexture2d(
         gl,
         this.model.radialCount,
         1,
-        gl.R32F,
-        gl.RED,
+        gl.RGB32F,
+        gl.RGB,
         gl.FLOAT,
-        elevationsRadians,
+        radialMetadata,
       );
       const palette = buildReflectivityPalette(this.model.scale, this.model.offset);
       this.paletteTexture = createTexture2d(
@@ -451,7 +462,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
     if (this.statusTexture) gl.deleteTexture(this.statusTexture);
     if (this.lookupTexture) gl.deleteTexture(this.lookupTexture);
     if (this.paletteTexture) gl.deleteTexture(this.paletteTexture);
-    if (this.elevationTexture) gl.deleteTexture(this.elevationTexture);
+    if (this.radialMetadataTexture) gl.deleteTexture(this.radialMetadataTexture);
     if (this.quadBuffer) gl.deleteBuffer(this.quadBuffer);
     if (this.vao) gl.deleteVertexArray(this.vao);
     if (this.program) gl.deleteProgram(this.program);
@@ -460,7 +471,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
     this.statusTexture = null;
     this.lookupTexture = null;
     this.paletteTexture = null;
-    this.elevationTexture = null;
+    this.radialMetadataTexture = null;
     this.quadBuffer = null;
     this.vao = null;
     this.program = null;
@@ -809,7 +820,7 @@ function resolveUniforms(gl: WebGL2RenderingContext, program: WebGLProgram): Uni
     gateSpacing: requireUniform(gl, program, "u_gate_spacing_m"),
     gateCount: requireUniform(gl, program, "u_gate_count"),
     lookupSize: requireUniform(gl, program, "u_azimuth_lookup_size"),
-    elevations: requireUniform(gl, program, "u_elevations"),
+    radialMetadata: requireUniform(gl, program, "u_radial_metadata"),
     rangeFoldedColor: requireUniform(gl, program, "u_range_folded_color"),
   };
 }
