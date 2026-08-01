@@ -22,7 +22,7 @@ The decision had to preserve five truths at the same time:
 
 ### One bounded resource set per measured observation
 
-The renderer retains at most 20 ordered observations for one generation and render key. Every frame owns:
+The shared fixture manifest identifies the loop through the explicit `phase4KtlxReflectivityLoop` set, so later phases may add unrelated fixtures without changing Phase 4 membership. The renderer retains at most 20 ordered observations for one generation and render key. Every frame owns:
 
 - one native `R8UI` raw-code texture;
 - one `R8UI` detailed-status texture;
@@ -91,7 +91,7 @@ On the primary packaged Windows workstation:
 - two independent 4K runs completed 1,000 transitions each with no radar hot-path activity and no long tasks;
 - both runs measured 6.2 ms P95 frame duration;
 - resident switch-to-receipt P95 was 11.9 ms; and
-- stabilized JavaScript heap was 82,943,541 bytes after run one and 83,814,104 bytes after run two, a bounded 0.83 MiB difference.
+- stabilized JavaScript heap was 75,643,954 bytes after run one and 77,823,722 bytes after run two, a bounded 2.08 MiB difference.
 
 ## Consequences
 

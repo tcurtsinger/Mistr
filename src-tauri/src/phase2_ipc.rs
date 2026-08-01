@@ -18,6 +18,7 @@ const MAX_DIAGNOSTIC_HOLD_MS: u64 = 2_000;
 const PHASE3_FIXTURE_NAME: &str = "KTLX20240520_230512_V06";
 const PHASE3_FIXTURE_ID: &str = "ktlx-2024-05-20-230512-v06";
 const PHASE4_FRAME_COUNT: usize = 20;
+const PHASE4_FIXTURE_SET: &str = "phase4KtlxReflectivityLoop";
 const FIXTURE_MANIFEST_JSON: &str = include_str!("../../fixtures/manifest.json");
 
 #[derive(Debug, Clone, Serialize)]
@@ -583,10 +584,11 @@ pub async fn request_phase4_fixture_sweep(
     Ok(Response::new(bytes))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct FixtureManifest {
     schema_version: u8,
+    fixture_sets: BTreeMap<String, Vec<String>>,
     fixtures: Vec<FixtureManifestEntry>,
 }
 
@@ -634,23 +636,48 @@ fn phase3_fixture_expectation() -> Result<FixtureManifestEntry, TransferError> {
 
 fn phase4_fixture_expectation(fixture_id: &str) -> Result<FixtureManifestEntry, TransferError> {
     let manifest = fixture_manifest()?;
-    if manifest.fixtures.len() != PHASE4_FRAME_COUNT {
+    phase4_fixture_expectation_in(&manifest, fixture_id)
+}
+
+fn phase4_fixture_expectation_in(
+    manifest: &FixtureManifest,
+    fixture_id: &str,
+) -> Result<FixtureManifestEntry, TransferError> {
+    let fixture_ids = manifest
+        .fixture_sets
+        .get(PHASE4_FIXTURE_SET)
+        .ok_or_else(|| {
+            TransferError::new(
+                "fixture_manifest_invalid",
+                format!("embedded fixture manifest is missing set {PHASE4_FIXTURE_SET}"),
+            )
+        })?;
+    let distinct_ids = fixture_ids.iter().collect::<BTreeSet<_>>();
+    if fixture_ids.len() != PHASE4_FRAME_COUNT || distinct_ids.len() != PHASE4_FRAME_COUNT {
         return Err(TransferError::new(
             "fixture_manifest_invalid",
             format!(
-                "Phase 4 requires exactly {PHASE4_FRAME_COUNT} pinned observations; manifest has {}",
-                manifest.fixtures.len()
+                "fixture set {PHASE4_FIXTURE_SET} must contain exactly {PHASE4_FRAME_COUNT} distinct observations"
             ),
+        ));
+    }
+    if !fixture_ids.iter().any(|candidate| candidate == fixture_id) {
+        return Err(TransferError::new(
+            "fixture_not_pinned",
+            format!("fixture ID {fixture_id:?} is not in set {PHASE4_FIXTURE_SET}"),
         ));
     }
     manifest
         .fixtures
-        .into_iter()
+        .iter()
         .find(|fixture| fixture.id == fixture_id)
+        .cloned()
         .ok_or_else(|| {
             TransferError::new(
-                "fixture_not_pinned",
-                format!("fixture ID {fixture_id:?} is not in the embedded Phase 4 manifest"),
+                "fixture_manifest_invalid",
+                format!(
+                    "fixture set {PHASE4_FIXTURE_SET} references missing fixture ID {fixture_id:?}"
+                ),
             )
         })
 }
@@ -956,26 +983,31 @@ mod tests {
 
     #[test]
     fn phase4_manifest_pins_exactly_twenty_distinct_observations() {
-        let manifest = fixture_manifest().unwrap();
-        assert_eq!(manifest.fixtures.len(), PHASE4_FRAME_COUNT);
-        let ids = manifest
-            .fixtures
+        let mut manifest = fixture_manifest().unwrap();
+        let fixture_ids = manifest
+            .fixture_sets
+            .get(PHASE4_FIXTURE_SET)
+            .unwrap()
+            .clone();
+        let ids = fixture_ids
             .iter()
-            .map(|fixture| fixture.id.as_str())
+            .map(String::as_str)
             .collect::<BTreeSet<_>>();
         assert_eq!(ids.len(), PHASE4_FRAME_COUNT);
-        for fixture in &manifest.fixtures {
-            assert_eq!(
-                phase4_fixture_expectation(&fixture.id)
-                    .unwrap()
-                    .sha256
-                    .len(),
-                64
-            );
+        for fixture_id in &fixture_ids {
+            let fixture = phase4_fixture_expectation_in(&manifest, fixture_id).unwrap();
+            assert_eq!(fixture.sha256.len(), 64);
             assert!(fixture.local_path.starts_with("cache/KTLX20240520_"));
         }
+        let mut future_fixture = manifest.fixtures[0].clone();
+        future_fixture.id = "future-phase-fixture".to_string();
+        manifest.fixtures.push(future_fixture);
+        assert_eq!(manifest.fixtures.len(), PHASE4_FRAME_COUNT + 1);
+        assert!(phase4_fixture_expectation_in(&manifest, fixture_ids[0].as_str()).is_ok());
         assert_eq!(
-            phase4_fixture_expectation("not-pinned").unwrap_err().code,
+            phase4_fixture_expectation_in(&manifest, "future-phase-fixture")
+                .unwrap_err()
+                .code,
             "fixture_not_pinned"
         );
     }

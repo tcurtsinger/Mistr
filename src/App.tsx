@@ -242,12 +242,21 @@ export function App() {
       client = new PackedSweepTransferClient(invoke);
       await client.open();
       await client.begin(1);
-      const fixtureIds = fixtureManifest.fixtures.map((fixture) => fixture.id);
+      const fixtureIds = fixtureManifest.fixtureSets.phase4KtlxReflectivityLoop;
+      const fixturesById = new Map(
+        fixtureManifest.fixtures.map((fixture) => [fixture.id, fixture]),
+      );
+      const phase4Fixtures = fixtureIds.flatMap((id) => {
+        const fixture = fixturesById.get(id);
+        return fixture ? [fixture] : [];
+      });
       if (
         fixtureIds.length !== PHASE4_FRAME_COUNT
-        || fixtureManifest.fixtures.some((fixture) => fixture.station !== "KTLX")
+        || new Set(fixtureIds).size !== PHASE4_FRAME_COUNT
+        || phase4Fixtures.length !== PHASE4_FRAME_COUNT
+        || phase4Fixtures.some((fixture) => fixture.station !== "KTLX")
       ) {
-        throw new Error(`Phase 4 requires exactly ${PHASE4_FRAME_COUNT} pinned fixtures`);
+        throw new Error(`Phase 4 requires its explicit ${PHASE4_FRAME_COUNT}-fixture KTLX set`);
       }
       const models: RadarSweepCpuModel[] = [];
       for (let index = 0; index < fixtureIds.length; index += 1) {

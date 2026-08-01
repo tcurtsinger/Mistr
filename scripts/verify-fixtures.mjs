@@ -34,6 +34,8 @@ for (const fixture of manifest.fixtures) {
   await verifyFixture(fixture, destination);
 }
 
+validateFixtureSets(manifest.fixtureSets, fixtureIds);
+
 console.log(`Verified ${manifest.fixtures.length} fixture(s).`);
 
 function validateFixture(fixture, knownIds) {
@@ -87,6 +89,30 @@ function validateFixture(fixture, knownIds) {
   const keyTimestamp = `${year}-${month}-${day}T${hour}:${minute}:${second}Z`;
   if (fixture.station !== keyStation || fixture.observedAt !== keyTimestamp) {
     throw new Error(`${fixture.id}: station or scan time does not match its archive key`);
+  }
+}
+
+function validateFixtureSets(fixtureSets, knownIds) {
+  if (
+    !fixtureSets
+    || typeof fixtureSets !== "object"
+    || Array.isArray(fixtureSets)
+    || !Array.isArray(fixtureSets.phase4KtlxReflectivityLoop)
+    || fixtureSets.phase4KtlxReflectivityLoop.length !== 20
+  ) {
+    throw new Error("Fixture manifest must define the 20-entry Phase 4 KTLX loop");
+  }
+  for (const [name, ids] of Object.entries(fixtureSets)) {
+    if (!/^[a-z][A-Za-z0-9]*$/.test(name) || !Array.isArray(ids) || ids.length === 0) {
+      throw new Error(`Invalid fixture set ${name}`);
+    }
+    const uniqueIds = new Set(ids);
+    if (
+      uniqueIds.size !== ids.length
+      || ids.some((id) => typeof id !== "string" || !knownIds.has(id))
+    ) {
+      throw new Error(`Fixture set ${name} contains a duplicate or unknown fixture ID`);
+    }
   }
 }
 

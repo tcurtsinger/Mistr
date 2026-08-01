@@ -46,6 +46,9 @@ export class FramePerformanceMonitor {
   stop(): FrameTimingSummary {
     if (this.frameHandle !== null) globalThis.cancelAnimationFrame(this.frameHandle);
     this.frameHandle = null;
+    if (this.observer) {
+      for (const entry of this.observer.takeRecords()) this.longTasks.push(entry.duration);
+    }
     this.observer?.disconnect();
     this.observer = null;
     return summarizeFramePerformance(
