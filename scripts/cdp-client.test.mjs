@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { CdpClient, openWebSocketWithTimeout } from "./cdp-client.mjs";
+import {
+  CdpClient,
+  fetchJsonWithTimeout,
+  openWebSocketWithTimeout,
+} from "./cdp-client.mjs";
 
 describe("bounded CDP requests", () => {
   it("rejects a request that receives no response", async () => {
@@ -42,6 +46,17 @@ describe("bounded CDP WebSocket handshake", () => {
     await expect(pending).rejects.toThrow(
       "CDP WebSocket closed before the handshake completed",
     );
+  });
+});
+
+describe("bounded CDP target discovery", () => {
+  it("aborts a fetch whose HTTP response never completes", async () => {
+    const stalledFetch = (_url, { signal }) => new Promise((_resolve, reject) => {
+      signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+    });
+
+    await expect(fetchJsonWithTimeout("http://127.0.0.1/json", 5, stalledFetch))
+      .rejects.toThrow("HTTP request timed out after 5 ms");
   });
 });
 

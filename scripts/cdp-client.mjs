@@ -85,3 +85,27 @@ export function openWebSocketWithTimeout(socket, timeoutMs = 15_000) {
     ));
   });
 }
+
+export async function fetchJsonWithTimeout(
+  url,
+  timeoutMs = 1_000,
+  fetchImplementation = globalThis.fetch,
+) {
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1) {
+    throw new RangeError("HTTP request timeout must be positive");
+  }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetchImplementation(url, { signal: controller.signal });
+    if (!response.ok) throw new Error(`HTTP ${response.status} from ${url}`);
+    return await response.json();
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(`HTTP request timed out after ${timeoutMs} ms`, { cause: error });
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}

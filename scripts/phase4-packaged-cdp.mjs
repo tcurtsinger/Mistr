@@ -1,6 +1,10 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { CdpClient, openWebSocketWithTimeout } from "./cdp-client.mjs";
+import {
+  CdpClient,
+  fetchJsonWithTimeout,
+  openWebSocketWithTimeout,
+} from "./cdp-client.mjs";
 import {
   parseAcceptanceWorkload,
   phase4ScenarioTimeoutMs,
@@ -119,7 +123,7 @@ async function waitForTarget() {
   const deadline = Date.now() + 60_000;
   while (Date.now() < deadline) {
     try {
-      const targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
+      const targets = await fetchJsonWithTimeout(`http://127.0.0.1:${port}/json`);
       const page = targets.find((candidate) => candidate.type === "page");
       if (page) return page;
     } catch {
