@@ -136,7 +136,7 @@ Preferred architectural direction is one Rust normalization boundary, but eviden
 
 ### Q006 — CPU retention for context restoration
 
-**Resolved for the resident-loop baseline:** Retain compact raw codes, detailed statuses, radial metadata (azimuth, beam width, and elevation), and azimuth lookup for every resident observation; release the packed float-value transfer after upload. The current 20-observation projection is about 50.64 MiB CPU and 50.66 MiB known GPU allocations. Phase 4 must confirm actual residency and revise visibly if another product/layout exceeds budget.
+**Resolved and confirmed for the resident-loop baseline:** Retain compact raw codes, detailed statuses, radial metadata (azimuth, beam width, and elevation), and azimuth lookup for every resident observation; release the packed float-value transfer after the compact copy. Phase 4 measured 53,098,240 CPU bytes (50.638 MiB) and 53,099,312 known GPU bytes (50.639 MiB) for 20 real KTLX observations. Five atomic replacements per run peaked at 106,197,552 known GPU bytes (101.278 MiB). See [`16_RESIDENT_PLAYBACK_DECISION.md`](16_RESIDENT_PLAYBACK_DECISION.md).
 
 Options:
 
@@ -214,3 +214,7 @@ Required ADRs before Phase 7:
 - Level III `N0S` decoder path.
 - Raw/tile fallback and source-preference policy.
 - GustAVO feature-flag and observation-period policy.
+
+Additional accepted prototype ADRs:
+
+- [x] Resident playback, atomic replacement, and paint truth: [`16_RESIDENT_PLAYBACK_DECISION.md`](16_RESIDENT_PLAYBACK_DECISION.md).

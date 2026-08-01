@@ -11,7 +11,7 @@ The target is a Windows desktop storm command center with game-loop-style playba
 
 ## Status
 
-**Prototype only.** Phase 0 established the reproducible desktop harness. Phase 1 contains a bounded Rust Level II decoder adapter and an independently verified reflectivity reference. Phase 2 adds the strict `PackedSweep v1` binary boundary and proves raw `ArrayBuffer` transfer, cancellation, and bounded backpressure in packaged Tauri. GPU and full playback feasibility must still pass their explicit gates before this code is considered for production use.
+**Prototype only.** Phases 0 through 4 are complete on the primary Windows workstation. The current build decodes 20 hash-pinned real KTLX observations, retains about 50.64 MiB of compact CPU truth, uploads about 50.64 MiB of known GPU resources, and proves 2,000 packaged 4K receipt-gated hard cuts with zero radar hot-path I/O/decode/IPC and no measured long tasks. Live chunks, velocity parity, context recovery, fallback, multi-machine evidence, and GustAVO integration still have explicit later gates.
 
 Start with [the documentation index](docs/README.md) and [prototype charter](docs/00_PROTOTYPE_CHARTER.md).
 
@@ -39,7 +39,7 @@ npm run tauri:build
 
 The unsigned NSIS and MSI outputs are local prototype artifacts under `src-tauri/target/release/bundle/`; they are not committed to the public repository.
 
-Downloaded radar data and generated diagnostics are intentionally ignored by Git. No AWS credentials are used: the Phase 0 fixture is fetched from a public Unidata NEXRAD bucket.
+Downloaded radar data and generated diagnostics are intentionally ignored by Git. No AWS credentials are used: the fixtures are fetched from a public Unidata NEXRAD bucket.
 
 ## Phase 1 decoder check
 
@@ -66,6 +66,16 @@ cargo run --release --locked --manifest-path src-tauri\Cargo.toml --bin mistr-wi
 ```
 
 The accepted byte layout is documented in [PackedSweep v1](docs/14_PACKED_SWEEP_V1.md), and the packaged-runtime evidence is in the [Phase 2 report](docs/phase-reports/PHASE_2_PACKED_WIRE_AND_IPC.md).
+
+## Phase 4 packaged playback gate
+
+After downloading the 20 public fixtures, run the real release/WebView2 4K gate:
+
+```powershell
+npm run test:phase4:packaged
+```
+
+The runner performs two 1,000-transition interaction scenarios and five atomic loop replacements per scenario. Its ignored evidence is written under `artifacts/phase-4/`. The contract and results are documented in the [resident playback decision](docs/16_RESIDENT_PLAYBACK_DECISION.md) and [Phase 4 report](docs/phase-reports/PHASE_4_RESIDENT_PLAYBACK.md).
 
 ## Public-repository rules
 

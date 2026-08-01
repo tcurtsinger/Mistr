@@ -10,6 +10,15 @@ export interface TransferSnapshot {
   creditLimit: number;
 }
 
+export interface Phase4ActivitySnapshot {
+  networkRequests: number;
+  diskReads: number;
+  decoderRuns: number;
+  normalizationRuns: number;
+  bulkIpcTransfers: number;
+  bulkIpcBytes: number;
+}
+
 export interface TimingDistribution {
   min: number;
   p50: number;
@@ -176,10 +185,25 @@ export class PackedSweepTransferClient {
     return this.requestFromCommand("request_phase3_fixture_sweep", 0, false);
   }
 
+  async requestPhase4Fixture(fixtureId: string): Promise<PackedSweepLease> {
+    if (!/^[a-z0-9-]+$/.test(fixtureId)) {
+      throw new TypeError("fixtureId must be a lowercase slug");
+    }
+    return this.requestFromCommand("request_phase4_fixture_sweep", 0, false, fixtureId);
+  }
+
+  async phase4ActivitySnapshot(): Promise<Phase4ActivitySnapshot> {
+    return this.invoke<Phase4ActivitySnapshot>("phase4_activity_snapshot");
+  }
+
   private async requestFromCommand(
-    command: "request_phase2_benchmark_sweep" | "request_phase3_fixture_sweep",
+    command:
+      | "request_phase2_benchmark_sweep"
+      | "request_phase3_fixture_sweep"
+      | "request_phase4_fixture_sweep",
     holdMs: number,
     includeHold: boolean,
+    fixtureId?: string,
   ): Promise<PackedSweepLease> {
     this.assertSessionOpen();
     await this.flushPendingReleaseAcks();
@@ -202,6 +226,9 @@ export class PackedSweepTransferClient {
       };
       if (includeHold) {
         arguments_.holdMs = holdMs;
+      }
+      if (fixtureId !== undefined) {
+        arguments_.fixtureId = fixtureId;
       }
       response = await this.invoke<ArrayBuffer>(command, arguments_);
       const invokeMs = performance.now() - invokeStarted;

@@ -23,6 +23,8 @@ export interface RadarSweepCpuModel {
   units: "dBZ";
   sourceKind: "nexrad_level2_archive_ii" | "mistr_phase2_synthetic";
   generation: bigint;
+  observedAtUnixMs: number;
+  volumeEndedAtUnixMs: number;
   center: LngLatPoint;
   radialCount: number;
   gateCount: number;
@@ -120,6 +122,8 @@ export function createRadarSweepCpuModel(sweep: PackedSweep): RadarSweepCpuModel
     units: "dBZ",
     sourceKind: metadata.sourceKind,
     generation: metadata.generation,
+    observedAtUnixMs: Number(metadata.sweepStartedAtUnixMs),
+    volumeEndedAtUnixMs: Number(metadata.volumeEndedAtUnixMs),
     center: {
       longitude: metadata.radarLongitudeDegrees,
       latitude: metadata.radarLatitudeDegrees,

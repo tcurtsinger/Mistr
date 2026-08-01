@@ -17,6 +17,8 @@ const MAX_BENCHMARK_ITERATIONS: u8 = 20;
 const MAX_DIAGNOSTIC_HOLD_MS: u64 = 2_000;
 const PHASE3_FIXTURE_NAME: &str = "KTLX20240520_230512_V06";
 const PHASE3_FIXTURE_ID: &str = "ktlx-2024-05-20-230512-v06";
+const PHASE4_FRAME_COUNT: usize = 20;
+const PHASE4_FIXTURE_SET: &str = "phase4KtlxReflectivityLoop";
 const FIXTURE_MANIFEST_JSON: &str = include_str!("../../fixtures/manifest.json");
 
 #[derive(Debug, Clone, Serialize)]
@@ -60,6 +62,18 @@ struct TransferState {
     // would let its eventual retry release a newer credit from the same owner.
     acknowledged_release_ids: BTreeSet<String>,
     in_flight_credits_by_session: BTreeMap<u64, u8>,
+    phase4_activity: Phase4ActivitySnapshot,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Phase4ActivitySnapshot {
+    pub network_requests: u64,
+    pub disk_reads: u64,
+    pub decoder_runs: u64,
+    pub normalization_runs: u64,
+    pub bulk_ipc_transfers: u64,
+    pub bulk_ipc_bytes: u64,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -246,6 +260,36 @@ impl TransferBroker {
         Ok(snapshot(&state))
     }
 
+    fn phase4_activity_snapshot(&self) -> Result<Phase4ActivitySnapshot, TransferError> {
+        let state = self.lock()?;
+        Ok(state.phase4_activity)
+    }
+
+    fn record_phase4_disk_read(&self) -> Result<(), TransferError> {
+        let mut state = self.lock()?;
+        state.phase4_activity.disk_reads = state.phase4_activity.disk_reads.saturating_add(1);
+        Ok(())
+    }
+
+    fn record_phase4_decode_and_normalize(&self) -> Result<(), TransferError> {
+        let mut state = self.lock()?;
+        state.phase4_activity.decoder_runs = state.phase4_activity.decoder_runs.saturating_add(1);
+        state.phase4_activity.normalization_runs =
+            state.phase4_activity.normalization_runs.saturating_add(1);
+        Ok(())
+    }
+
+    fn record_phase4_bulk_ipc(&self, byte_length: usize) -> Result<(), TransferError> {
+        let mut state = self.lock()?;
+        state.phase4_activity.bulk_ipc_transfers =
+            state.phase4_activity.bulk_ipc_transfers.saturating_add(1);
+        state.phase4_activity.bulk_ipc_bytes = state
+            .phase4_activity
+            .bulk_ipc_bytes
+            .saturating_add(byte_length as u64);
+        Ok(())
+    }
+
     fn lock(&self) -> Result<std::sync::MutexGuard<'_, TransferState>, TransferError> {
         self.inner.lock().map_err(|_| {
             TransferError::new(
@@ -412,6 +456,13 @@ pub fn phase2_transfer_snapshot(
 }
 
 #[tauri::command]
+pub fn phase4_activity_snapshot(
+    state: tauri::State<'_, TransferBroker>,
+) -> Result<Phase4ActivitySnapshot, TransferError> {
+    state.phase4_activity_snapshot()
+}
+
+#[tauri::command]
 pub async fn request_phase2_benchmark_sweep(
     state: tauri::State<'_, TransferBroker>,
     session: u64,
@@ -488,22 +539,69 @@ pub async fn request_phase3_fixture_sweep(
     Ok(Response::new(bytes))
 }
 
-#[derive(Debug, Deserialize)]
+#[tauri::command]
+pub async fn request_phase4_fixture_sweep(
+    state: tauri::State<'_, TransferBroker>,
+    session: u64,
+    generation: u64,
+    fixture_id: String,
+) -> Result<Response, TransferError> {
+    let broker = state.inner().clone();
+    broker.acquire(session, generation)?;
+    let worker_broker = broker.clone();
+    let task = tauri::async_runtime::spawn_blocking(move || {
+        let fixture = phase4_fixture_expectation(&fixture_id)?;
+        let path = phase4_fixture_path(&fixture)?;
+        let input = read_fixture_archive(&path, &fixture)?;
+        worker_broker.record_phase4_disk_read()?;
+        verify_fixture_archive_hash(&input, &fixture, "Phase 4")?;
+        worker_broker.record_phase4_decode_and_normalize()?;
+        let decoded = decode_level2(&input, RadarProduct::Reflectivity)
+            .map_err(|error| TransferError::new("fixture_decode_failed", error.to_string()))?;
+        encode_packed_sweep(&decoded.sweep, PackedSweepIdentity { generation })
+            .map_err(|error| TransferError::new("wire_encode_failed", error.to_string()))
+    })
+    .await;
+
+    let encoded = match task {
+        Ok(encoded) => encoded,
+        Err(error) => {
+            broker.finish_without_publish(session);
+            return Err(TransferError::new("backend_task_failed", error.to_string()));
+        }
+    };
+    let bytes = match encoded {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            broker.finish_without_publish(session);
+            return Err(error);
+        }
+    };
+    broker.complete_for_publish(session, generation)?;
+    // Publication already converted the in-flight credit into a delivered
+    // credit. It remains releasable by the client if this diagnostic update fails.
+    broker.record_phase4_bulk_ipc(bytes.len())?;
+    Ok(Response::new(bytes))
+}
+
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct FixtureManifest {
     schema_version: u8,
+    fixture_sets: BTreeMap<String, Vec<String>>,
     fixtures: Vec<FixtureManifestEntry>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct FixtureManifestEntry {
     id: String,
     size_bytes: u64,
     sha256: String,
+    local_path: String,
 }
 
-fn phase3_fixture_expectation() -> Result<FixtureManifestEntry, TransferError> {
+fn fixture_manifest() -> Result<FixtureManifest, TransferError> {
     let manifest: FixtureManifest =
         serde_json::from_str(FIXTURE_MANIFEST_JSON).map_err(|error| {
             TransferError::new(
@@ -520,7 +618,11 @@ fn phase3_fixture_expectation() -> Result<FixtureManifestEntry, TransferError> {
             ),
         ));
     }
-    manifest
+    Ok(manifest)
+}
+
+fn phase3_fixture_expectation() -> Result<FixtureManifestEntry, TransferError> {
+    fixture_manifest()?
         .fixtures
         .into_iter()
         .find(|fixture| fixture.id == PHASE3_FIXTURE_ID)
@@ -532,14 +634,71 @@ fn phase3_fixture_expectation() -> Result<FixtureManifestEntry, TransferError> {
         })
 }
 
+fn phase4_fixture_expectation(fixture_id: &str) -> Result<FixtureManifestEntry, TransferError> {
+    let manifest = fixture_manifest()?;
+    phase4_fixture_expectation_in(&manifest, fixture_id)
+}
+
+fn phase4_fixture_expectation_in(
+    manifest: &FixtureManifest,
+    fixture_id: &str,
+) -> Result<FixtureManifestEntry, TransferError> {
+    let fixture_ids = manifest
+        .fixture_sets
+        .get(PHASE4_FIXTURE_SET)
+        .ok_or_else(|| {
+            TransferError::new(
+                "fixture_manifest_invalid",
+                format!("embedded fixture manifest is missing set {PHASE4_FIXTURE_SET}"),
+            )
+        })?;
+    let distinct_ids = fixture_ids.iter().collect::<BTreeSet<_>>();
+    if fixture_ids.len() != PHASE4_FRAME_COUNT || distinct_ids.len() != PHASE4_FRAME_COUNT {
+        return Err(TransferError::new(
+            "fixture_manifest_invalid",
+            format!(
+                "fixture set {PHASE4_FIXTURE_SET} must contain exactly {PHASE4_FRAME_COUNT} distinct observations"
+            ),
+        ));
+    }
+    if !fixture_ids.iter().any(|candidate| candidate == fixture_id) {
+        return Err(TransferError::new(
+            "fixture_not_pinned",
+            format!("fixture ID {fixture_id:?} is not in set {PHASE4_FIXTURE_SET}"),
+        ));
+    }
+    manifest
+        .fixtures
+        .iter()
+        .find(|fixture| fixture.id == fixture_id)
+        .cloned()
+        .ok_or_else(|| {
+            TransferError::new(
+                "fixture_manifest_invalid",
+                format!(
+                    "fixture set {PHASE4_FIXTURE_SET} references missing fixture ID {fixture_id:?}"
+                ),
+            )
+        })
+}
+
 fn verify_phase3_archive_hash(input: &[u8]) -> Result<(), TransferError> {
     let expected = phase3_fixture_expectation()?;
+    verify_fixture_archive_hash(input, &expected, "Phase 3")
+}
+
+fn verify_fixture_archive_hash(
+    input: &[u8],
+    expected: &FixtureManifestEntry,
+    phase: &str,
+) -> Result<(), TransferError> {
     let actual_sha256 = format!("{:x}", Sha256::digest(input));
     if input.len() as u64 != expected.size_bytes || actual_sha256 != expected.sha256 {
         return Err(TransferError::new(
             "fixture_hash_mismatch",
             format!(
-                "Phase 3 fixture does not match manifest entry {PHASE3_FIXTURE_ID}: expected {} bytes / {}, got {} bytes / {actual_sha256}",
+                "{phase} fixture does not match manifest entry {}: expected {} bytes / {}, got {} bytes / {actual_sha256}",
+                expected.id,
                 expected.size_bytes,
                 expected.sha256,
                 input.len()
@@ -547,6 +706,25 @@ fn verify_phase3_archive_hash(input: &[u8]) -> Result<(), TransferError> {
         ));
     }
     Ok(())
+}
+
+fn read_fixture_archive(
+    path: &std::path::Path,
+    fixture: &FixtureManifestEntry,
+) -> Result<Vec<u8>, TransferError> {
+    let input = read_phase3_archive(path)?;
+    if input.len() as u64 != fixture.size_bytes {
+        return Err(TransferError::new(
+            "fixture_hash_mismatch",
+            format!(
+                "fixture {} expected {} bytes, got {} bytes",
+                fixture.id,
+                fixture.size_bytes,
+                input.len()
+            ),
+        ));
+    }
+    Ok(input)
 }
 
 fn read_phase3_archive(path: &std::path::Path) -> Result<Vec<u8>, TransferError> {
@@ -610,6 +788,37 @@ fn phase3_fixture_path() -> Result<PathBuf, TransferError> {
         .join("fixtures")
         .join("cache")
         .join(PHASE3_FIXTURE_NAME))
+}
+
+fn phase4_fixture_path(fixture: &FixtureManifestEntry) -> Result<PathBuf, TransferError> {
+    let relative = std::path::Path::new(&fixture.local_path);
+    if relative.is_absolute()
+        || relative
+            .components()
+            .any(|component| !matches!(component, std::path::Component::Normal(_)))
+        || relative.parent() != Some(std::path::Path::new("cache"))
+    {
+        return Err(TransferError::new(
+            "fixture_manifest_invalid",
+            format!("fixture {} has an unsafe localPath", fixture.id),
+        ));
+    }
+    if let Some(cache_dir) = std::env::var_os("MISTR_PHASE4_FIXTURE_CACHE_DIR") {
+        let file_name = relative.file_name().ok_or_else(|| {
+            TransferError::new(
+                "fixture_manifest_invalid",
+                format!("fixture {} has no local filename", fixture.id),
+            )
+        })?;
+        return Ok(PathBuf::from(cache_dir).join(file_name));
+    }
+    let current = std::env::current_dir().map_err(|error| {
+        TransferError::new(
+            "fixture_path_failed",
+            format!("failed to resolve current directory: {error}"),
+        )
+    })?;
+    Ok(current.join("fixtures").join(relative))
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -770,6 +979,56 @@ mod tests {
         );
         let error = verify_phase3_archive_hash(b"another valid archive could decode").unwrap_err();
         assert_eq!(error.code, "fixture_hash_mismatch");
+    }
+
+    #[test]
+    fn phase4_manifest_pins_exactly_twenty_distinct_observations() {
+        let mut manifest = fixture_manifest().unwrap();
+        let fixture_ids = manifest
+            .fixture_sets
+            .get(PHASE4_FIXTURE_SET)
+            .unwrap()
+            .clone();
+        let ids = fixture_ids
+            .iter()
+            .map(String::as_str)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(ids.len(), PHASE4_FRAME_COUNT);
+        for fixture_id in &fixture_ids {
+            let fixture = phase4_fixture_expectation_in(&manifest, fixture_id).unwrap();
+            assert_eq!(fixture.sha256.len(), 64);
+            assert!(fixture.local_path.starts_with("cache/KTLX20240520_"));
+        }
+        let mut future_fixture = manifest.fixtures[0].clone();
+        future_fixture.id = "future-phase-fixture".to_string();
+        manifest.fixtures.push(future_fixture);
+        assert_eq!(manifest.fixtures.len(), PHASE4_FRAME_COUNT + 1);
+        assert!(phase4_fixture_expectation_in(&manifest, fixture_ids[0].as_str()).is_ok());
+        assert_eq!(
+            phase4_fixture_expectation_in(&manifest, "future-phase-fixture")
+                .unwrap_err()
+                .code,
+            "fixture_not_pinned"
+        );
+    }
+
+    #[test]
+    fn phase4_activity_ledger_is_monotonic_and_stage_specific() {
+        let broker = TransferBroker::default();
+        broker.record_phase4_disk_read().unwrap();
+        broker.record_phase4_decode_and_normalize().unwrap();
+        broker.record_phase4_bulk_ipc(123).unwrap();
+        assert_eq!(
+            broker.phase4_activity_snapshot().unwrap(),
+            Phase4ActivitySnapshot {
+                network_requests: 0,
+                disk_reads: 1,
+                decoder_runs: 1,
+                normalization_runs: 1,
+                bulk_ipc_transfers: 1,
+                bulk_ipc_bytes: 123,
+            }
+        );
     }
 
     #[test]

@@ -123,7 +123,7 @@ The packaged WebView2 device was hardware ANGLE/D3D11 on an NVIDIA GeForce RTX 4
 
 ## Validation required next
 
-Phase 4 must load a real 20-observation loop, prove already-resident hard cuts with paint receipts, measure frame-time/long-task behavior under interaction, and confirm the projected CPU/GPU residency with actual allocations and stabilized process memory.
+Completed in Phase 4. The real 20-observation loop, already-resident hard cuts, GPU-complete paint receipts, 4K frame/long-task measurements, atomic replacement, and actual CPU/GPU residency are recorded in [`16_RESIDENT_PLAYBACK_DECISION.md`](16_RESIDENT_PLAYBACK_DECISION.md) and [`phase-reports/PHASE_4_RESIDENT_PLAYBACK.md`](phase-reports/PHASE_4_RESIDENT_PLAYBACK.md).
 
 ## Primary API basis
 

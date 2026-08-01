@@ -138,6 +138,8 @@ Render one decoded Level II reflectivity sweep correctly over MapLibre.
 
 ## Phase 4 — Resident 20-frame playback
 
+**Status:** Complete on the primary Windows workstation. See [`phase-reports/PHASE_4_RESIDENT_PLAYBACK.md`](phase-reports/PHASE_4_RESIDENT_PLAYBACK.md) and [`16_RESIDENT_PLAYBACK_DECISION.md`](16_RESIDENT_PLAYBACK_DECISION.md).
+
 ### Objective
 
 Prove the core game-loop property: after loading, playback is GPU-resident and independent of network/tile readiness.
@@ -164,6 +166,7 @@ Prove the core game-loop property: after loading, playback is GPU-resident and i
 - An already-resident frame paints on the next render opportunity.
 - Resident playback performs zero network, disk, decoder, and bulk IPC work.
 - P95 frame time stays below 16.7 ms in the representative 4K scenario.
+- Per-run resident selection-to-GPU-receipt P95 stays below 33.4 ms.
 - Radar GPU memory remains at or below the target budget and never exceeds the hard ceiling.
 - Timeline state never claims an observation that lacks a matching paint receipt.
 - Repeated playback and replacement show no unbounded growth.

@@ -3,11 +3,30 @@
   "$id": "https://github.com/tcurtsinger/Mistr/blob/main/fixtures/manifest.schema.json",
   "title": "Mistr NEXRAD fixture manifest",
   "type": "object",
-  "required": ["schemaVersion", "fixtures"],
+  "required": ["schemaVersion", "fixtureSets", "fixtures"],
   "additionalProperties": false,
   "properties": {
     "$schema": { "type": "string" },
     "schemaVersion": { "const": 1 },
+    "fixtureSets": {
+      "type": "object",
+      "required": ["phase4KtlxReflectivityLoop"],
+      "additionalProperties": {
+        "type": "array",
+        "minItems": 1,
+        "uniqueItems": true,
+        "items": { "type": "string", "pattern": "^[a-z0-9-]+$" }
+      },
+      "properties": {
+        "phase4KtlxReflectivityLoop": {
+          "type": "array",
+          "minItems": 20,
+          "maxItems": 20,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[a-z0-9-]+$" }
+        }
+      }
+    },
     "fixtures": {
       "type": "array",
       "minItems": 1,

@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  assertNoWebGlError,
   hasVerifiedHardwareAcceleration,
   radarShaderSources,
+  validateReplacementGeneration,
+  validateResidentModels,
 } from "./RadarCustomLayer";
+import type { RadarSweepCpuModel } from "./cpuModel";
 
 describe("Radar custom-layer shader contract", () => {
   it("uses public matrix input and compact texture fetches without per-gate geometry", () => {
@@ -28,6 +32,17 @@ describe("Radar custom-layer shader contract", () => {
   });
 });
 
+describe("WebGL upload error gate", () => {
+  it("rejects a texture upload when WebGL records an error", () => {
+    expect(() => assertNoWebGlError({
+      NO_ERROR: 0,
+      getError: () => 0x0502,
+    }, "radial-metadata texture upload")).toThrow(
+      "radial-metadata texture upload failed with WebGL error 0x502",
+    );
+  });
+});
+
 describe("hardware renderer evidence", () => {
   it("requires unmasked evidence and rejects common software renderers", () => {
     expect(hasVerifiedHardwareAcceleration(false, "WebKit WebGL")).toBe(false);
@@ -45,3 +60,40 @@ describe("hardware renderer evidence", () => {
       .toBe(false);
   });
 });
+
+describe("resident loop validation", () => {
+  it("accepts 20 ordered observations from one render key", () => {
+    expect(() => validateResidentModels(
+      Array.from({ length: 20 }, (_, index) => model(index)),
+    )).not.toThrow();
+  });
+
+  it("rejects duplicate identities, mixed generations, and unordered times", () => {
+    expect(() => validateResidentModels([model(0), model(0)])).toThrow("duplicate");
+    expect(() => validateResidentModels([
+      model(0),
+      { ...model(1), generation: 2n },
+    ])).toThrow("one generation");
+    expect(() => validateResidentModels([model(1), model(0)])).toThrow("increasing");
+  });
+
+  it("requires every atomic replacement to advance the generation", () => {
+    expect(() => validateReplacementGeneration(6, 7)).not.toThrow();
+    expect(() => validateReplacementGeneration(6, 6)).toThrow("monotonically");
+    expect(() => validateReplacementGeneration(6, 2)).toThrow("monotonically");
+  });
+});
+
+function model(index: number): RadarSweepCpuModel {
+  return {
+    observationId: `observation-${index}`,
+    siteIcao: "KTLX",
+    product: "reflectivity",
+    sourceKind: "nexrad_level2_archive_ii",
+    scale: 2,
+    offset: 66,
+    center: { longitude: -97.27776, latitude: 35.333363 },
+    generation: 1n,
+    observedAtUnixMs: 1_700_000_000_000 + index,
+  } as RadarSweepCpuModel;
+}
