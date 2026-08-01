@@ -6,7 +6,8 @@
     "providerComparisonUncertaintyMs": 5000,
     "s3LastModifiedResolutionMs": 1000,
     "crossClockCaution": "S3 Last-Modified and local completion use different clocks; sub-second negative deltas are timestamp granularity, not pre-availability decode.",
-    "interpretation": "Positive provider-lead values mean Mistr safe decode was observed before that provider frame."
+    "interpretation": "Positive provider-lead values mean Mistr safe decode was observed before that provider frame.",
+    "acquisitionCounterScope": "Comparator polling shared the original probe client, so acquisition counters from this evidence window were invalidated and are not reported; the probe now isolates comparator clients."
   },
   "sampleCount": 14,
   "sites": [
@@ -59,14 +60,14 @@
       "p50": 26411,
       "p95": 81753,
       "minimum": 17503,
-      "worst": 81753
+      "worst": 17503
     },
     "safeDecodeLeadVsIemMs": {
       "count": 14,
       "p50": 27828,
       "p95": 93124,
       "minimum": 16215,
-      "worst": 93124
+      "worst": 16215
     },
     "volumeStartToArchiveAvailableMs": {
       "count": 14,
@@ -92,10 +93,7 @@
       "decoderAttempts": 6,
       "gapObservations": 0,
       "duplicateObservations": 0,
-      "acquisition": {
-        "networkRequests": 51,
-        "responseBytes": 1247359
-      },
+      "acquisition": null,
       "normalizedSha256": "97b8374d604c8c57071c78122bafa165f1dd043caad100d60b531e5afa7cce36",
       "completeComparison": {
         "terminalSequence": 67,
@@ -128,10 +126,7 @@
       "decoderAttempts": 7,
       "gapObservations": 0,
       "duplicateObservations": 0,
-      "acquisition": {
-        "networkRequests": 286,
-        "responseBytes": 3200308
-      },
+      "acquisition": null,
       "normalizedSha256": "e2258ab71d358f4e07bbf5013477aa082fa10ca30c2b957072d2cd0d4c75f168",
       "completeComparison": {
         "terminalSequence": 67,
@@ -164,10 +159,7 @@
       "decoderAttempts": 7,
       "gapObservations": 0,
       "duplicateObservations": 0,
-      "acquisition": {
-        "networkRequests": 281,
-        "responseBytes": 1995977
-      },
+      "acquisition": null,
       "normalizedSha256": "1018d84e95bda90923e0542f86110343d183fc8c2cc5824ff0a520c94c853aa3",
       "completeComparison": {
         "terminalSequence": 67,
@@ -200,10 +192,7 @@
       "decoderAttempts": 7,
       "gapObservations": 0,
       "duplicateObservations": 0,
-      "acquisition": {
-        "networkRequests": 281,
-        "responseBytes": 2391454
-      },
+      "acquisition": null,
       "normalizedSha256": "a45a8b350e4ba4a7e69fff8d608be04718407699d465791337b0c13506f41838",
       "completeComparison": {
         "terminalSequence": 88,
@@ -236,10 +225,7 @@
       "decoderAttempts": 7,
       "gapObservations": 0,
       "duplicateObservations": 0,
-      "acquisition": {
-        "networkRequests": 384,
-        "responseBytes": 3121923
-      },
+      "acquisition": null,
       "normalizedSha256": "816f71f73429781d3a4662f05e7b9383d08281bc3af8b2ae8139f51250dc1de5",
       "completeComparison": {
         "terminalSequence": 67,
@@ -272,10 +258,7 @@
       "decoderAttempts": 7,
       "gapObservations": 0,
       "duplicateObservations": 0,
-      "acquisition": {
-        "networkRequests": 91,
-        "responseBytes": 1366669
-      },
+      "acquisition": null,
       "normalizedSha256": "8f0009654b76379069e688dd1ffc7c3c838ac6f1d711d05c967cf280281f2691",
       "completeComparison": {
         "terminalSequence": 67,
@@ -308,10 +291,7 @@
       "decoderAttempts": 7,
       "gapObservations": 0,
       "duplicateObservations": 0,
-      "acquisition": {
-        "networkRequests": 305,
-        "responseBytes": 2880250
-      },
+      "acquisition": null,
       "normalizedSha256": "9f894c5eca141b89f0ae9cf17e9a809456331d297d310de407d952c52fabb454",
       "completeComparison": {
         "terminalSequence": 67,
@@ -344,10 +324,7 @@
       "decoderAttempts": 7,
       "gapObservations": 0,
       "duplicateObservations": 0,
-      "acquisition": {
-        "networkRequests": 258,
-        "responseBytes": 3042775
-      },
+      "acquisition": null,
       "normalizedSha256": "4ed2d6816fcbf6c69af1b14fae2153ffa44649f5063516b9e63c892c3355065d",
       "completeComparison": {
         "terminalSequence": 55,
@@ -380,10 +357,7 @@
       "decoderAttempts": 7,
       "gapObservations": 0,
       "duplicateObservations": 0,
-      "acquisition": {
-        "networkRequests": 373,
-        "responseBytes": 2243549
-      },
+      "acquisition": null,
       "normalizedSha256": "d386ac20c7eaaefaf0ede288768ecd291000894ecb6e1beeeaba799cae691317",
       "completeComparison": {
         "terminalSequence": 67,
@@ -416,10 +390,7 @@
       "decoderAttempts": 7,
       "gapObservations": 0,
       "duplicateObservations": 0,
-      "acquisition": {
-        "networkRequests": 377,
-        "responseBytes": 2710212
-      },
+      "acquisition": null,
       "normalizedSha256": "78bfce1a476d5ee80e485fb335b824eed86788b1b67902e201f993dab50a4100",
       "completeComparison": {
         "terminalSequence": 85,
@@ -452,10 +423,7 @@
       "decoderAttempts": 7,
       "gapObservations": 0,
       "duplicateObservations": 0,
-      "acquisition": {
-        "networkRequests": 240,
-        "responseBytes": 1791899
-      },
+      "acquisition": null,
       "normalizedSha256": "40fea4116d34ad40a461668966792c332a7d9908ba3da37a20ee0b1368a883bc",
       "completeComparison": {
         "terminalSequence": 67,
@@ -488,10 +456,7 @@
       "decoderAttempts": 7,
       "gapObservations": 0,
       "duplicateObservations": 0,
-      "acquisition": {
-        "networkRequests": 477,
-        "responseBytes": 2802746
-      },
+      "acquisition": null,
       "normalizedSha256": "54a7d7078cb9ba7d973bb597bbf0a26a07655880fe4a6f8ab37807918b39b866",
       "completeComparison": {
         "terminalSequence": 67,
@@ -524,10 +489,7 @@
       "decoderAttempts": 7,
       "gapObservations": 0,
       "duplicateObservations": 0,
-      "acquisition": {
-        "networkRequests": 509,
-        "responseBytes": 3799156
-      },
+      "acquisition": null,
       "normalizedSha256": "0304d1bbe670868b0241b92b974cab88dfad0e4cf9f21a9be1a46f1c0d592760",
       "completeComparison": {
         "terminalSequence": 67,
@@ -560,10 +522,7 @@
       "decoderAttempts": 7,
       "gapObservations": 0,
       "duplicateObservations": 0,
-      "acquisition": {
-        "networkRequests": 499,
-        "responseBytes": 2551995
-      },
+      "acquisition": null,
       "normalizedSha256": "89f8f326899480595d5e219183610a1dde43042c789183665aff46811ea4b400",
       "completeComparison": {
         "terminalSequence": 55,

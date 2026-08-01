@@ -14,7 +14,7 @@ Mistr discovered rotating real-time volumes, assembled strict start/intermediate
 
 In this observation window, safe decode completed `26411` ms before NOAA at P50 and `27828` ms before IEM at P50, with a five-second provider-poll uncertainty. This supports proceeding with the raw selected-site architecture; it does not promise that raw always wins.
 
-The release packaged runner also proved the end-to-end path. It cancelled a superseded KAMX request, published only the current KTLX generation, parsed 7,931,840 packed bytes, atomically replaced the prior archive loop with one live frame, and received a matching hardware GPU-complete receipt at 3840 by 2160. Safe-decode-to-paint was 88 ms in that run.
+The release packaged runner also proved the end-to-end path. It cancelled a superseded KAMX request, published only the current KTLX generation, parsed 7,931,840 packed bytes, atomically replaced the prior archive loop with one live frame, and received a matching hardware GPU-complete receipt at 3840 by 2160. Safe-decode-to-paint was 91 ms in that run.
 
 The governing boundary and fallback decision is [`17_REALTIME_FRESHNESS_AND_FALLBACK_DECISION.md`](../17_REALTIME_FRESHNESS_AND_FALLBACK_DECISION.md).
 
@@ -57,8 +57,8 @@ All values are milliseconds. P50/P95 use nearest rank. â€œLead versus provid
 | Lowest-sweep end to raw availability | `14` | `1290` | `1804` | `2767` | `2767` |
 | Raw availability to safe decode | `14` | `-240` | `537` | `1332` | `1332` |
 | Lowest-sweep end to safe decode | `14` | `1970` | `2589` | `3226` | `3226` |
-| Safe-decode lead versus NOAA | `13` | `17503` | `26411` | `81753` | `81753` |
-| Safe-decode lead versus IEM | `14` | `16215` | `27828` | `93124` | `93124` |
+| Safe-decode lead versus NOAA | `13` | `17503` | `26411` | `81753` | `17503` |
+| Safe-decode lead versus IEM | `14` | `16215` | `27828` | `93124` | `16215` |
 | Volume start to completed archive observation | `14` | `243536` | `326330` | `521375` | `521375` |
 
 ## Safety and failure behavior
@@ -76,7 +76,9 @@ The Mistr-owned assembler enforces:
 
 The progressive decoder additionally requires a physical first-radial start and last-radial end, rejects unknown statuses and duplicate source azimuth numbers, and permits publication only once for a volume. Missing reflectivity or an incomplete boundary means â€œnot safe yetâ€; other decoder errors fail closed.
 
-Deterministic tests cover gaps, out-of-order delivery, duplicates, terminal ordering, rollover, late chunks, payload mismatch, site/generation mismatch, single-use publication, fixed-host rejection, bounded XML/provider parsing, rotating-index wrap, complete-request timeout enforcement, cancellation, atomic evidence publication, and the display fallback reducer.
+Deterministic tests cover gaps, out-of-order delivery, duplicates, terminal ordering, rollover, late chunks, payload mismatch, site/generation mismatch, single-use publication, fixed-host rejection, bounded XML/provider parsing, dense and sparse rotating-index wrap, complete-request timeout enforcement, cancellation, atomic evidence publication, and the display fallback reducer.
+
+The original probe shared acquisition counters with its NOAA/IEM watcher tasks. Those counter values depended on watcher timing, so the committed evidence now marks them unavailable rather than presenting them as live-path metrics. Comparator/archive polling now uses a separate client; future probe counters measure only chunk discovery and download. Sweep fingerprints and all source timestamps are independent of those counters and remain valid.
 
 ## Fallback and truth
 
@@ -101,12 +103,12 @@ npm run test:phase5:packaged
 | Shell | Release Tauri / WebView2 |
 | Window and receipt framebuffer | 3840 Ã— 2160 |
 | GPU path | Hardware ANGLE / NVIDIA RTX 4080 / D3D11 |
-| Superseded request | KAMX rejected with `live_sweep_failed` |
+| Superseded request | KAMX rejected before publication (`live_start_failed` or `live_sweep_failed`, depending on stage) |
 | Current publication | KTLX generation 3 only |
 | Packed live sweep | 7,931,840 bytes |
-| Safe sequence in current catch-up run | 38 |
-| Raw last-modified to safe decode | 7,926 ms |
-| Safe decode to GPU receipt | 88 ms |
+| Safe sequence in current catch-up run | 41 |
+| Raw last-modified to safe decode | 7,706 ms |
+| Safe decode to GPU receipt | 91 ms |
 | GPU receipt observation match | PASS |
 | Renderer selected/last-painted match | PASS |
 | Incomplete UI label present | No |

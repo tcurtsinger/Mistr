@@ -19,7 +19,11 @@ export function validatePhase5Acceptance(report, cancellation, bounds, bodyText)
   requireGate(failures, receipt?.framebufferWidth >= 3_840 && receipt?.framebufferHeight >= 2_160, "live paint did not occur at 4K");
   requireGate(failures, bounds?.width >= 3_840 && bounds?.height >= 2_160, "packaged window is smaller than 4K");
   requireGate(failures, cancellation?.oldRejected === true, "superseded site request was not rejected");
-  requireGate(failures, cancellation?.oldCode === "live_sweep_failed" || cancellation?.oldCode === "stale_response", "superseded request reported an unexpected error");
+  requireGate(
+    failures,
+    ["live_start_failed", "live_sweep_failed", "stale_response"].includes(cancellation?.oldCode),
+    "superseded request reported an unexpected error",
+  );
   requireGate(failures, cancellation?.currentObservationId === evidence?.observationId, "current site request did not own final publication");
   requireGate(failures, !/\bINCOMPLETE\b/i.test(bodyText), "UI labels an incomplete frame");
   return failures;

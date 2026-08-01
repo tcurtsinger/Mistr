@@ -14,9 +14,16 @@ export function summarizeReports(reports) {
     "safeDecodeLeadVsIemMs",
     "volumeStartToArchiveAvailableMs",
   ];
+  const lowerIsWorse = new Set([
+    "safeDecodeLeadVsNoaaMs",
+    "safeDecodeLeadVsIemMs",
+  ]);
   const latencySummary = Object.fromEntries(metricNames.map(name => [
     name,
-    distribution(samples.map(sample => sample.latency[name]).filter(Number.isFinite)),
+    distribution(
+      samples.map(sample => sample.latency[name]).filter(Number.isFinite),
+      lowerIsWorse.has(name),
+    ),
   ]));
   return {
     schemaVersion: 1,
@@ -107,7 +114,7 @@ function toSample(report) {
   };
 }
 
-function distribution(values) {
+function distribution(values, lowerIsWorse = false) {
   if (values.length === 0) return null;
   const sorted = [...values].sort((left, right) => left - right);
   return {
@@ -115,7 +122,7 @@ function distribution(values) {
     p50: percentile(sorted, 0.50),
     p95: percentile(sorted, 0.95),
     minimum: sorted[0],
-    worst: sorted.at(-1),
+    worst: lowerIsWorse ? sorted[0] : sorted.at(-1),
   };
 }
 

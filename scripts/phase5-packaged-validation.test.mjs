@@ -39,6 +39,15 @@ describe("Phase 5 packaged acceptance", () => {
     }, { width: 3_840, height: 2_160 }, "SAFE + PAINTED")).toEqual([]);
   });
 
+  it("accepts supersession while discovery is still starting", () => {
+    const report = passingReport();
+    expect(validatePhase5Acceptance(report, {
+      oldRejected: true,
+      oldCode: "live_start_failed",
+      currentObservationId: report.evidence.observationId,
+    }, { width: 3_840, height: 2_160 }, "SAFE + PAINTED")).toEqual([]);
+  });
+
   it("rejects a false paint, missing cancellation, and incomplete label", () => {
     const report = passingReport();
     report.renderer.lastPaintedObservationId = "b".repeat(32);

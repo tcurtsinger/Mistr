@@ -7,7 +7,7 @@ use chrono::{DateTime, Datelike, Utc};
 use quick_xml::{Reader, events::Event};
 use reqwest::{Client, Url, redirect::Policy};
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::future::Future;
 use std::sync::{
     Arc,
@@ -127,7 +127,7 @@ impl PublicRadarClient {
         site: &str,
     ) -> Result<u16, AcquisitionError> {
         validate_site(site)?;
-        let found = rotated_search(999, i64::MAX, |offset| async move {
+        let found = rotated_max(999, |offset| async move {
             let volume_index = u16::try_from(offset + 1)
                 .map_err(|_| AcquisitionError::MalformedResponse("volume index overflow".into()))?;
             Ok(self
@@ -576,9 +576,8 @@ fn parse_iem_times(bytes: &[u8]) -> Result<Vec<i64>, AcquisitionError> {
     Ok(times)
 }
 
-async fn rotated_search<F, Fut, V>(
+async fn rotated_max<F, Fut, V>(
     element_count: usize,
-    target: V,
     mut probe: F,
 ) -> Result<Option<usize>, AcquisitionError>
 where
@@ -589,90 +588,67 @@ where
     if element_count == 0 {
         return Ok(None);
     }
-    let target_ref = Some(&target);
-    let mut first_value = probe(0).await?;
-    let mut first_ref = first_value.as_ref();
-    if first_ref == target_ref {
-        return Ok(Some(0));
-    }
-    let mut nearest = first_ref
-        .filter(|candidate| Some(*candidate) <= target_ref)
-        .map(|candidate| (0usize, candidate.clone()));
-    let mut low = 0usize;
-    let mut high = element_count;
+    let mut cache = BTreeMap::<usize, Option<V>>::new();
+    let mut newest = None::<(usize, V)>;
     let mut queue = VecDeque::from([(0usize, element_count - 1)]);
     while let Some((start, end)) = queue.pop_front() {
         if start > end {
             continue;
         }
-        let mid = start + (end - start) / 2;
-        let value = probe(mid).await?;
-        let value_ref = value.as_ref();
-        if value_ref.is_none() {
-            if mid < end {
-                queue.push_back((mid + 1, end));
-            }
-            if mid > start {
-                queue.push_back((start, mid - 1));
-            }
+        let start_value = cached_probe(&mut cache, &mut probe, start).await?;
+        retain_newest(&mut newest, start, start_value.as_ref());
+        if start == end {
             continue;
         }
-        if let Some(candidate) = value_ref.filter(|candidate| Some(*candidate) <= target_ref) {
-            let is_nearer = match nearest.as_ref() {
-                Some((_, current)) => candidate > current,
-                None => true,
-            };
-            if is_nearer {
-                nearest = Some((mid, candidate.clone()));
-            }
+        let end_value = cached_probe(&mut cache, &mut probe, end).await?;
+        retain_newest(&mut newest, end, end_value.as_ref());
+
+        // A populated interval whose endpoints are still ordered cannot contain
+        // the one rotation boundary. Its right endpoint is therefore its maximum.
+        if matches!((&start_value, &end_value), (Some(left), Some(right)) if left <= right) {
+            continue;
         }
-        if value_ref == target_ref {
-            return Ok(nearest.map(|(index, _)| index));
+        let mid = start + (end - start) / 2;
+        if mid == start {
+            continue;
         }
-        if should_search_right(first_ref, value_ref, target_ref) {
-            low = mid + 1;
-        } else {
-            high = mid;
-        }
-        break;
+        queue.push_back((start, mid));
+        queue.push_back((mid + 1, end));
     }
-    if low >= high {
-        return Ok(nearest.map(|(index, _)| index));
-    }
-    first_value = probe(low).await?;
-    first_ref = first_value.as_ref();
-    while low < high {
-        let mid = low + (high - low) / 2;
-        let value = probe(mid).await?;
-        let value_ref = value.as_ref();
-        if let Some(candidate) = value_ref.filter(|candidate| Some(*candidate) <= target_ref) {
-            let is_nearer = match nearest.as_ref() {
-                Some((_, current)) => candidate > current,
-                None => true,
-            };
-            if is_nearer {
-                nearest = Some((mid, candidate.clone()));
-            }
-        }
-        if value_ref == target_ref {
-            return Ok(Some(mid));
-        }
-        if should_search_right(first_ref, value_ref, target_ref) {
-            low = mid + 1;
-        } else {
-            high = mid;
-        }
-    }
-    Ok(nearest.map(|(index, _)| index))
+    Ok(newest.map(|(index, _)| index))
 }
 
-fn should_search_right<V: PartialOrd>(first: V, value: V, target: V) -> bool {
-    let first_wrapped = first > value;
-    let target_wrapped = target < first;
-    if value < target {
-        !first_wrapped || target_wrapped
-    } else {
-        first_wrapped && !target_wrapped
+async fn cached_probe<F, Fut, V>(
+    cache: &mut BTreeMap<usize, Option<V>>,
+    probe: &mut F,
+    index: usize,
+) -> Result<Option<V>, AcquisitionError>
+where
+    F: FnMut(usize) -> Fut,
+    Fut: Future<Output = Result<Option<V>, AcquisitionError>>,
+    V: Clone,
+{
+    if let Some(value) = cache.get(&index) {
+        return Ok(value.clone());
+    }
+    let value = probe(index).await?;
+    cache.insert(index, value.clone());
+    Ok(value)
+}
+
+fn retain_newest<V: PartialOrd + Clone>(
+    newest: &mut Option<(usize, V)>,
+    index: usize,
+    candidate: Option<&V>,
+) {
+    let Some(candidate) = candidate else {
+        return;
+    };
+    if newest
+        .as_ref()
+        .is_none_or(|(_, current)| candidate > current)
+    {
+        *newest = Some((index, candidate.clone()));
     }
 }
 
@@ -743,13 +719,9 @@ mod tests {
             Some(4),
             Some(5),
         ];
-        let found = rotated_search(
-            values.len(),
-            i32::MAX,
-            |index| async move { Ok(values[index]) },
-        )
-        .await
-        .unwrap();
+        let found = rotated_max(values.len(), |index| async move { Ok(values[index]) })
+            .await
+            .unwrap();
         assert_eq!(found, Some(2));
     }
 
@@ -768,12 +740,56 @@ mod tests {
                     .iter()
                     .position(|value| *value == Some(length))
                     .unwrap();
-                let found = rotated_search(values.len(), usize::MAX, |index| {
-                    std::future::ready(Ok(values[index]))
-                })
-                .await
-                .unwrap();
+                let found =
+                    rotated_max(values.len(), |index| std::future::ready(Ok(values[index])))
+                        .await
+                        .unwrap();
                 assert_eq!(found, Some(expected), "length {length}, pivot {pivot}");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn rotated_search_checks_sparse_intervals_before_choosing_the_newest() {
+        let values = [None, Some(2), None, None, Some(1)];
+        let found = rotated_max(values.len(), |index| std::future::ready(Ok(values[index])))
+            .await
+            .unwrap();
+        assert_eq!(found, Some(1));
+    }
+
+    #[tokio::test]
+    async fn rotated_search_handles_every_sparse_layout_through_eight_slots() {
+        for slot_count in 1..=8usize {
+            for mask in 1usize..(1usize << slot_count) {
+                let populated = (0..slot_count)
+                    .filter(|slot| mask & (1usize << slot) != 0)
+                    .collect::<Vec<_>>();
+                let value_count = populated.len();
+                for pivot in 0..value_count {
+                    let ordered = (1..=value_count).collect::<Vec<_>>();
+                    let rotated = ordered[pivot..]
+                        .iter()
+                        .chain(ordered[..pivot].iter())
+                        .copied();
+                    let mut values = vec![None; slot_count];
+                    for (slot, value) in populated.iter().copied().zip(rotated) {
+                        values[slot] = Some(value);
+                    }
+                    let expected = values
+                        .iter()
+                        .position(|value| *value == Some(value_count))
+                        .unwrap();
+                    let found =
+                        rotated_max(values.len(), |index| std::future::ready(Ok(values[index])))
+                            .await
+                            .unwrap();
+                    assert_eq!(
+                        found,
+                        Some(expected),
+                        "slots {slot_count}, mask {mask:#b}, pivot {pivot}"
+                    );
+                }
             }
         }
     }

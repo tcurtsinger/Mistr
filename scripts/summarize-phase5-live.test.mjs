@@ -58,6 +58,14 @@ describe("Phase 5 live evidence summary", () => {
       p95: 3_000,
       worst: 3_000,
     });
+    expect(summary.latencySummary.safeDecodeLeadVsNoaaMs.worst)
+      .toBe(summary.latencySummary.safeDecodeLeadVsNoaaMs.minimum);
+    expect(summary.latencySummary.safeDecodeLeadVsNoaaMs.p95)
+      .toBeGreaterThan(summary.latencySummary.safeDecodeLeadVsNoaaMs.worst);
+    expect(summary.latencySummary.safeDecodeLeadVsIemMs.worst)
+      .toBe(summary.latencySummary.safeDecodeLeadVsIemMs.minimum);
+    expect(summary.latencySummary.safeDecodeLeadVsIemMs.p95)
+      .toBeGreaterThan(summary.latencySummary.safeDecodeLeadVsIemMs.worst);
     expect(summary.completeVolumeComparisons).toEqual({ compared: 2, allMatched: true });
   });
 });

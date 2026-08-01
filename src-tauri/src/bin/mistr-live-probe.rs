@@ -77,6 +77,7 @@ async fn main() {
 async fn run() -> Result<(), String> {
     let args = parse_args(env::args().skip(1))?;
     let client = PublicRadarClient::new().map_err(|error| error.to_string())?;
+    let comparator_client = PublicRadarClient::new().map_err(|error| error.to_string())?;
     let clock = GenerationClock::default();
     let token = clock.begin(1).map_err(|error| error.to_string())?;
 
@@ -84,13 +85,13 @@ async fn run() -> Result<(), String> {
     let noaa_seen = Arc::new(Mutex::new(BTreeMap::<i64, i64>::new()));
     let iem_seen = Arc::new(Mutex::new(BTreeMap::<i64, i64>::new()));
     let noaa_task = tokio::spawn(watch_noaa(
-        client.clone(),
+        comparator_client.clone(),
         args.site.clone(),
         provider_stop.clone(),
         noaa_seen.clone(),
     ));
     let iem_task = tokio::spawn(watch_iem(
-        client.clone(),
+        comparator_client.clone(),
         args.site.clone(),
         provider_stop.clone(),
         iem_seen.clone(),
@@ -129,7 +130,7 @@ async fn run() -> Result<(), String> {
 
     let (archive, archive_first_seen) = if complete.is_some() {
         wait_for_archive(
-            &client,
+            &comparator_client,
             &args.site,
             safe.evidence.volume_started_at_unix_ms,
             ARCHIVE_WAIT,

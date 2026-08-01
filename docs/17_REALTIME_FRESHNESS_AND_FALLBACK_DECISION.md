@@ -94,10 +94,10 @@ All timings preserve distinct source clocks. Provider inventories were polled ev
 |---|---:|---:|---:|
 | Lowest-sweep end to raw chunk availability | `1804` ms | `2767` ms | `2767` ms |
 | Raw availability to safe decode | `537` ms | `1332` ms | `1332` ms |
-| Safe-decode lead versus NOAA | `26411` ms | `81753` ms | `81753` ms |
-| Safe-decode lead versus IEM | `27828` ms | `93124` ms | `93124` ms |
+| Safe-decode lead versus NOAA | `26411` ms | `81753` ms | `17503` ms |
+| Safe-decode lead versus IEM | `27828` ms | `93124` ms | `16215` ms |
 
-Positive lead means the Mistr safe decode was observed first. The result supports the architectural conclusion that progressive raw acquisition can be materially fresher in this observation window. It is not a universal provider SLA or outage guarantee.
+Positive lead means the Mistr safe decode was observed first, so the smallest provider-lead value is the worst case. The result supports the architectural conclusion that progressive raw acquisition can be materially fresher in this observation window. It is not a universal provider SLA or outage guarantee.
 
 ## Packaged paint proof
 
@@ -105,10 +105,10 @@ The release Tauri/WebView2 runner at 3840 by 2160:
 
 1. started a fresh KAMX request;
 2. superseded it with a current KTLX generation;
-3. observed the KAMX request fail with `live_sweep_failed` and no stale publication;
+3. observed the KAMX request fail during start or sweep acquisition with no stale publication;
 4. decoded and transferred a 7,931,840-byte KTLX sweep;
 5. uploaded one live frame; and
-6. received a matching hardware-accelerated GPU receipt 88 ms after safe decode completed.
+6. received a matching hardware-accelerated GPU receipt 91 ms after safe decode completed.
 
 The final observation ID matched backend evidence, packed bytes, display truth, selected renderer state, last-painted renderer state, and the 4K receipt. The existing Phase 4 2,000-transition packaged regression also passed after the renderer was generalized to replace its site/source/bounds atomically.
 
