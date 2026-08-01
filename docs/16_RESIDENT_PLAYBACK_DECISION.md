@@ -90,8 +90,8 @@ On the primary packaged Windows workstation:
 - atomic replacement peaked at 106,197,552 known GPU bytes;
 - two independent 4K runs completed 1,000 transitions each with no radar hot-path activity and no long tasks;
 - both runs measured 6.2 ms P95 frame duration;
-- resident switch-to-receipt P95 was 11.3 ms; and
-- stabilized JavaScript heap was 86,318,335 bytes after run one and 85,886,833 bytes after run two, a 0.41 MiB decrease.
+- resident switch-to-receipt P95 was 22.1 ms; and
+- stabilized JavaScript heap was 82,790,229 bytes after run one and 86,905,307 bytes after run two, a bounded 3.92 MiB increase.
 
 ## Consequences
 

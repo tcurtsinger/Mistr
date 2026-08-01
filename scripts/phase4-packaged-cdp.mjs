@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { CdpClient } from "./cdp-client.mjs";
 import {
   parseAcceptanceWorkload,
   validatePhase4Acceptance,
@@ -18,16 +19,7 @@ await new Promise((resolveOpen, rejectOpen) => {
   socket.onerror = rejectOpen;
 });
 
-let nextId = 0;
-const pending = new Map();
-socket.onmessage = (event) => {
-  const message = JSON.parse(event.data);
-  const resolveCall = pending.get(message.id);
-  if (resolveCall) {
-    pending.delete(message.id);
-    resolveCall(message);
-  }
-};
+const client = new CdpClient(socket);
 
 try {
   await call("Runtime.enable");
@@ -50,6 +42,7 @@ try {
     const scenario = await evaluate(
       `(async()=>{window.__MISTR_PHASE4__.pause();await new Promise(r=>setTimeout(r,750));return window.__MISTR_PHASE4__.runScenario(${transitions})})()`,
       true,
+      60_000,
     );
     await call("HeapProfiler.collectGarbage");
     await delay(500);
@@ -104,23 +97,19 @@ try {
   console.log(JSON.stringify(summary, null, 2));
   if (failures.length > 0) process.exitCode = 1;
 } finally {
-  socket.close();
+  client.close();
 }
 
-function call(method, params = {}) {
-  const id = ++nextId;
-  return new Promise((resolveCall) => {
-    pending.set(id, resolveCall);
-    socket.send(JSON.stringify({ id, method, params }));
-  });
+function call(method, params = {}, timeoutMs) {
+  return client.call(method, params, timeoutMs);
 }
 
-async function evaluate(expression, awaitPromise = false) {
+async function evaluate(expression, awaitPromise = false, timeoutMs) {
   const response = await call("Runtime.evaluate", {
     expression,
     awaitPromise,
     returnByValue: true,
-  });
+  }, timeoutMs);
   assertProtocolResult(response, "Runtime.evaluate");
   if (response.result.exceptionDetails) {
     throw new Error(JSON.stringify(response.result.exceptionDetails));
