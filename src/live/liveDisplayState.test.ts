@@ -51,6 +51,11 @@ describe("live display truth", () => {
     expect(painted.lastComplete).toEqual(liveFrame);
     expect(() => publishLiveDisplay(acquiring, 2, { ...liveFrame, site: "KOUN" }))
       .toThrow("active site/source");
-    expect(failLiveDisplay(painted, 2, "post-paint diagnostic failed")).toBe(painted);
+    const afterDiagnosticFailure = failLiveDisplay(painted, 2, "post-paint diagnostic failed");
+    expect(afterDiagnosticFailure).toBe(painted);
+    expect(afterDiagnosticFailure).toMatchObject({
+      kind: "painted",
+      lastComplete: liveFrame,
+    });
   });
 });

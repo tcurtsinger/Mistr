@@ -431,30 +431,42 @@ export function App() {
           }
           modelsById.clear();
           modelsById.set(model.observationId, model);
-          updateDiagnosticSources(instance, model, liveAlignment);
-          setInterrogation(interrogateLngLat(model, {
-            longitude: liveAnchor.longitude,
-            latitude: liveAnchor.latitude,
-          }));
           liveDisplay = publishLiveDisplay(
             liveDisplay,
             generation,
             frameTruth(model, receipt),
           );
-          const report: Phase5Report = {
+          let report: Phase5Report = {
             display: liveDisplay,
             evidence,
             receipt,
             transferTiming: lease.timing,
             renderer: activeLayer.getSnapshot(),
           };
+          // GPU paint is authoritative even if auxiliary MapLibre diagnostics
+          // disappear during a style lifecycle. Publish that truth first.
           publishPhase5(report);
-          instance.jumpTo({
-            center: [model.center.longitude, model.center.latitude],
-            zoom: 5.8,
-            bearing: 0,
-            pitch: 0,
-          });
+          try {
+            updateDiagnosticSources(instance, model, liveAlignment);
+            setInterrogation(interrogateLngLat(model, {
+              longitude: liveAnchor.longitude,
+              latitude: liveAnchor.latitude,
+            }));
+            instance.jumpTo({
+              center: [model.center.longitude, model.center.latitude],
+              zoom: 5.8,
+              bearing: 0,
+              pitch: 0,
+            });
+          } catch (diagnosticError) {
+            report = {
+              ...report,
+              diagnosticsError: diagnosticError instanceof Error
+                ? diagnosticError.message
+                : String(diagnosticError),
+            };
+            publishPhase5(report);
+          }
           return report;
         } catch (error) {
           const priorDisplay = liveDisplay;
@@ -595,6 +607,7 @@ export interface Phase5Report {
   receipt?: RadarPaintReceipt;
   transferTiming?: TransferTiming;
   renderer?: RadarRendererSnapshot;
+  diagnosticsError?: string;
 }
 
 export interface Phase4Report {
@@ -644,6 +657,7 @@ function Phase5Readout({ report }: { report: Phase5Report }) {
       <div><dt>DECODE TO PAINT</dt><dd>{formatMs(report.receipt.completedAtUnixMs - report.evidence.safe.decodeCompletedAtUnixMs)} ms</dd></div>
       <div><dt>GAPS / DUPES</dt><dd>{report.evidence.safe.gapObservations} / {report.evidence.safe.duplicateObservations}</dd></div>
       <div><dt>NETWORK</dt><dd>{report.evidence.safe.acquisitionDelta.networkRequests} REQUESTS</dd></div>
+      <div><dt>DIAGNOSTICS</dt><dd>{report.diagnosticsError ?? "READY"}</dd></div>
     </dl>
   );
 }
