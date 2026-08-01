@@ -578,8 +578,9 @@ export class RadarCustomLayer implements CustomLayerInterface {
         1,
         gl.RGBA8,
         gl.RGBA,
-        gl.UNSIGNED_BYTE,
-        palette,
+      gl.UNSIGNED_BYTE,
+      palette,
+      "palette texture upload",
       );
       for (const model of this.models) {
         const frame = createFrameResources(gl, model, this.paletteTexture, palette);
@@ -768,6 +769,7 @@ function createFrameResources(
       gl.RED_INTEGER,
       gl.UNSIGNED_BYTE,
       model.rawCodes,
+      "raw-code texture upload",
     );
     statusTexture = createTexture2d(
       gl,
@@ -777,6 +779,7 @@ function createFrameResources(
       gl.RED_INTEGER,
       gl.UNSIGNED_BYTE,
       model.statuses,
+      "status texture upload",
     );
     lookupTexture = createTexture2d(
       gl,
@@ -786,6 +789,7 @@ function createFrameResources(
       gl.RED_INTEGER,
       gl.UNSIGNED_SHORT,
       model.azimuthLookup,
+      "azimuth-lookup texture upload",
     );
     const radialMetadata = new Float32Array(model.radialCount * 3);
     for (let radialIndex = 0; radialIndex < model.radialCount; radialIndex += 1) {
@@ -804,6 +808,7 @@ function createFrameResources(
       gl.RGB,
       gl.FLOAT,
       radialMetadata,
+      "radial-metadata texture upload",
     );
     const textureValidation = validateTextureUploads(gl, model, {
       raw: rawTexture,
@@ -1132,25 +1137,52 @@ function createTexture2d(
   format: number,
   type: number,
   data: ArrayBufferView,
+  operation: string,
 ): WebGLTexture {
+  clearWebGlErrors(gl);
   const texture = requireResource(gl.createTexture(), "texture");
-  gl.bindTexture(gl.TEXTURE_2D, texture);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  gl.texImage2D(
-    gl.TEXTURE_2D,
-    0,
-    internalFormat,
-    width,
-    height,
-    0,
-    format,
-    type,
-    data,
-  );
-  return texture;
+  try {
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(
+      gl.TEXTURE_2D,
+      0,
+      internalFormat,
+      width,
+      height,
+      0,
+      format,
+      type,
+      data,
+    );
+    assertNoWebGlError(gl, operation);
+    return texture;
+  } catch (error) {
+    gl.deleteTexture(texture);
+    throw error;
+  }
+}
+
+function clearWebGlErrors(gl: Pick<WebGL2RenderingContext, "getError" | "NO_ERROR">): void {
+  for (let attempt = 0; attempt < 32; attempt += 1) {
+    if (gl.getError() === gl.NO_ERROR) return;
+  }
+  throw new RadarRendererError("could not clear the prior WebGL error state");
+}
+
+export function assertNoWebGlError(
+  gl: Pick<WebGL2RenderingContext, "getError" | "NO_ERROR">,
+  operation: string,
+): void {
+  const error = gl.getError();
+  if (error !== gl.NO_ERROR) {
+    throw new RadarRendererError(
+      `${operation} failed with WebGL error 0x${error.toString(16)}`,
+    );
+  }
 }
 
 function createProgram(

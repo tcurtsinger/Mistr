@@ -12,7 +12,7 @@ class FakeLayer {
   private sequence = 1;
   private generation = 7;
   private residentObservationIds = ["frame-a", "frame-b", "frame-c"];
-  private pending: (() => void) | null = null;
+  private pending: { complete(): void; fail(error: Error): void } | null = null;
 
   getSnapshot(): RadarRendererSnapshot {
     return {
@@ -36,11 +36,17 @@ class FakeLayer {
   selectAndWait(observationId: string): Promise<RadarPaintReceipt> {
     this.selected = observationId;
     this.sequence += 1;
-    return new Promise((resolve) => {
-      this.pending = () => {
-        this.painted = observationId;
-        this.pending = null;
-        resolve(this.receipt());
+    return new Promise((resolve, reject) => {
+      this.pending = {
+        complete: () => {
+          this.painted = observationId;
+          this.pending = null;
+          resolve(this.receipt());
+        },
+        fail: (error) => {
+          this.pending = null;
+          reject(error);
+        },
       };
     });
   }
@@ -54,7 +60,11 @@ class FakeLayer {
   }
 
   completePaint() {
-    this.pending?.();
+    this.pending?.complete();
+  }
+
+  failPaint(error = new Error("paint failed")) {
+    this.pending?.fail(error);
   }
 
   private receipt(): RadarPaintReceipt {
@@ -126,6 +136,26 @@ describe("resident playback truth", () => {
       selectedObservationId: "replacement-b",
       lastPaintedObservationId: "replacement-b",
       playheadObservedAtUnixMs: 500,
+    });
+  });
+
+  it("counts a completed cycle only after the wraparound frame paints", async () => {
+    const layer = new FakeLayer();
+    const controller = new ResidentPlaybackController(layer, frames());
+
+    const selectLast = controller.scrub(2);
+    await Promise.resolve();
+    layer.completePaint();
+    await selectLast;
+
+    const failedWrap = controller.step();
+    await Promise.resolve();
+    layer.failPaint();
+    await expect(failedWrap).rejects.toThrow("paint failed");
+    expect(controller.snapshot()).toMatchObject({
+      transitionCount: 1,
+      completedCycles: 0,
+      lastPaintedObservationId: "frame-c",
     });
   });
 });

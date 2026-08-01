@@ -180,18 +180,20 @@ export class ResidentPlaybackController {
     const currentIndex = this.frames.findIndex((frame) => frame.observationId === selected);
     if (currentIndex < 0) throw new Error("renderer selected a frame outside the resident loop");
     const nextIndex = (currentIndex + 1) % this.frames.length;
-    if (nextIndex === 0) this.completedCycles += 1;
-    return this.select(this.frames[nextIndex].observationId);
+    return this.select(this.frames[nextIndex].observationId, nextIndex === 0);
   }
 
-  private async select(observationId: string): Promise<RadarPaintReceipt> {
+  private async select(
+    observationId: string,
+    completesCycle = false,
+  ): Promise<RadarPaintReceipt> {
     if (this.operation) throw new Error("a frame selection is already awaiting paint");
     const operation = this.layer.selectAndWait(observationId);
     this.operation = operation;
     this.emit();
     try {
       const receipt = await operation;
-      this.acceptReceipt(receipt);
+      this.acceptReceipt(receipt, completesCycle);
       return receipt;
     } finally {
       this.operation = null;
@@ -199,10 +201,11 @@ export class ResidentPlaybackController {
     }
   }
 
-  private acceptReceipt(receipt: RadarPaintReceipt) {
+  private acceptReceipt(receipt: RadarPaintReceipt, completesCycle: boolean) {
     this.assertReceipt(receipt);
     this.lastReceipt = receipt;
     this.transitionCount += 1;
+    if (completesCycle) this.completedCycles += 1;
     this.emit();
   }
 

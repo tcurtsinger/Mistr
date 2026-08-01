@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  assertNoWebGlError,
   hasVerifiedHardwareAcceleration,
   radarShaderSources,
   validateReplacementGeneration,
@@ -28,6 +29,17 @@ describe("Radar custom-layer shader contract", () => {
     expect(fragment).toContain("slantRangeM - u_first_gate_center_m");
     expect(fragment).toContain("status == uint(1)");
     expect(fragment).toContain("status == uint(2)");
+  });
+});
+
+describe("WebGL upload error gate", () => {
+  it("rejects a texture upload when WebGL records an error", () => {
+    expect(() => assertNoWebGlError({
+      NO_ERROR: 0,
+      getError: () => 0x0502,
+    }, "radial-metadata texture upload")).toThrow(
+      "radial-metadata texture upload failed with WebGL error 0x502",
+    );
   });
 });
 
