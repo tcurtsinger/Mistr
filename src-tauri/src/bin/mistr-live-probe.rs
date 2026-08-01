@@ -5,6 +5,7 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::{
     Arc,
@@ -76,6 +77,7 @@ async fn main() {
 
 async fn run() -> Result<(), String> {
     let args = parse_args(env::args().skip(1))?;
+    let deadline = tokio::time::Instant::now() + args.timeout;
     let client = PublicRadarClient::new().map_err(|error| error.to_string())?;
     let comparator_client = PublicRadarClient::new().map_err(|error| error.to_string())?;
     let clock = GenerationClock::default();
@@ -97,18 +99,24 @@ async fn run() -> Result<(), String> {
         iem_seen.clone(),
     ));
 
-    let mut session = LiveSweepSession::start(client.clone(), token, &args.site, args.fresh_only)
-        .await
-        .map_err(|error| error.to_string())?;
+    let mut session = before_probe_deadline(
+        deadline,
+        "live-volume discovery",
+        LiveSweepSession::start(client.clone(), token, &args.site, args.fresh_only),
+    )
+    .await?;
     eprintln!(
         "waiting for {} volume {} safe lowest sweep",
         session.site(),
         session.target_volume_index()
     );
-    let safe = session
-        .wait_for_safe_sweep(args.timeout)
-        .await
-        .map_err(|error| error.to_string())?;
+    let safe_budget = remaining_probe_time(deadline, "safe-sweep acquisition")?;
+    let safe = before_probe_deadline(
+        deadline,
+        "safe-sweep acquisition",
+        session.wait_for_safe_sweep(safe_budget),
+    )
+    .await?;
     eprintln!(
         "safe sweep: volume {} sequence {} VCP {} {} radials",
         safe.evidence.volume_index,
@@ -120,28 +128,39 @@ async fn run() -> Result<(), String> {
     let complete = if args.safe_only {
         None
     } else {
+        let complete_budget = remaining_probe_time(deadline, "complete-volume acquisition")?;
         Some(
-            session
-                .wait_for_complete_volume(args.timeout)
-                .await
-                .map_err(|error| error.to_string())?,
+            before_probe_deadline(
+                deadline,
+                "complete-volume acquisition",
+                session.wait_for_complete_volume(complete_budget),
+            )
+            .await?,
         )
     };
 
     let (archive, archive_first_seen) = if complete.is_some() {
-        wait_for_archive(
-            &comparator_client,
-            &args.site,
-            safe.evidence.volume_started_at_unix_ms,
-            ARCHIVE_WAIT,
+        let archive_budget =
+            remaining_probe_time(deadline, "archive observation")?.min(ARCHIVE_WAIT);
+        before_probe_deadline(
+            deadline,
+            "archive observation",
+            wait_for_archive(
+                &comparator_client,
+                &args.site,
+                safe.evidence.volume_started_at_unix_ms,
+                archive_budget,
+            ),
         )
         .await?
     } else {
         (Vec::new(), None)
     };
     provider_stop.store(true, Ordering::SeqCst);
-    let _ = tokio::time::timeout(Duration::from_secs(5), noaa_task).await;
-    let _ = tokio::time::timeout(Duration::from_secs(5), iem_task).await;
+    noaa_task.abort();
+    iem_task.abort();
+    let _ = noaa_task.await;
+    let _ = iem_task.await;
 
     let measurement_second = safe.evidence.volume_started_at_unix_ms;
     let measurement_minute = measurement_second - measurement_second.rem_euclid(60_000);
@@ -214,6 +233,39 @@ async fn run() -> Result<(), String> {
     }
     print!("{json}");
     Ok(())
+}
+
+async fn before_probe_deadline<T, E, F>(
+    deadline: tokio::time::Instant,
+    stage: &str,
+    future: F,
+) -> Result<T, String>
+where
+    E: std::fmt::Display,
+    F: Future<Output = Result<T, E>>,
+{
+    let remaining = remaining_probe_time(deadline, stage)?;
+    tokio::time::timeout(remaining, future)
+        .await
+        .map_err(|_| format!("probe timed out during {stage}"))?
+        .map_err(|error| error.to_string())
+}
+
+fn remaining_probe_time(deadline: tokio::time::Instant, stage: &str) -> Result<Duration, String> {
+    remaining_probe_time_at(deadline, tokio::time::Instant::now(), stage)
+}
+
+fn remaining_probe_time_at(
+    deadline: tokio::time::Instant,
+    now: tokio::time::Instant,
+    stage: &str,
+) -> Result<Duration, String> {
+    let remaining = deadline.saturating_duration_since(now);
+    if remaining.is_zero() {
+        Err(format!("probe timed out before {stage}"))
+    } else {
+        Ok(remaining)
+    }
 }
 
 async fn watch_noaa(
@@ -356,5 +408,21 @@ mod tests {
     fn unknown_arguments_and_missing_values_fail_closed() {
         assert!(parse(&["--output"]).is_err());
         assert!(parse(&["--unknown"]).is_err());
+    }
+
+    #[test]
+    fn every_probe_stage_receives_only_the_shared_deadline_remainder() {
+        let started = tokio::time::Instant::now();
+        let deadline = started + Duration::from_secs(900);
+        assert_eq!(
+            remaining_probe_time_at(
+                deadline,
+                started + Duration::from_secs(300),
+                "complete-volume acquisition",
+            )
+            .expect("deadline remains"),
+            Duration::from_secs(600),
+        );
+        assert!(remaining_probe_time_at(deadline, deadline, "archive observation").is_err());
     }
 }
