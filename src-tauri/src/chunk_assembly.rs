@@ -481,8 +481,9 @@ impl ChunkAssembler {
         let volume = self.volume.as_ref()?;
         volume
             .chunks
-            .get(&volume.contiguous_through())
-            .map(|chunk| chunk.metadata.last_modified_unix_ms)
+            .range(..=volume.contiguous_through())
+            .map(|(_, chunk)| chunk.metadata.last_modified_unix_ms)
+            .max()
     }
 
     fn ensure_current(&self, generation: u64) -> Result<(), ChunkAssemblyError> {
@@ -672,6 +673,36 @@ mod tests {
         )
         .unwrap();
         assert!(assembler.is_complete());
+    }
+
+    #[test]
+    fn contiguous_availability_uses_the_latest_timestamp_from_every_prefix_chunk() {
+        let mut assembler = ChunkAssembler::new(1, "KTLX").unwrap();
+        let mut start = metadata(7, "20260801-010203", 1, ChunkKind::Start);
+        start.last_modified_unix_ms = 1_800_000_000_010;
+        assembler
+            .ingest(1, start, bytes(ChunkKind::Start, 1))
+            .unwrap();
+
+        let mut end = metadata(7, "20260801-010203", 3, ChunkKind::End);
+        end.last_modified_unix_ms = 1_800_000_000_030;
+        assembler.ingest(1, end, bytes(ChunkKind::End, 3)).unwrap();
+        assert_eq!(
+            assembler.latest_contiguous_last_modified_unix_ms(),
+            Some(1_800_000_000_010),
+            "a chunk beyond the gap is not part of the available prefix"
+        );
+
+        let mut gap_closer = metadata(7, "20260801-010203", 2, ChunkKind::Intermediate);
+        gap_closer.last_modified_unix_ms = 1_800_000_000_099;
+        assembler
+            .ingest(1, gap_closer, bytes(ChunkKind::Intermediate, 2))
+            .unwrap();
+        assert_eq!(
+            assembler.latest_contiguous_last_modified_unix_ms(),
+            Some(1_800_000_000_099),
+            "prefix availability is the latest timestamp among all required chunks"
+        );
     }
 
     #[test]
