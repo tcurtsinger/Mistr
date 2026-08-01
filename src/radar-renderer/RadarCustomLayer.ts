@@ -232,9 +232,7 @@ interface ResidentFrameReplacement {
   previousPalette: WebGLTexture;
   previousSelectedObservationId: string;
   previousSelectionSequence: number;
-  previousSelectedAt: number;
   previousTextureValidation?: RadarTextureValidation;
-  previousPaintReceipt?: RadarPaintReceipt;
   previousPaintReceipts: RadarPaintReceipt[];
   previousSwitchLatencySamples: number[];
 }
@@ -552,9 +550,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
       previousPalette,
       previousSelectedObservationId: this.selectedObservationId,
       previousSelectionSequence: this.selectionSequence,
-      previousSelectedAt: this.selectedAt,
       previousTextureValidation: this.textureValidation,
-      previousPaintReceipt: this.paintReceipt,
       previousPaintReceipts: this.paintReceipts.map((receipt) => ({ ...receipt })),
       previousSwitchLatencySamples: [...this.switchLatencySamples],
     };
@@ -589,7 +585,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
     this.pendingReplacement = null;
   }
 
-  rollbackResidentFrameReplacement(): void {
+  async rollbackResidentFrameReplacement(timeoutMs = 2_000): Promise<RadarPaintReceipt> {
     const replacement = this.pendingReplacement;
     if (!replacement || !this.gl) {
       throw new RadarRendererError("there is no resident-frame replacement to roll back");
@@ -608,9 +604,11 @@ export class RadarCustomLayer implements CustomLayerInterface {
     this.paletteTexture = replacement.previousPalette;
     this.selectedObservationId = replacement.previousSelectedObservationId;
     this.selectionSequence = replacement.previousSelectionSequence;
-    this.selectedAt = replacement.previousSelectedAt;
+    this.selectedAt = performance.now();
     this.textureValidation = replacement.previousTextureValidation;
-    this.paintReceipt = replacement.previousPaintReceipt;
+    // The rejected replacement may still be the framebuffer's visible pixels.
+    // Clear paint truth until a new fence proves that the restored resources drew.
+    this.paintReceipt = undefined;
     this.paintReceipts = replacement.previousPaintReceipts;
     this.switchLatencySamples = replacement.previousSwitchLatencySamples;
     this.pendingReplacement = null;
@@ -624,8 +622,10 @@ export class RadarCustomLayer implements CustomLayerInterface {
     } finally {
       gl.bindBuffer(gl.ARRAY_BUFFER, previousArrayBuffer);
     }
+    const restoredPaint = this.waitForPaint(this.selectionSequence, timeoutMs);
     this.map?.triggerRepaint();
-    this.emit("painted");
+    this.emit("ready");
+    return restoredPaint;
   }
 
   private createResources(gl: WebGL2RenderingContext) {

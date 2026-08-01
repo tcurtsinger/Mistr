@@ -87,11 +87,12 @@ describe("resident loop validation", () => {
 });
 
 describe("resident replacement rollback", () => {
-  it("restores capped receipt and latency histories without retaining the rejected paint", () => {
+  it("restores capped histories but withholds prior paint truth until restoration completes", async () => {
     const previousReceipts = Array.from({ length: 64 }, (_, index) => receipt(index));
     const previousLatencies = Array.from({ length: 240 }, (_, index) => index);
     const rejectedReceipt = receipt(999);
-    const layer = new RadarCustomLayer(model(0), { onSnapshot: vi.fn() });
+    const onSnapshot = vi.fn();
+    const layer = new RadarCustomLayer(model(0), { onSnapshot });
     const internals = layer as unknown as Record<string, unknown>;
     const gl = {
       ARRAY_BUFFER: 0x8892,
@@ -114,17 +115,21 @@ describe("resident replacement rollback", () => {
       previousPalette: {} as WebGLTexture,
       previousSelectedObservationId: "observation-0",
       previousSelectionSequence: 1,
-      previousSelectedAt: 0,
-      previousPaintReceipt: previousReceipts[previousReceipts.length - 1],
       previousPaintReceipts: previousReceipts,
       previousSwitchLatencySamples: previousLatencies,
     };
 
-    layer.rollbackResidentFrameReplacement();
+    const rollback = layer.rollbackResidentFrameReplacement(10);
+    const rollbackFailure = expect(rollback).rejects.toThrow("did not paint");
 
     expect(layer.getPaintReceipts()).toEqual(previousReceipts);
     expect(internals.switchLatencySamples).toEqual(previousLatencies);
     expect(layer.getPaintReceipts()).not.toContainEqual(rejectedReceipt);
+    expect(layer.getSnapshot()).toMatchObject({
+      lastPaintedObservationId: undefined,
+    });
+    expect(onSnapshot).toHaveBeenLastCalledWith(expect.objectContaining({ status: "ready" }));
+    await rollbackFailure;
   });
 });
 

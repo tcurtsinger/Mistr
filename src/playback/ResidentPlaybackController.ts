@@ -84,7 +84,6 @@ export class ResidentPlaybackController {
     // The renderer swap and controller-frame update are synchronous so no
     // playback operation can observe IDs from different resident loops.
     const previousFrames = this.frames;
-    const previousReceipt = this.lastReceipt;
     this.layer.replaceResidentFrames(frames);
     this.frames = [...frames];
     this.lastReceipt = undefined;
@@ -94,9 +93,23 @@ export class ResidentPlaybackController {
       beforeCommit?.();
       this.layer.commitResidentFrameReplacement(receipt.selectionSequence);
     } catch (error) {
-      this.layer.rollbackResidentFrameReplacement();
       this.frames = previousFrames;
-      this.lastReceipt = previousReceipt;
+      this.lastReceipt = undefined;
+      const rollback = this.layer.rollbackResidentFrameReplacement();
+      this.operation = rollback;
+      this.emit();
+      try {
+        const restoredReceipt = await rollback;
+        this.assertReceipt(restoredReceipt);
+        this.lastReceipt = restoredReceipt;
+      } catch (rollbackError) {
+        throw new Error(
+          `resident replacement failed (${errorMessage(error)}) and rollback GPU paint failed (${errorMessage(rollbackError)})`,
+        );
+      } finally {
+        this.operation = null;
+        this.emit();
+      }
       throw error;
     }
     return receipt;
@@ -281,4 +294,8 @@ export class ResidentPlaybackController {
   private assertActive() {
     if (this.disposed) throw new Error("playback controller is disposed");
   }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

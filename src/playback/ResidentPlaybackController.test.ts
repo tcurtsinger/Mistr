@@ -8,7 +8,7 @@ import { ResidentPlaybackController } from "./ResidentPlaybackController";
 
 class FakeLayer {
   private selected = "frame-a";
-  private painted = "frame-a";
+  private painted: string | undefined = "frame-a";
   private sequence = 1;
   private paintedSequence = 1;
   private generation = 7;
@@ -17,7 +17,7 @@ class FakeLayer {
   private pending: { complete(): void; fail(error: Error): void } | null = null;
   private replacement: {
     selected: string;
-    painted: string;
+    painted: string | undefined;
     sequence: number;
     paintedSequence: number;
     generation: number;
@@ -95,16 +95,17 @@ class FakeLayer {
     this.replacement = null;
   }
 
-  rollbackResidentFrameReplacement(): void {
+  rollbackResidentFrameReplacement(): Promise<RadarPaintReceipt> {
     if (!this.replacement) throw new Error("replacement is not pending");
     this.selected = this.replacement.selected;
-    this.painted = this.replacement.painted;
     this.sequence = this.replacement.sequence;
-    this.paintedSequence = this.replacement.paintedSequence;
     this.generation = this.replacement.generation;
-    this.paintedGeneration = this.replacement.paintedGeneration;
     this.residentObservationIds = this.replacement.residentObservationIds;
+    this.painted = undefined;
+    this.paintedSequence = 0;
+    this.paintedGeneration = 0;
     this.replacement = null;
+    return this.beginPendingPaint();
   }
 
   completePaint() {
@@ -116,6 +117,7 @@ class FakeLayer {
   }
 
   private receipt(): RadarPaintReceipt {
+    if (!this.painted) throw new Error("there is no completed fake paint");
     return {
       generation: this.paintedGeneration,
       observationId: this.painted,
@@ -231,6 +233,16 @@ describe("resident playback truth", () => {
     });
     layer.failPaint();
 
+    await vi.waitFor(() => {
+      expect(controller.snapshot()).toMatchObject({
+        generation: 7,
+        residentCount: 3,
+        selectedObservationId: "frame-a",
+        lastPaintedObservationId: undefined,
+        holdReason: "AWAITING_GPU_PAINT",
+      });
+    });
+    layer.completePaint();
     await expect(replacement).rejects.toThrow("paint failed");
     expect(controller.snapshot()).toMatchObject({
       generation: 7,
@@ -257,6 +269,16 @@ describe("resident playback truth", () => {
     ownsGeneration = false;
     layer.completePaint();
 
+    await vi.waitFor(() => {
+      expect(controller.snapshot()).toMatchObject({
+        generation: 7,
+        residentCount: 3,
+        selectedObservationId: "frame-a",
+        lastPaintedObservationId: undefined,
+        holdReason: "AWAITING_GPU_PAINT",
+      });
+    });
+    layer.completePaint();
     await expect(replacement).rejects.toThrow("generation was superseded");
     expect(controller.snapshot()).toMatchObject({
       generation: 7,
