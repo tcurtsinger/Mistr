@@ -236,6 +236,12 @@ On `webglcontextrestored`:
 
 Automated tests must trigger context loss where supported and also exercise a deterministic simulated resource reset.
 
+### Phase 6 implementation result
+
+The packaged Windows prototype now exercises the real `WEBGL_lose_context` path rather than merely clearing Mistr's own handles. It retains normalized CPU observations, invalidates the prior paint receipt, advances a context epoch, and re-adds the custom layer through MapLibre's public style API. The selected visible frame is uploaded and GPU-fenced first; the remaining loop is uploaded one frame per render turn and fenced before playback becomes ready. Pending paint/recovery promises fail explicitly if recreation or GPU verification fails. Two consecutive cold-start packaged passes also covered minimize/restore, offline resident playback, and 1x/2x device-scale overrides. Real Windows sleep/wake remains a manual hardware lifecycle check, recorded as DRF-003 rather than reported as an automated pass.
+
+Evidence: [`phase-reports/PHASE_6_N0S_AND_CONTEXT_RECOVERY.md`](phase-reports/PHASE_6_N0S_AND_CONTEXT_RECOVERY.md).
+
 ## 13. Resource replacement
 
 For site/product/elevation changes:

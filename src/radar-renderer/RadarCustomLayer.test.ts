@@ -133,6 +133,123 @@ describe("resident replacement rollback", () => {
   });
 });
 
+describe("context recovery truth", () => {
+  it("invalidates old paint truth, advances the context epoch, and retains CPU observations", () => {
+    const models = [model(0), model(1), model(2)];
+    const layer = new RadarCustomLayer(models, { onSnapshot: vi.fn() });
+    const internals = layer as unknown as {
+      beginContextRecovery(): void;
+      paintReceipt: RadarPaintReceipt | undefined;
+      frameResources: Map<string, unknown>;
+    };
+    internals.paintReceipt = receipt(0);
+    internals.frameResources = new Map(models.map((entry) => [entry.observationId, {
+      textureValidation: { allPassed: true },
+    }]));
+
+    internals.beginContextRecovery();
+
+    expect(layer.getSnapshot()).toMatchObject({
+      status: "recovering",
+      contextEpoch: 2,
+      lastPaintedObservationId: undefined,
+      recovery: {
+        phase: "context_lost",
+        targetResidentCount: 3,
+        visibleObservationId: "observation-0",
+        visibleFramePainted: false,
+      },
+    });
+    expect(() => layer.selectFrame("observation-1")).toThrow("renderer is recovering");
+  });
+
+  it("rejects paint and recovery waiters when recovery fails", async () => {
+    const layer = new RadarCustomLayer([model(0)], { onSnapshot: vi.fn() });
+    const internals = layer as unknown as {
+      beginContextRecovery(): void;
+      failRenderer(error: unknown): void;
+    };
+    const paintFailure = expect(layer.waitForPaint(1, 1_000)).rejects.toThrow(
+      "recovery upload failed",
+    );
+    internals.beginContextRecovery();
+    const recoveryFailure = expect(layer.waitForRecovery(1_000)).rejects.toThrow(
+      "recovery upload failed",
+    );
+
+    internals.failRenderer(new Error("recovery upload failed"));
+
+    await Promise.all([paintFailure, recoveryFailure]);
+    expect(layer.getSnapshot()).toMatchObject({
+      status: "error",
+      error: "recovery upload failed",
+    });
+  });
+
+  it("restarts per-context truth for a second loss during recovery", () => {
+    const layer = new RadarCustomLayer([model(0), model(1)], { onSnapshot: vi.fn() });
+    const internals = layer as unknown as {
+      beginContextRecovery(): void;
+      contextLossActive: boolean;
+      recoveryPhase: string;
+      recoverySync: WebGLSync | null;
+      paintReceipt: RadarPaintReceipt | undefined;
+    };
+
+    internals.beginContextRecovery();
+    internals.beginContextRecovery();
+    expect(layer.getSnapshot().contextEpoch).toBe(2);
+
+    internals.contextLossActive = false;
+    internals.recoveryPhase = "rehydrating_loop";
+    internals.recoverySync = {} as WebGLSync;
+    internals.paintReceipt = receipt(0);
+    internals.beginContextRecovery();
+
+    expect(layer.getSnapshot()).toMatchObject({
+      status: "recovering",
+      contextEpoch: 3,
+      lastPaintedObservationId: undefined,
+      recovery: { phase: "context_lost", visibleFramePainted: false },
+    });
+    expect(internals.recoverySync).toBeNull();
+  });
+
+  it("rejects the abandoned replacement sequence before restoring prior CPU truth", async () => {
+    const prior = model(0);
+    const replacement = { ...model(1), generation: 2n };
+    const layer = new RadarCustomLayer(replacement, { onSnapshot: vi.fn() });
+    const internals = layer as unknown as {
+      beginContextRecovery(): void;
+      pendingReplacement: Record<string, unknown> | null;
+      selectionSequence: number;
+    };
+    internals.selectionSequence = 2;
+    internals.pendingReplacement = {
+      previousModels: [prior],
+      previousFrames: new Map(),
+      previousPalette: {} as WebGLTexture,
+      previousSelectedObservationId: prior.observationId,
+      previousSelectionSequence: 1,
+      previousTextureValidation: undefined,
+      previousPaintReceipts: [],
+      previousSwitchLatencySamples: [],
+    };
+    const abandoned = expect(layer.waitForPaint(2, 1_000)).rejects.toThrow(
+      "abandoned by WebGL context loss",
+    );
+
+    internals.beginContextRecovery();
+
+    await abandoned;
+    expect(layer.getSnapshot()).toMatchObject({
+      selectedObservationId: prior.observationId,
+      selectionSequence: 1,
+      recovery: { phase: "context_lost" },
+    });
+  });
+});
+
 function model(index: number): RadarSweepCpuModel {
   return {
     observationId: `observation-${index}`,

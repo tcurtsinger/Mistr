@@ -15,7 +15,7 @@ const manifest = JSON.parse(await readFile(join(fixtureRoot, "manifest.json"), "
 const { shouldDownload, setName } = parseFixtureVerificationArgs(process.argv.slice(2));
 
 if (
-  manifest.schemaVersion !== 1 ||
+  manifest.schemaVersion !== 2 ||
   !Array.isArray(manifest.fixtures) ||
   manifest.fixtures.length === 0
 ) {
@@ -62,44 +62,95 @@ function validateFixture(fixture, knownIds) {
   if (
     typeof fixture.source !== "string" ||
     !fixture.source.trim() ||
-    fixture.bucket !== "unidata-nexrad-level2" ||
-    typeof fixture.key !== "string" ||
-    !fixture.key ||
+    ![
+      "level2_archive",
+      "level3_n0s",
+      "iem_ridge_png",
+      "iem_ridge_world_file",
+    ].includes(fixture.datasetKind) ||
     typeof fixture.station !== "string" ||
-    !/^K[A-Z0-9]{3}$/.test(fixture.station) ||
+    !/^[A-Z0-9]{4}$/.test(fixture.station) ||
     typeof fixture.observedAt !== "string" ||
     !isValidUtcTimestamp(fixture.observedAt) ||
     !Number.isSafeInteger(fixture.sizeBytes) ||
     fixture.sizeBytes < 1 ||
     typeof fixture.sha256 !== "string" ||
     !/^[a-f0-9]{64}$/.test(fixture.sha256) ||
-    typeof fixture.etag !== "string" ||
-    !/^[a-f0-9]{32}(?:-\d+)?$/.test(fixture.etag) ||
+    (fixture.etag !== undefined && (
+      typeof fixture.etag !== "string" ||
+      !/^[a-f0-9]{32}(?:-\d+)?$/.test(fixture.etag)
+    )) ||
     typeof fixture.localPath !== "string"
   ) {
     throw new Error(`${fixture.id}: invalid fixture metadata`);
   }
 
+  validateSourceIdentity(fixture);
+}
+
+function validateSourceIdentity(fixture) {
   const url = new URL(fixture.url);
+  if (url.protocol !== "https:") {
+    throw new Error(`${fixture.id}: fixture URL must use HTTPS`);
+  }
+
+  if (fixture.datasetKind === "level2_archive") {
+    if (
+      fixture.bucket !== "unidata-nexrad-level2" ||
+      url.hostname !== "unidata-nexrad-level2.s3.amazonaws.com" ||
+      url.pathname.slice(1) !== fixture.key
+    ) {
+      throw new Error(`${fixture.id}: source URL does not match its fixed Level II key`);
+    }
+    const match = /^(\d{4})\/(\d{2})\/(\d{2})\/(K[A-Z0-9]{3})\/\4\1\2\3_(\d{2})(\d{2})(\d{2})_V\d{2}(?:\.gz)?$/.exec(fixture.key);
+    if (!match) throw new Error(`${fixture.id}: unsupported Level II archive key format`);
+    const [, year, month, day, station, hour, minute, second] = match;
+    assertKeyIdentity(fixture, station, `${year}-${month}-${day}T${hour}:${minute}:${second}Z`);
+    return;
+  }
+
+  if (fixture.datasetKind === "level3_n0s") {
+    if (
+      fixture.bucket !== "unidata-nexrad-level3" ||
+      url.hostname !== "unidata-nexrad-level3.s3.amazonaws.com" ||
+      url.pathname.slice(1) !== fixture.key
+    ) {
+      throw new Error(`${fixture.id}: source URL does not match its fixed Level III key`);
+    }
+    const match = /^([A-Z0-9]{3})_N0S_(\d{4})_(\d{2})_(\d{2})_(\d{2})_(\d{2})_(\d{2})$/.exec(fixture.key);
+    if (!match) throw new Error(`${fixture.id}: unsupported N0S key format`);
+    const [, id3, year, month, day, hour, minute, second] = match;
+    if (fixture.station.slice(1) !== id3) {
+      throw new Error(`${fixture.id}: station does not match its N0S key`);
+    }
+    assertKeyIdentity(fixture, fixture.station, `${year}-${month}-${day}T${hour}:${minute}:${second}Z`);
+    return;
+  }
+
   if (
-    url.protocol !== "https:" ||
-    url.hostname !== "unidata-nexrad-level2.s3.amazonaws.com" ||
-    url.pathname.slice(1) !== fixture.key
+    url.hostname !== "mesonet.agron.iastate.edu" ||
+    fixture.bucket !== undefined ||
+    fixture.key !== undefined ||
+    fixture.etag !== undefined
   ) {
-    throw new Error(`${fixture.id}: source URL does not match its fixed bucket key`);
+    throw new Error(`${fixture.id}: IEM reference metadata is not fixed-host or canonical`);
   }
-
-  const keyMetadata = /^(\d{4})\/(\d{2})\/(\d{2})\/(K[A-Z0-9]{3})\/\4\1\2\3_(\d{2})(\d{2})(\d{2})_V\d{2}(?:\.gz)?$/.exec(
-    fixture.key,
-  );
-  if (!keyMetadata) {
-    throw new Error(`${fixture.id}: unsupported Level II archive key format`);
+  const extension = fixture.datasetKind === "iem_ridge_png" ? "png" : "wld";
+  const match = /^\/archive\/data\/(\d{4})\/(\d{2})\/(\d{2})\/GIS\/ridge\/([A-Z0-9]{3})\/N0S\/\4_N0S_(\d{8})(\d{4})\.(png|wld)$/.exec(url.pathname);
+  if (!match || match[7] !== extension || fixture.station.slice(1) !== match[4]) {
+    throw new Error(`${fixture.id}: unsupported IEM RIDGE N0S path`);
   }
+  const [, year, month, day, , compactDate, compactTime] = match;
+  const expectedDate = `${year}${month}${day}`;
+  const expectedTime = `${year}-${month}-${day}T${compactTime.slice(0, 2)}:${compactTime.slice(2)}:00Z`;
+  if (compactDate !== expectedDate || fixture.observedAt !== expectedTime) {
+    throw new Error(`${fixture.id}: scan time does not match its IEM RIDGE path`);
+  }
+}
 
-  const [, year, month, day, keyStation, hour, minute, second] = keyMetadata;
-  const keyTimestamp = `${year}-${month}-${day}T${hour}:${minute}:${second}Z`;
-  if (fixture.station !== keyStation || fixture.observedAt !== keyTimestamp) {
-    throw new Error(`${fixture.id}: station or scan time does not match its archive key`);
+function assertKeyIdentity(fixture, station, observedAt) {
+  if (fixture.station !== station || fixture.observedAt !== observedAt) {
+    throw new Error(`${fixture.id}: station or scan time does not match its fixed key`);
   }
 }
 
@@ -110,6 +161,10 @@ function validateFixtureSets(fixtureSets, knownIds) {
     || Array.isArray(fixtureSets)
     || !Array.isArray(fixtureSets.phase4KtlxReflectivityLoop)
     || fixtureSets.phase4KtlxReflectivityLoop.length !== 20
+    || !Array.isArray(fixtureSets.phase6N0sCorpus)
+    || fixtureSets.phase6N0sCorpus.length < 4
+    || !Array.isArray(fixtureSets.phase6TlxIemComparison)
+    || fixtureSets.phase6TlxIemComparison.length < 3
   ) {
     throw new Error("Fixture manifest must define the 20-entry Phase 4 KTLX loop");
   }
@@ -159,7 +214,12 @@ async function downloadIfNeeded(fixture, destination) {
   await rm(temporary, { force: true });
 
   const url = new URL(fixture.url);
-  if (url.protocol !== "https:" || url.hostname !== "unidata-nexrad-level2.s3.amazonaws.com") {
+  const allowedHosts = new Set([
+    "unidata-nexrad-level2.s3.amazonaws.com",
+    "unidata-nexrad-level3.s3.amazonaws.com",
+    "mesonet.agron.iastate.edu",
+  ]);
+  if (url.protocol !== "https:" || !allowedHosts.has(url.hostname)) {
     throw new Error(`${fixture.id}: download host is not allowed`);
   }
 

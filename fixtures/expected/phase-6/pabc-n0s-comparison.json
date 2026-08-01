@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "passed": true,
+  "rustDecoder": "mistr-level3-n0s=1;oracle=nexrad-level-3-data@0.6.1",
+  "independentOracle": "nexrad-level-3-data@0.6.1",
+  "siteIcao": "PABC",
+  "sourceSha256": "209df1235b5d50f46b5e6d98a80ee7f42ac1d1314280b31b846c9c0bc44f6ddd",
+  "checks": {
+    "siteIcao": true,
+    "productIdentity": true,
+    "units": true,
+    "coordinates": true,
+    "elevation": true,
+    "vcp": true,
+    "dimensions": true,
+    "gateGeometry": true,
+    "validCount": true,
+    "missingCount": true,
+    "rangeFoldedCount": true,
+    "azimuthSha256": true,
+    "oracleFieldSha256": true,
+    "gateStatusSha256": true,
+    "rawCodesSha256": true
+  },
+  "failed": []
+}

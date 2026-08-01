@@ -28,6 +28,7 @@ import {
 import {
   createAlignmentReport,
   createRadarSweepCpuModel,
+  interrogateGate,
   interrogateLngLat,
   type AlignmentReport,
   type GateInterrogation,
@@ -502,6 +503,88 @@ export function App() {
         report: () => latestPhase5,
         acquire: acquireLive,
       };
+      const phase6Report = (): Phase6Report => {
+        if (!layer || !controller) throw new Error("Phase 6 renderer is unavailable");
+        const renderer = layer.getSnapshot();
+        const model = modelsById.get(renderer.selectedObservationId);
+        if (!model) throw new Error("Phase 6 selected observation has no CPU model");
+        const validCell = model.statuses.findIndex((status) => status === 0);
+        const sample = validCell < 0
+          ? undefined
+          : interrogateGate(
+              model,
+              Math.floor(validCell / model.gateCount),
+              validCell % model.gateCount,
+            );
+        return {
+          renderer,
+          playback: controller.snapshot(),
+          product: model.product,
+          units: model.units,
+          sourceKind: model.sourceKind,
+          siteIcao: model.siteIcao,
+          observedAtUnixMs: model.observedAtUnixMs,
+          sample,
+        };
+      };
+      const loadN0s = async (
+        fixtureId = "ktlx-n0s-2024-05-20-230512",
+      ): Promise<Phase6Report> => {
+        if (!layer || !controller || !client) throw new Error("Phase 6 renderer is unavailable");
+        const generation = Math.max(
+          transferGeneration + 1,
+          layer.getSnapshot().generation + 1,
+        );
+        transferGeneration = generation;
+        await client.begin(generation);
+        const lease = await client.requestPhase6N0sFixture(fixtureId);
+        try {
+          const model = createRadarSweepCpuModel(lease.packed);
+          if (
+            model.product !== "storm_relative_velocity"
+            || model.units !== "kt"
+            || model.sourceKind !== "nexrad_level3_n0s"
+          ) {
+            throw new Error("Phase 6 fixture is not explicit Level III N0S storm-relative velocity");
+          }
+          const alignment = createAlignmentReport(model);
+          await controller.replaceResidentFrames([model]);
+          modelsById.clear();
+          modelsById.set(model.observationId, model);
+          updateDiagnosticSources(instance, model, alignment);
+          const firstValid = model.statuses.findIndex((status) => status === 0);
+          if (firstValid >= 0) {
+            setInterrogation(interrogateGate(
+              model,
+              Math.floor(firstValid / model.gateCount),
+              firstValid % model.gateCount,
+            ));
+          }
+          instance.jumpTo({
+            center: [model.center.longitude, model.center.latitude],
+            zoom: 5.8,
+            bearing: 0,
+            pitch: 0,
+          });
+          return phase6Report();
+        } finally {
+          await lease.release();
+        }
+      };
+      globalThis.__MISTR_PHASE6__ = {
+        report: phase6Report,
+        loadN0s,
+        async resetContext(holdMs = 100) {
+          if (!layer) throw new Error("Phase 6 renderer is unavailable");
+          const before = layer.getSnapshot();
+          const recovery = await layer.simulateContextResetForTest(holdMs);
+          return { before, recovery, after: layer.getSnapshot() };
+        },
+        resize() {
+          instance.resize();
+          return layer?.getSnapshot() ?? null;
+        },
+      };
       controller.play();
     };
 
@@ -522,6 +605,7 @@ export function App() {
       if (clickHandler) instance.off("click", clickHandler);
       if (globalThis.__MISTR_PHASE4__) delete globalThis.__MISTR_PHASE4__;
       if (globalThis.__MISTR_PHASE5__) delete globalThis.__MISTR_PHASE5__;
+      if (globalThis.__MISTR_PHASE6__) delete globalThis.__MISTR_PHASE6__;
       acquireLiveRef.current = null;
       removeDiagnosticLayers(instance, layer);
     };
@@ -543,7 +627,7 @@ export function App() {
       <header className="top-rail">
         <div>
           <p className="eyebrow">NEXRAD RENDERING EXPERIMENT</p>
-          <h1>MISTR <span>PHASE 5</span></h1>
+          <h1>MISTR <span>PHASE 6</span></h1>
         </div>
         <div className="status-cluster" aria-label="Prototype status">
           <Status label="SHELL" value={runtime.shell.toUpperCase()} />
@@ -554,10 +638,10 @@ export function App() {
       </header>
       <section className="checkpoint" aria-labelledby="checkpoint-title">
         <p className="eyebrow">CURRENT CHECKPOINT</p>
-        <h2 id="checkpoint-title">Real-time Level II acquisition</h2>
+        <h2 id="checkpoint-title">Storm-relative velocity + GPU recovery</h2>
         <p>
-          Public NEXRAD chunks are assembled under strict bounds. Only a complete,
-          safely bounded lowest sweep can replace the last GPU-painted frame.
+          Native N0S decoding stays explicitly separate from base velocity. A lost
+          WebGL context restores the visible frame first, then the resident loop.
         </p>
         <button
           className="live-action"
@@ -572,7 +656,7 @@ export function App() {
         <InterrogationReadout value={interrogation} />
       </section>
       <footer className="bottom-rail">
-        <span>REAL-TIME CHUNKS / SAFE LOWEST SWEEP / GPU PAINT RECEIPT</span>
+        <span>LEVEL III N0S / PRODUCT TRUTH / VISIBLE-FIRST GPU RECOVERY</span>
         <span className="truth-label">PROTOTYPE - NOT OPERATIONAL</span>
       </footer>
     </main>
@@ -623,6 +707,23 @@ export interface Phase5Report {
   transferTiming?: TransferTiming;
   renderer?: RadarRendererSnapshot;
   diagnosticsError?: string;
+}
+
+export interface Phase6Report {
+  renderer: RadarRendererSnapshot;
+  playback: PlaybackStateSnapshot;
+  product: RadarSweepCpuModel["product"];
+  units: RadarSweepCpuModel["units"];
+  sourceKind: RadarSweepCpuModel["sourceKind"];
+  siteIcao: string;
+  observedAtUnixMs: number;
+  sample?: GateInterrogation;
+}
+
+export interface Phase6ContextResetReport {
+  before: RadarRendererSnapshot;
+  recovery: RadarRendererSnapshot["recovery"];
+  after: RadarRendererSnapshot;
 }
 
 export interface Phase4Report {
@@ -979,5 +1080,11 @@ declare global {
   var __MISTR_PHASE5__: undefined | {
     report(): Phase5Report;
     acquire(site: string, freshOnly?: boolean, timeoutSeconds?: number): Promise<Phase5Report>;
+  };
+  var __MISTR_PHASE6__: undefined | {
+    report(): Phase6Report;
+    loadN0s(fixtureId?: string): Promise<Phase6Report>;
+    resetContext(holdMs?: number): Promise<Phase6ContextResetReport>;
+    resize(): RadarRendererSnapshot | null;
   };
 }

@@ -26,11 +26,11 @@
 
 **Reason:** Removing it would be a product regression; stacking raw Level II sites is not an equivalent mosaic.
 
-### D005 — Preserve SRV semantics via Level III evaluation
+### D005 — Preserve SRV semantics via Level III `N0S`
 
-**Decision:** Evaluate raw Level III `N0S` for storm-relative velocity parity. Level II velocity remains labeled base/radial velocity.
+**Decision:** Decode raw Level III code-56 `N0S` as the canonical `storm_relative_velocity` product. Level II velocity remains a distinct `base_velocity` product and cannot enter the SRV renderer path.
 
-**Reason:** Storm-relative velocity is derived and is not present as the current `N0S` product in Level II.
+**Reason:** Storm-relative velocity is derived and is not present as the current `N0S` product in Level II. Phase 6 demonstrated exact structural parity against an independent decoder and spatial/category agreement with the identical IEM RIDGE observation; the accepted implementation record is [`18_LEVEL3_N0S_AND_CONTEXT_RECOVERY_DECISION.md`](18_LEVEL3_N0S_AND_CONTEXT_RECOVERY_DECISION.md).
 
 ### D006 — Use packed binary IPC
 
@@ -132,17 +132,19 @@ Decision evidence: chunk/completed-volume comparisons and consistency across cur
 
 ### Q005 — Level III implementation language
 
+**Resolved in Phase 6:** Use a Mistr-owned, bounded Rust parser for product 56 / `N0S` inside the common normalization boundary. Pin `nexrad-level-3-data@0.6.1` only as an independent development oracle. See [`18_LEVEL3_N0S_AND_CONTEXT_RECOVERY_DECISION.md`](18_LEVEL3_N0S_AND_CONTEXT_RECOVERY_DECISION.md).
+
 Options:
 
 - Rust decoder within the common backend normalization boundary.
 - TypeScript/JavaScript decoder in a worker, outputting the same normalized model.
 - Mistr-owned minimal Rust decoder validated against `nexrad-level-3-data`.
 
-Preferred architectural direction is one Rust normalization boundary, but evidence and dependency maturity decide.
+The selected path keeps one runtime language at the decoder boundary while avoiding dependence on an immature or absent general Rust Level III crate.
 
 ### Q006 — CPU retention for context restoration
 
-**Resolved and confirmed for the resident-loop baseline:** Retain compact raw codes, detailed statuses, radial metadata (azimuth, beam width, and elevation), and azimuth lookup for every resident observation; release the packed float-value transfer after the compact copy. Phase 4 measured 53,098,240 CPU bytes (50.638 MiB) and 53,099,312 known GPU bytes (50.639 MiB) for 20 real KTLX observations. Five atomic replacements per run peaked at 106,197,552 known GPU bytes (101.278 MiB). See [`16_RESIDENT_PLAYBACK_DECISION.md`](16_RESIDENT_PLAYBACK_DECISION.md).
+**Resolved and confirmed for the resident-loop baseline:** Retain compact raw codes, detailed statuses, radial metadata (azimuth, beam width, and elevation), and azimuth lookup for every resident observation; release the packed float-value transfer after the compact copy. N0S additionally retains its categorical float values because they cannot be reconstructed with one linear scale/offset equation. Phase 4 measured 53,098,240 CPU bytes (50.638 MiB) and 53,099,312 known GPU bytes (50.639 MiB) for 20 real KTLX observations. Five atomic replacements per run peaked at 106,197,552 known GPU bytes (101.278 MiB). See [`16_RESIDENT_PLAYBACK_DECISION.md`](16_RESIDENT_PLAYBACK_DECISION.md) and [`18_LEVEL3_N0S_AND_CONTEXT_RECOVERY_DECISION.md`](18_LEVEL3_N0S_AND_CONTEXT_RECOVERY_DECISION.md).
 
 Options:
 
@@ -217,7 +219,7 @@ Required ADRs before Phase 3:
 Required ADRs before Phase 7:
 
 - Real-time publication boundary.
-- Level III `N0S` decoder path.
+- [x] Level III `N0S` decoder path: [`18_LEVEL3_N0S_AND_CONTEXT_RECOVERY_DECISION.md`](18_LEVEL3_N0S_AND_CONTEXT_RECOVERY_DECISION.md).
 - Raw/tile fallback and source-preference policy.
 - GustAVO feature-flag and observation-period policy.
 
@@ -225,3 +227,4 @@ Additional accepted prototype ADRs:
 
 - [x] Resident playback, atomic replacement, and paint truth: [`16_RESIDENT_PLAYBACK_DECISION.md`](16_RESIDENT_PLAYBACK_DECISION.md).
 - [x] Real-time publication boundary and fallback: [`17_REALTIME_FRESHNESS_AND_FALLBACK_DECISION.md`](17_REALTIME_FRESHNESS_AND_FALLBACK_DECISION.md).
+- [x] Level III N0S and visible-first context recovery: [`18_LEVEL3_N0S_AND_CONTEXT_RECOVERY_DECISION.md`](18_LEVEL3_N0S_AND_CONTEXT_RECOVERY_DECISION.md).

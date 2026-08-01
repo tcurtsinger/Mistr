@@ -2,7 +2,7 @@
 
 Mistr is a feasibility prototype for a fast, native-data NEXRAD radar renderer. It tests a specific architecture before any production adoption:
 
-1. acquire public NEXRAD Level II volumes;
+1. acquire public NEXRAD Level II and selected Level III products;
 2. decode and normalize radar sweeps in Rust;
 3. transfer a compact binary representation across Tauri IPC; and
 4. render resident sweeps in a custom MapLibre WebGL layer.
@@ -11,7 +11,7 @@ The target is a Windows desktop storm command center with game-loop-style playba
 
 ## Status
 
-**Prototype only.** Phases 0 through 5 are complete on the primary Windows workstation. The build retains the Phase 4 proof of 20 GPU-resident real observations and adds bounded, cancellable acquisition from the public real-time Level II chunk bucket. A live frame is exposed only after the lowest sweep has a verified physical boundary, and the packaged app replaces visible radar only after an authoritative GPU receipt. Velocity parity, context recovery, multi-machine evidence, and GustAVO integration still have explicit later gates.
+**Prototype only.** Phases 0 through 6 are complete on the primary Windows workstation. The build retains the Phase 4 proof of 20 GPU-resident observations, the Phase 5 bounded real-time Level II path, and now adds strict Level III `N0S` storm-relative velocity plus visible-first WebGL context recovery. Independent decoder and IEM comparisons pass. A real Windows sleep/wake check, multi-machine evidence, and GustAVO integration remain later gates.
 
 Start with [the documentation index](docs/README.md) and [prototype charter](docs/00_PROTOTYPE_CHARTER.md).
 
@@ -92,6 +92,17 @@ cargo run --release --locked --manifest-path src-tauri\Cargo.toml --bin mistr-li
 ```
 
 The probe uses anonymous fixed-host HTTPS only. Raw chunks, executables, provider responses, and packaged screenshots remain ignored; the reviewed latency dataset contains only bounded public metadata and hashes. See the [real-time decision](docs/17_REALTIME_FRESHNESS_AND_FALLBACK_DECISION.md) and [Phase 5 report](docs/phase-reports/PHASE_5_REALTIME_CHUNKS.md).
+
+## Phase 6 N0S and recovery gate
+
+Download/verify the fixed public Level III and IEM references, then run two packaged WebView2 cold-start passes:
+
+```powershell
+npm run fixture:verify:phase6
+npm run test:phase6:packaged
+```
+
+This exercises real WebGL context loss/restoration, visible-first then loop rehydration, minimize/restore, offline resident playback, DPR 1/2 rendering, explicit N0S product labels, and restart. Detailed runtime artifacts remain ignored. See the [Phase 6 decision](docs/18_LEVEL3_N0S_AND_CONTEXT_RECOVERY_DECISION.md) and [Phase 6 report](docs/phase-reports/PHASE_6_N0S_AND_CONTEXT_RECOVERY.md).
 
 ## Public-repository rules
 

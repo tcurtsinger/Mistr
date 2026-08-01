@@ -1,0 +1,181 @@
+{
+  "schemaVersion": 1,
+  "reference": "Iowa Environmental Mesonet RIDGE N0S indexed PNG",
+  "method": "Independent AF1F RLE parse; world-file pixel centers are mapped to the nearest source radial and 4/3-earth slant-range gate",
+  "site": {
+    "latitudeDegrees": 35.333,
+    "longitudeDegrees": -97.278,
+    "elevationDegrees": 0.5
+  },
+  "image": {
+    "width": 1000,
+    "height": 1000
+  },
+  "nontransparentReferencePixels": 100636,
+  "comparedPixels": 99263,
+  "outsideSourceSweepPixels": 1373,
+  "coverageFraction": 0.9863567709368417,
+  "exactCategoryMatches": 92621,
+  "exactCategoryFraction": 0.9330868500851274,
+  "sameOrAdjacentCategoryMatches": 97219,
+  "sameOrAdjacentCategoryFraction": 0.9794082387193617,
+  "largestConfusionPairs": [
+    {
+      "iemCategory": 9,
+      "rawCategory": 9,
+      "pixels": 19819
+    },
+    {
+      "iemCategory": 6,
+      "rawCategory": 6,
+      "pixels": 16711
+    },
+    {
+      "iemCategory": 8,
+      "rawCategory": 8,
+      "pixels": 14536
+    },
+    {
+      "iemCategory": 7,
+      "rawCategory": 7,
+      "pixels": 12815
+    },
+    {
+      "iemCategory": 5,
+      "rawCategory": 5,
+      "pixels": 11348
+    },
+    {
+      "iemCategory": 10,
+      "rawCategory": 10,
+      "pixels": 10443
+    },
+    {
+      "iemCategory": 4,
+      "rawCategory": 4,
+      "pixels": 4151
+    },
+    {
+      "iemCategory": 11,
+      "rawCategory": 11,
+      "pixels": 1733
+    },
+    {
+      "iemCategory": 3,
+      "rawCategory": 3,
+      "pixels": 586
+    },
+    {
+      "iemCategory": 9,
+      "rawCategory": 10,
+      "pixels": 505
+    },
+    {
+      "iemCategory": 10,
+      "rawCategory": 9,
+      "pixels": 498
+    },
+    {
+      "iemCategory": 4,
+      "rawCategory": 5,
+      "pixels": 498
+    },
+    {
+      "iemCategory": 5,
+      "rawCategory": 4,
+      "pixels": 469
+    },
+    {
+      "iemCategory": 6,
+      "rawCategory": 5,
+      "pixels": 386
+    },
+    {
+      "iemCategory": 5,
+      "rawCategory": 6,
+      "pixels": 348
+    },
+    {
+      "iemCategory": 8,
+      "rawCategory": 9,
+      "pixels": 290
+    },
+    {
+      "iemCategory": 9,
+      "rawCategory": 0,
+      "pixels": 260
+    },
+    {
+      "iemCategory": 15,
+      "rawCategory": 15,
+      "pixels": 250
+    },
+    {
+      "iemCategory": 9,
+      "rawCategory": 8,
+      "pixels": 245
+    },
+    {
+      "iemCategory": 7,
+      "rawCategory": 6,
+      "pixels": 238
+    },
+    {
+      "iemCategory": 10,
+      "rawCategory": 0,
+      "pixels": 236
+    },
+    {
+      "iemCategory": 12,
+      "rawCategory": 12,
+      "pixels": 224
+    },
+    {
+      "iemCategory": 6,
+      "rawCategory": 7,
+      "pixels": 220
+    },
+    {
+      "iemCategory": 11,
+      "rawCategory": 10,
+      "pixels": 219
+    },
+    {
+      "iemCategory": 10,
+      "rawCategory": 11,
+      "pixels": 211
+    },
+    {
+      "iemCategory": 6,
+      "rawCategory": 0,
+      "pixels": 190
+    },
+    {
+      "iemCategory": 5,
+      "rawCategory": 0,
+      "pixels": 174
+    },
+    {
+      "iemCategory": 7,
+      "rawCategory": 8,
+      "pixels": 158
+    },
+    {
+      "iemCategory": 8,
+      "rawCategory": 7,
+      "pixels": 154
+    },
+    {
+      "iemCategory": 8,
+      "rawCategory": 0,
+      "pixels": 116
+    }
+  ],
+  "checks": {
+    "sameProductCategories": true,
+    "referenceCoverageAtLeast98Percent": true,
+    "exactCategoryAgreementAtLeast90Percent": true,
+    "AdjacentCategoryAgreementAtLeast97Percent": true
+  },
+  "passed": true
+}

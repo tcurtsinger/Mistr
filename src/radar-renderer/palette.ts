@@ -25,6 +25,28 @@ const REFLECTIVITY_STOPS: readonly PaletteStop[] = [
 export const RANGE_FOLDED_COLOR: Rgba = [144, 91, 211, 220];
 export const TRANSPARENT_COLOR: Rgba = [0, 0, 0, 0];
 
+// Product 56 uses categorical velocity thresholds, not the Level II linear
+// scale/offset equation. Category 8 is near-zero; cool hues are inbound and
+// warm hues are outbound. This palette never changes the product label.
+const STORM_RELATIVE_VELOCITY_COLORS: readonly Rgba[] = [
+  TRANSPARENT_COLOR,
+  [23, 48, 138, 230],
+  [28, 78, 181, 230],
+  [33, 113, 202, 230],
+  [51, 147, 214, 230],
+  [83, 179, 224, 230],
+  [137, 208, 232, 230],
+  [204, 232, 239, 220],
+  [232, 232, 232, 205],
+  [254, 224, 210, 220],
+  [252, 187, 161, 230],
+  [252, 146, 114, 230],
+  [239, 96, 78, 230],
+  [211, 51, 55, 230],
+  [158, 31, 46, 230],
+  RANGE_FOLDED_COLOR,
+];
+
 export function buildReflectivityPalette(scale: number, offset: number): Uint8Array {
   if (!Number.isFinite(scale) || scale <= 0 || !Number.isFinite(offset)) {
     throw new RangeError("reflectivity palette requires positive scale and finite offset");
@@ -38,7 +60,26 @@ export function buildReflectivityPalette(scale: number, offset: number): Uint8Ar
   return palette;
 }
 
+export function buildStormRelativeVelocityPalette(): Uint8Array {
+  const palette = new Uint8Array(PALETTE_WIDTH * 4);
+  for (let category = 1; category <= 14; category += 1) {
+    writePremultiplied(palette, category * 4, STORM_RELATIVE_VELOCITY_COLORS[category]);
+  }
+  return palette;
+}
+
+export function buildRadarPalette(
+  product: "reflectivity" | "storm_relative_velocity",
+  scale: number,
+  offset: number,
+): Uint8Array {
+  return product === "storm_relative_velocity"
+    ? buildStormRelativeVelocityPalette()
+    : buildReflectivityPalette(scale, offset);
+}
+
 export function paletteColor(
+  product: "reflectivity" | "storm_relative_velocity",
   rawCode: number,
   status: number,
   scale: number,
@@ -50,9 +91,13 @@ export function paletteColor(
   if (status === 2) {
     return RANGE_FOLDED_COLOR;
   }
-  if (status !== 0 || rawCode < 2) {
+  if (status !== 0) {
     return TRANSPARENT_COLOR;
   }
+  if (product === "storm_relative_velocity") {
+    return STORM_RELATIVE_VELOCITY_COLORS[rawCode] ?? TRANSPARENT_COLOR;
+  }
+  if (rawCode < 2) return TRANSPARENT_COLOR;
   return colorForReflectivity((rawCode - offset) / scale);
 }
 

@@ -11,6 +11,10 @@ const GOLDEN_PATH = new URL(
   "../../fixtures/expected/phase-2/packed-sweep-v1.bin",
   import.meta.url,
 );
+const N0S_PATH = new URL(
+  "../../fixtures/expected/phase-6/ktlx-n0s-packed-sweep-v1.bin",
+  import.meta.url,
+);
 
 function golden(): Uint8Array {
   return Uint8Array.from(readFileSync(GOLDEN_PATH));
@@ -108,6 +112,55 @@ describe("parsePackedSweep", () => {
     await rewriteHash(bytes);
     const packed = await parsePackedSweep(bytes);
     expect(packed.metadata.sourceKind).toBe("nexrad_level2_chunks");
+  });
+
+  it("parses N0S only as storm-relative velocity with knot units", async () => {
+    const packed = await parsePackedSweep(Uint8Array.from(readFileSync(N0S_PATH)));
+    expect(packed.metadata).toMatchObject({
+      product: "storm_relative_velocity",
+      units: "kt",
+      sourceKind: "nexrad_level3_n0s",
+      siteIcao: "KTLX",
+      radialCount: 360,
+      gateCount: 230,
+    });
+    expect(packed.rawCodes[0]).toBe(0);
+    expect(packed.statuses[0]).toBe(1);
+  });
+
+  it("rejects product/source masquerading even with a recomputed hash", async () => {
+    const reflectivityAsN0s = golden();
+    new DataView(reflectivityAsN0s.buffer).setUint16(26, 4, true);
+    await rewriteHash(reflectivityAsN0s);
+    await expectCode(parsePackedSweep(reflectivityAsN0s), "invalid_metadata");
+
+    const n0sAsLevel2 = Uint8Array.from(readFileSync(N0S_PATH));
+    new DataView(n0sAsLevel2.buffer).setUint16(26, 1, true);
+    await rewriteHash(n0sAsLevel2);
+    await expectCode(parsePackedSweep(n0sAsLevel2), "invalid_metadata");
+  });
+
+  it("rejects inconsistent values for the same N0S category", async () => {
+    const bytes = Uint8Array.from(readFileSync(N0S_PATH));
+    const view = new DataView(bytes.buffer);
+    const valueOffset = view.getUint32(248, true);
+    const statusOffset = view.getUint32(256, true);
+    const rawOffset = view.getUint32(264, true);
+    const firstByCategory = new Map<number, number>();
+    let duplicate = -1;
+    for (let index = 0; index < view.getUint32(76, true); index += 1) {
+      const raw = bytes[rawOffset + index];
+      if (bytes[statusOffset + index] !== 0) continue;
+      if (firstByCategory.has(raw)) {
+        duplicate = index;
+        break;
+      }
+      firstByCategory.set(raw, index);
+    }
+    expect(duplicate).toBeGreaterThanOrEqual(0);
+    view.setFloat32(valueOffset + duplicate * 4, 123.25, true);
+    await rewriteHash(bytes);
+    await expectCode(parsePackedSweep(bytes), "invalid_gate");
   });
 
   it("rejects payload corruption by hash", async () => {

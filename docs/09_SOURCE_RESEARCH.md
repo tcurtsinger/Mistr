@@ -122,7 +122,7 @@ An anonymous listing of `unidata-nexrad-level3` on 2026-07-31 returned keys with
 TLX_N0S_2026_07_31_HH_MM_SS
 ```
 
-This establishes that current `N0S` objects existed in the public Level III bucket at the snapshot. Mistr still needs a pinned fixture and decoder parity test.
+This established that current `N0S` objects existed in the public Level III bucket at the snapshot. Phase 6 subsequently pinned a four-site fixture corpus and completed decoder/parity tests, as recorded below.
 
 ### KTLX Level II size spot-check
 
@@ -260,3 +260,22 @@ Primary sources:
 ### Revalidated limitation
 
 AWS `Last-Modified`, provider-inventory observation time, local discovery time, decode completion, and GPU receipt are different clocks. The committed Phase 5 dataset preserves those distinctions. NOAA/IEM are polled every five seconds, so a provider comparison has up to five seconds of observation uncertainty and cannot support sub-second ranking claims.
+
+## 8. Phase 6 Level III and context-recovery revalidation (2026-08-01 UTC)
+
+Phase 6 revalidated product identity and the actual pinned MapLibre recovery behavior immediately before implementation.
+
+- NCEI identifies product 56 `N0S/N1S/N2S/N3S` as storm-relative velocity and separately identifies base velocity as radial motion toward/away from the radar. Mistr therefore uses different product enum values and rejects Level II base velocity at the N0S display boundary.
+- The ROC interface-control-document index remains the authoritative path to the Level III product and message specifications. The Mistr runtime parser intentionally supports only the pinned code-56 symbology/AF1F subset and fails closed outside it.
+- Four public raw `N0S` fixtures were pinned by exact URL, byte length, SHA-256, site, and observation time. Their normalized structures and content hashes agree with the exact-pinned independent `nexrad-level-3-data@0.6.1` decoder.
+- A separate raw-RLE/Pillow comparator achieved the committed coverage and category thresholds against the identical KTLX IEM RIDGE PNG/world-file observation. This is a spatial product comparison, not a screenshot judgment.
+- Inspection of pinned MapLibre 6.1.0 behavior confirmed that Mistr cannot expect MapLibre to recreate custom-layer resources. The packaged gate consequently uses the public context/style events and `addLayer`, plus the real `WEBGL_lose_context` extension, to prove visible-first recreation and a new-context GPU paint receipt.
+
+Primary sources and implementation evidence:
+
+- [NCEI NEXRAD product descriptions](https://www.ncei.noaa.gov/products/radar/next-generation-weather-radar)
+- [ROC Interface Control Documents](https://www.roc.noaa.gov/interface-control-documents.php)
+- [MapLibre `CustomLayerInterface`](https://maplibre.org/maplibre-gl-js/docs/API/interfaces/CustomLayerInterface/)
+- [`nexrad-level-3-data` package](https://www.npmjs.com/package/nexrad-level-3-data)
+- [`18_LEVEL3_N0S_AND_CONTEXT_RECOVERY_DECISION.md`](18_LEVEL3_N0S_AND_CONTEXT_RECOVERY_DECISION.md)
+- [`phase-reports/PHASE_6_N0S_AND_CONTEXT_RECOVERY.md`](phase-reports/PHASE_6_N0S_AND_CONTEXT_RECOVERY.md)

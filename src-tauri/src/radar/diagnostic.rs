@@ -152,7 +152,7 @@ impl DiagnosticReport {
 
     pub fn to_text(&self) -> String {
         let mut output = format!(
-            "Mistr Level II diagnostic\n\
+            "Mistr normalized radar diagnostic\n\
              decoder: {}\n\
              source_sha256: {}\n\
              normalized_sha256: {}\n\

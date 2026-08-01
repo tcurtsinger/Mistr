@@ -2,7 +2,7 @@ use mistr_lib::packed_sweep::{
     PackedSweepIdentity, PackedSweepSummary, encode_packed_sweep, phase2_benchmark_sweep,
     phase2_golden_sweep, validate_packed_sweep,
 };
-use mistr_lib::radar::{MAX_LEVEL2_INPUT_BYTES, RadarProduct, decode_level2};
+use mistr_lib::radar::{MAX_LEVEL2_INPUT_BYTES, RadarProduct, decode_level2, decode_level3_n0s};
 use serde::Serialize;
 use std::env;
 use std::fs;
@@ -111,8 +111,16 @@ fn encode_archive(options: &Options) -> Result<(), String> {
     let input = read_input(archive)?;
 
     let started = Instant::now();
-    let decoded = decode_level2(&input, options.product)
-        .map_err(|error| format!("archive decode failed: {error}"))?;
+    let decoded = if options.product == RadarProduct::StormRelativeVelocity {
+        let site = options
+            .site
+            .as_deref()
+            .ok_or_else(|| "--site is required for N0S encoding".to_string())?;
+        decode_level3_n0s(&input, site).map_err(|error| format!("N0S decode failed: {error}"))?
+    } else {
+        decode_level2(&input, options.product)
+            .map_err(|error| format!("archive decode failed: {error}"))?
+    };
     let decode_ms = started.elapsed().as_secs_f64() * 1_000.0;
 
     let started = Instant::now();
@@ -127,7 +135,11 @@ fn encode_archive(options: &Options) -> Result<(), String> {
 
     write_bytes(output, &bytes)?;
     let report = ArchiveReport {
-        mode: "phase2_level2_archive",
+        mode: if options.product == RadarProduct::StormRelativeVelocity {
+            "phase6_level3_n0s"
+        } else {
+            "phase2_level2_archive"
+        },
         build_profile: if cfg!(debug_assertions) {
             "debug"
         } else {
@@ -217,6 +229,7 @@ struct Options {
     json: Option<PathBuf>,
     archive: Option<PathBuf>,
     product: RadarProduct,
+    site: Option<String>,
 }
 
 impl Options {
@@ -227,6 +240,7 @@ impl Options {
         let mut json = None;
         let mut archive = None;
         let mut product = RadarProduct::Reflectivity;
+        let mut site = None;
         while let Some(argument) = arguments.next() {
             match argument.as_str() {
                 "--golden" => set_mode(&mut mode, Mode::Golden)?,
@@ -244,6 +258,13 @@ impl Options {
                         .next()
                         .ok_or_else(|| "--product requires a value".to_string())?
                         .parse()?;
+                }
+                "--site" => {
+                    site = Some(
+                        arguments
+                            .next()
+                            .ok_or_else(|| "--site requires a value".to_string())?,
+                    );
                 }
                 "--iterations" => {
                     iterations = arguments
@@ -279,6 +300,7 @@ impl Options {
             json,
             archive,
             product,
+            site,
         })
     }
 }
@@ -343,7 +365,7 @@ fn percentile(sorted: &[f64], fraction: f64) -> f64 {
 }
 
 fn usage() -> &'static str {
-    "usage:\n  mistr-wire --golden --output <path> [--json <path>]\n  mistr-wire --benchmark [--iterations 10] [--output <path>] [--json <path>]\n  mistr-wire --archive <path> [--product reflectivity|base_velocity] --output <path> [--json <path>]"
+    "usage:\n  mistr-wire --golden --output <path> [--json <path>]\n  mistr-wire --benchmark [--iterations 10] [--output <path>] [--json <path>]\n  mistr-wire --archive <path> [--product reflectivity|base_velocity|n0s] [--site <ICAO>] --output <path> [--json <path>]"
 }
 
 #[cfg(test)]

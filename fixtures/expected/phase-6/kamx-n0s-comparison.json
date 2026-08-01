@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "passed": true,
+  "rustDecoder": "mistr-level3-n0s=1;oracle=nexrad-level-3-data@0.6.1",
+  "independentOracle": "nexrad-level-3-data@0.6.1",
+  "siteIcao": "KAMX",
+  "sourceSha256": "df4d832f7f69a80ea7095a116fdc98925749a55fd59ff444ec52c7f22a2c2bd4",
+  "checks": {
+    "siteIcao": true,
+    "productIdentity": true,
+    "units": true,
+    "coordinates": true,
+    "elevation": true,
+    "vcp": true,
+    "dimensions": true,
+    "gateGeometry": true,
+    "validCount": true,
+    "missingCount": true,
+    "rangeFoldedCount": true,
+    "azimuthSha256": true,
+    "oracleFieldSha256": true,
+    "gateStatusSha256": true,
+    "rawCodesSha256": true
+  },
+  "failed": []
+}

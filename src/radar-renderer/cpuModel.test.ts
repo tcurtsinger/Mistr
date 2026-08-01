@@ -14,6 +14,10 @@ const GOLDEN_PATH = new URL(
   "../../fixtures/expected/phase-2/packed-sweep-v1.bin",
   import.meta.url,
 );
+const N0S_PATH = new URL(
+  "../../fixtures/expected/phase-6/ktlx-n0s-packed-sweep-v1.bin",
+  import.meta.url,
+);
 
 let golden: PackedSweep;
 
@@ -110,5 +114,36 @@ describe("RadarSweepCpuModel", () => {
     const model = createRadarSweepCpuModel(golden);
     model.statuses[5] = 9;
     expect(() => interrogateGate(model, 1, 2)).toThrow("unsupported gate status 9");
+  });
+
+  it("retains categorical N0S values and never relabels base velocity as storm-relative", async () => {
+    const n0s = await parsePackedSweep(Uint8Array.from(readFileSync(N0S_PATH)));
+    const model = createRadarSweepCpuModel(n0s);
+    expect(model.product).toBe("storm_relative_velocity");
+    expect(model.units).toBe("kt");
+    expect(model.sourceKind).toBe("nexrad_level3_n0s");
+    expect(model.categoryValues).toBeInstanceOf(Float32Array);
+    const validCell = model.statuses.findIndex((status) => status === 0);
+    const radialIndex = Math.floor(validCell / model.gateCount);
+    const gateIndex = validCell % model.gateCount;
+    expect(interrogateGate(model, radialIndex, gateIndex)).toMatchObject({
+      rawCode: model.rawCodes[validCell],
+      value: model.categoryValues?.[validCell],
+      units: "kt",
+    });
+
+    const baseVelocity = {
+      ...golden,
+      metadata: { ...golden.metadata, product: "base_velocity", units: "m/s" },
+    } as PackedSweep;
+    expect(() => createRadarSweepCpuModel(baseVelocity)).toThrow("reflectivity or explicitly storm-relative");
+
+    const spoofedSource = {
+      ...n0s,
+      metadata: { ...n0s.metadata, sourceKind: "nexrad_level2_archive_ii" },
+    } as PackedSweep;
+    expect(() => createRadarSweepCpuModel(spoofedSource)).toThrow(
+      "reflectivity or explicitly storm-relative",
+    );
   });
 });

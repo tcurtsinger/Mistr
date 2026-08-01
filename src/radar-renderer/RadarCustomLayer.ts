@@ -5,7 +5,7 @@ import type {
 } from "maplibre-gl";
 import { buildMercatorBounds } from "./geo";
 import type { RadarSweepCpuModel } from "./cpuModel";
-import { buildReflectivityPalette, RANGE_FOLDED_COLOR } from "./palette";
+import { buildRadarPalette, RANGE_FOLDED_COLOR } from "./palette";
 
 const VERTEX_SHADER = `#version 300 es
 precision highp float;
@@ -165,7 +165,7 @@ export interface RadarTextureValidation {
 }
 
 export interface RadarRendererSnapshot {
-  status: "initializing" | "ready" | "painted" | "removed" | "error";
+  status: "initializing" | "ready" | "painted" | "recovering" | "removed" | "error";
   observationId: string;
   selectedObservationId: string;
   lastPaintedObservationId?: string;
@@ -173,6 +173,7 @@ export interface RadarRendererSnapshot {
   selectionSequence: number;
   residentObservationIds: string[];
   contextEpoch: number;
+  recovery: RadarRecoverySnapshot;
   capabilities?: RadarRendererCapabilities;
   metrics?: RadarRendererMetrics;
   textureValidation?: RadarTextureValidation;
@@ -180,6 +181,24 @@ export interface RadarRendererSnapshot {
   paintReceipt?: RadarPaintReceipt;
   shaderLog: string[];
   error?: string;
+}
+
+export type RadarRecoveryPhase =
+  | "ready"
+  | "context_lost"
+  | "waiting_for_style"
+  | "painting_visible_frame"
+  | "rehydrating_loop"
+  | "verifying_loop";
+
+export interface RadarRecoverySnapshot {
+  phase: RadarRecoveryPhase;
+  targetResidentCount: number;
+  currentResidentCount: number;
+  visibleObservationId: string;
+  visibleFramePainted: boolean;
+  startedAtUnixMs?: number;
+  completedAtUnixMs?: number;
 }
 
 export interface RadarCustomLayerOptions {
@@ -222,6 +241,13 @@ interface PendingPaint {
 
 interface PaintWaiter {
   resolve(receipt: RadarPaintReceipt): void;
+  reject(error: Error): void;
+  timeout: ReturnType<typeof globalThis.setTimeout> | null;
+  timeoutMs: number;
+}
+
+interface RecoveryWaiter {
+  resolve(snapshot: RadarRecoverySnapshot): void;
   reject(error: Error): void;
   timeout: ReturnType<typeof globalThis.setTimeout>;
 }
@@ -272,6 +298,15 @@ export class RadarCustomLayer implements CustomLayerInterface {
   private textureValidation: RadarTextureValidation | undefined;
   private shaderLog: string[] = [];
   private runtimeError: string | undefined;
+  private recoveryPhase: RadarRecoveryPhase = "ready";
+  private recoveryStartedAtUnixMs: number | undefined;
+  private recoveryCompletedAtUnixMs: number | undefined;
+  private recoveryVisiblePainted = true;
+  private recoverySync: WebGLSync | null = null;
+  private readonly recoveryWaiters = new Set<RecoveryWaiter>();
+  private contextListenersAttached = false;
+  private styleListenerAttached = false;
+  private contextLossActive = false;
 
   constructor(
     modelOrModels: RadarSweepCpuModel | readonly RadarSweepCpuModel[],
@@ -298,6 +333,11 @@ export class RadarCustomLayer implements CustomLayerInterface {
   onAdd(map: MapLibreMap, gl: WebGL2RenderingContext): void {
     this.map = map;
     this.gl = gl;
+    this.attachContextListeners(map);
+    if (this.styleListenerAttached) {
+      map.off("styledata", this.tryReaddAfterContextRestore);
+      this.styleListenerAttached = false;
+    }
     try {
       this.capabilities = queryCapabilities(gl);
       for (const model of this.models) validateCapabilities(this.capabilities, model);
@@ -306,16 +346,20 @@ export class RadarCustomLayer implements CustomLayerInterface {
       this.shaderCompileLinkMs = performance.now() - compileStarted;
       this.uniforms = resolveUniforms(gl, this.program);
       const uploadStarted = performance.now();
-      this.createResources(gl);
+      const recovering = this.recoveryPhase !== "ready";
+      if (recovering) {
+        this.recoveryPhase = "painting_visible_frame";
+        this.recoveryVisiblePainted = false;
+      }
+      this.createResources(gl, recovering);
       this.uploadMs = performance.now() - uploadStarted;
       this.uploadCompletedAt = performance.now();
       this.selectedAt = this.uploadCompletedAt;
-      this.emit("ready");
+      this.emit(recovering ? "recovering" : "ready");
       map.triggerRepaint();
     } catch (error) {
-      this.runtimeError = error instanceof Error ? error.message : String(error);
-      this.emit("error", this.runtimeError);
-      this.deleteResources(gl);
+      this.failRenderer(error);
+      this.deleteResources(gl, false);
       throw error;
     }
   }
@@ -324,8 +368,20 @@ export class RadarCustomLayer implements CustomLayerInterface {
     if (!this.program || !this.vao || !this.uniforms) {
       return;
     }
-    this.completePendingFence(gl);
-    if (this.runtimeError) return;
+    try {
+      this.completePendingFence(gl);
+      this.completeRecoveryFence(gl);
+      if (this.recoveryPhase === "rehydrating_loop") {
+        this.rehydrateNextFrame(gl);
+      }
+    } catch (error) {
+      this.failRenderer(error);
+      throw error;
+    }
+    if (this.runtimeError) {
+      if (this.recoveryPhase !== "ready") this.rejectRecoveryWaiters(this.runtimeError);
+      return;
+    }
     const frame = this.requireSelectedFrame();
     const model = frame.model;
     const started = performance.now();
@@ -402,9 +458,16 @@ export class RadarCustomLayer implements CustomLayerInterface {
   }
 
   onRemove(_map: MapLibreMap, gl: WebGL2RenderingContext): void {
-    this.deleteResources(gl);
-    this.map = null;
+    const contextLost = gl.isContextLost();
+    if (contextLost) this.beginContextRecovery();
+    this.deleteResources(gl, contextLost);
     this.gl = null;
+    if (contextLost) {
+      this.emit("recovering");
+      return;
+    }
+    this.detachContextListeners(_map);
+    this.map = null;
     this.emit("removed");
   }
 
@@ -412,6 +475,8 @@ export class RadarCustomLayer implements CustomLayerInterface {
     return this.buildSnapshot(
       this.runtimeError
         ? "error"
+        : this.recoveryPhase !== "ready"
+          ? "recovering"
         : this.paintReceipt
           ? "painted"
           : this.program
@@ -422,6 +487,9 @@ export class RadarCustomLayer implements CustomLayerInterface {
   }
 
   selectFrame(observationId: string): RadarSelectionRequest {
+    if (this.recoveryPhase !== "ready") {
+      throw new RadarRendererError(`renderer is recovering (${this.recoveryPhase})`);
+    }
     if (!this.frameResources.has(observationId)) {
       throw new RadarRendererError(`observation ${observationId} is not resident`);
     }
@@ -461,11 +529,9 @@ export class RadarCustomLayer implements CustomLayerInterface {
       return Promise.reject(new RadarRendererError("selection is stale or already has a waiter"));
     }
     return new Promise((resolve, reject) => {
-      const timeout = globalThis.setTimeout(() => {
-        this.paintWaiters.delete(selectionSequence);
-        reject(new RadarRendererError(`selection ${selectionSequence} did not paint within ${timeoutMs} ms`));
-      }, timeoutMs);
-      this.paintWaiters.set(selectionSequence, { resolve, reject, timeout });
+      const waiter: PaintWaiter = { resolve, reject, timeout: null, timeoutMs };
+      this.paintWaiters.set(selectionSequence, waiter);
+      this.armPaintWaiter(selectionSequence, waiter, timeoutMs);
     });
   }
 
@@ -476,6 +542,39 @@ export class RadarCustomLayer implements CustomLayerInterface {
 
   getPaintReceipts(): RadarPaintReceipt[] {
     return this.paintReceipts.map((receipt) => ({ ...receipt }));
+  }
+
+  waitForRecovery(timeoutMs = 10_000): Promise<RadarRecoverySnapshot> {
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1) {
+      return Promise.reject(new RangeError("recovery timeout must be a positive integer"));
+    }
+    if (this.recoveryPhase === "ready") return Promise.resolve(this.recoverySnapshot());
+    return new Promise((resolve, reject) => {
+      const waiter: RecoveryWaiter = {
+        resolve,
+        reject,
+        timeout: globalThis.setTimeout(() => {
+          this.recoveryWaiters.delete(waiter);
+          reject(new RadarRendererError(`context recovery did not finish within ${timeoutMs} ms`));
+        }, timeoutMs),
+      };
+      this.recoveryWaiters.add(waiter);
+    });
+  }
+
+  async simulateContextResetForTest(holdMs = 100): Promise<RadarRecoverySnapshot> {
+    if (!Number.isSafeInteger(holdMs) || holdMs < 50 || holdMs > 5_000) {
+      throw new RangeError("context reset hold must be an integer from 50 to 5000 ms");
+    }
+    const gl = this.gl;
+    if (!gl) throw new RadarRendererError("renderer has no active WebGL context");
+    const extension = gl.getExtension("WEBGL_lose_context");
+    if (!extension) throw new RadarRendererError("WEBGL_lose_context is unavailable");
+    extension.loseContext();
+    this.beginContextRecovery();
+    const recovery = this.waitForRecovery(15_000);
+    globalThis.setTimeout(() => extension.restoreContext(), holdMs);
+    return recovery;
   }
 
   replaceResidentFrames(models: readonly RadarSweepCpuModel[]): void {
@@ -492,12 +591,12 @@ export class RadarCustomLayer implements CustomLayerInterface {
     const currentKey = this.models[0];
     const replacementKey = models[0];
     validateReplacementGeneration(generationNumber(currentKey), generationNumber(replacementKey));
-    if (currentKey.product !== replacementKey.product) {
-      throw new RadarRendererError("replacement changes the renderer product");
-    }
-
     const gl = this.gl;
-    const palette = buildReflectivityPalette(replacementKey.scale, replacementKey.offset);
+    const palette = buildRadarPalette(
+      replacementKey.product,
+      replacementKey.scale,
+      replacementKey.offset,
+    );
     const pendingFrames = new Map<string, RadarFrameResources>();
     let pendingPalette: WebGLTexture | null = null;
     const previousUnpack = gl.getParameter(gl.UNPACK_ALIGNMENT) as number;
@@ -566,6 +665,10 @@ export class RadarCustomLayer implements CustomLayerInterface {
     this.emit("ready");
   }
 
+  hasPendingResidentFrameReplacement(): boolean {
+    return this.pendingReplacement !== null;
+  }
+
   commitResidentFrameReplacement(selectionSequence: number): void {
     const replacement = this.pendingReplacement;
     if (!replacement) {
@@ -628,7 +731,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
     return restoredPaint;
   }
 
-  private createResources(gl: WebGL2RenderingContext) {
+  private createResources(gl: WebGL2RenderingContext, selectedOnly = false) {
     if (!this.program) throw new RadarRendererError("renderer program is unavailable");
     const primary = this.models[0];
     const vertices = mercatorQuadVertices(this.models);
@@ -655,7 +758,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
     const pendingFrames = new Map<string, RadarFrameResources>();
     try {
       gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-      const palette = buildReflectivityPalette(primary.scale, primary.offset);
+      const palette = buildRadarPalette(primary.product, primary.scale, primary.offset);
       this.paletteTexture = createTexture2d(
         gl,
         256,
@@ -666,7 +769,10 @@ export class RadarCustomLayer implements CustomLayerInterface {
       palette,
       "palette texture upload",
       );
-      for (const model of this.models) {
+      const uploadModels = selectedOnly
+        ? this.models.filter((model) => model.observationId === this.selectedObservationId)
+        : this.models;
+      for (const model of uploadModels) {
         const frame = createFrameResources(gl, model, this.paletteTexture, palette);
         pendingFrames.set(model.observationId, frame);
         this.frameUploadCount += 1;
@@ -728,15 +834,24 @@ export class RadarCustomLayer implements CustomLayerInterface {
     this.switchLatencySamples.push(this.paintReceipt.residentSwitchLatencyMs);
     if (this.switchLatencySamples.length > 240) this.switchLatencySamples.shift();
     const waiter = this.paintWaiters.get(pending.selectionSequence);
-    if (waiter) {
-      globalThis.clearTimeout(waiter.timeout);
+    if (waiter && this.recoveryPhase !== "painting_visible_frame") {
+      if (waiter.timeout !== null) globalThis.clearTimeout(waiter.timeout);
       this.paintWaiters.delete(pending.selectionSequence);
       waiter.resolve(this.paintReceipt);
     }
     this.emit("painted");
+    if (this.recoveryPhase === "painting_visible_frame") {
+      this.recoveryVisiblePainted = true;
+      this.recoveryPhase = this.frameResources.size === this.models.length
+        ? "verifying_loop"
+        : "rehydrating_loop";
+      if (this.recoveryPhase === "verifying_loop") this.beginRecoveryFence(gl);
+      this.emit("recovering");
+      this.map?.triggerRepaint();
+    }
   }
 
-  private deleteResources(gl: WebGL2RenderingContext) {
+  private deleteResources(gl: WebGL2RenderingContext, preserveWaiters: boolean) {
     if (this.pendingPaint) gl.deleteSync(this.pendingPaint.sync);
     deleteFrameResources(gl, this.frameResources.values());
     if (this.paletteTexture) gl.deleteTexture(this.paletteTexture);
@@ -756,11 +871,200 @@ export class RadarCustomLayer implements CustomLayerInterface {
     this.vao = null;
     this.program = null;
     this.uniforms = null;
-    for (const [sequence, waiter] of this.paintWaiters) {
-      globalThis.clearTimeout(waiter.timeout);
-      waiter.reject(new RadarRendererError(`renderer removed before selection ${sequence} painted`));
+    if (!preserveWaiters) {
+      for (const [sequence, waiter] of this.paintWaiters) {
+        if (waiter.timeout !== null) globalThis.clearTimeout(waiter.timeout);
+        waiter.reject(new RadarRendererError(`renderer removed before selection ${sequence} painted`));
+      }
+      this.paintWaiters.clear();
+      this.rejectRecoveryWaiters("renderer removed before context recovery completed");
     }
-    this.paintWaiters.clear();
+  }
+
+  private beginContextRecovery() {
+    if (this.contextLossActive) return;
+    this.contextLossActive = true;
+    let abandonedReplacementSequence: number | undefined;
+    if (this.pendingReplacement) {
+      abandonedReplacementSequence = this.selectionSequence;
+      this.models = this.pendingReplacement.previousModels;
+      this.selectedObservationId = this.pendingReplacement.previousSelectedObservationId;
+      this.selectionSequence = this.pendingReplacement.previousSelectionSequence;
+      this.paintReceipts = this.pendingReplacement.previousPaintReceipts;
+      this.switchLatencySamples = this.pendingReplacement.previousSwitchLatencySamples;
+    }
+    this.contextEpoch += 1;
+    this.recoveryPhase = "context_lost";
+    this.recoveryStartedAtUnixMs = Date.now();
+    this.recoveryCompletedAtUnixMs = undefined;
+    this.recoveryVisiblePainted = false;
+    this.paintReceipt = undefined;
+    this.runtimeError = undefined;
+    this.textureValidation = undefined;
+    if (abandonedReplacementSequence !== undefined) {
+      this.rejectPaintWaiter(
+        abandonedReplacementSequence,
+        "resident-frame replacement was abandoned by WebGL context loss",
+      );
+    }
+    for (const waiter of this.paintWaiters.values()) {
+      if (waiter.timeout !== null) globalThis.clearTimeout(waiter.timeout);
+      waiter.timeout = null;
+    }
+    if (this.recoverySync && this.gl && !this.gl.isContextLost()) {
+      this.gl.deleteSync(this.recoverySync);
+    }
+    this.recoverySync = null;
+  }
+
+  private readonly handleContextLost = () => {
+    this.beginContextRecovery();
+    this.emit("recovering");
+  };
+
+  private readonly handleContextRestored = () => {
+    this.contextLossActive = false;
+    if (!this.map || this.recoveryPhase === "ready") return;
+    this.recoveryPhase = "waiting_for_style";
+    for (const [sequence, waiter] of this.paintWaiters) {
+      this.armPaintWaiter(sequence, waiter, Math.max(waiter.timeoutMs, 15_000));
+    }
+    if (!this.styleListenerAttached) {
+      this.map.on("styledata", this.tryReaddAfterContextRestore);
+      this.styleListenerAttached = true;
+    }
+    this.emit("recovering");
+    this.tryReaddAfterContextRestore();
+  };
+
+  private readonly tryReaddAfterContextRestore = () => {
+    const map = this.map;
+    if (!map || this.recoveryPhase !== "waiting_for_style") return;
+    try {
+      if (!map.getLayer(this.id)) map.addLayer(this);
+    } catch {
+      // Style loading is asynchronous after context restoration. The retained
+      // styledata listener retries without a timer or private MapLibre API.
+    }
+  };
+
+  private attachContextListeners(map: MapLibreMap) {
+    if (this.contextListenersAttached) return;
+    map.on("webglcontextlost", this.handleContextLost);
+    map.on("webglcontextrestored", this.handleContextRestored);
+    this.contextListenersAttached = true;
+  }
+
+  private detachContextListeners(map: MapLibreMap) {
+    if (this.styleListenerAttached) {
+      map.off("styledata", this.tryReaddAfterContextRestore);
+      this.styleListenerAttached = false;
+    }
+    if (!this.contextListenersAttached) return;
+    map.off("webglcontextlost", this.handleContextLost);
+    map.off("webglcontextrestored", this.handleContextRestored);
+    this.contextListenersAttached = false;
+  }
+
+  private rehydrateNextFrame(gl: WebGL2RenderingContext) {
+    if (!this.paletteTexture) throw new RadarRendererError("recovery palette is unavailable");
+    const model = this.models.find(
+      (candidate) => !this.frameResources.has(candidate.observationId),
+    );
+    if (!model) {
+      this.recoveryPhase = "verifying_loop";
+      this.beginRecoveryFence(gl);
+      return;
+    }
+    const palette = buildRadarPalette(model.product, model.scale, model.offset);
+    const previousUnpack = gl.getParameter(gl.UNPACK_ALIGNMENT) as number;
+    const previousActive = gl.getParameter(gl.ACTIVE_TEXTURE) as number;
+    const previousTexture = gl.getParameter(gl.TEXTURE_BINDING_2D) as WebGLTexture | null;
+    try {
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+      const frame = createFrameResources(gl, model, this.paletteTexture, palette);
+      this.frameResources.set(model.observationId, frame);
+      this.frameUploadCount += 1;
+      this.frameUploadBytes += frame.gpuBytes;
+      this.peakGpuResourceBytes = Math.max(
+        this.peakGpuResourceBytes,
+        this.currentGpuResourceBytes(),
+      );
+    } finally {
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT, previousUnpack);
+      gl.activeTexture(previousActive);
+      gl.bindTexture(gl.TEXTURE_2D, previousTexture);
+    }
+    this.emit("recovering");
+    if (this.frameResources.size === this.models.length) {
+      this.recoveryPhase = "verifying_loop";
+      this.beginRecoveryFence(gl);
+    }
+    this.map?.triggerRepaint();
+  }
+
+  private beginRecoveryFence(gl: WebGL2RenderingContext) {
+    if (this.recoverySync) return;
+    this.recoverySync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+    if (!this.recoverySync) throw new RadarRendererError("failed to allocate recovery fence");
+    gl.flush();
+    this.map?.triggerRepaint();
+  }
+
+  private completeRecoveryFence(gl: WebGL2RenderingContext) {
+    if (this.recoveryPhase !== "verifying_loop" || !this.recoverySync) return;
+    const result = gl.clientWaitSync(this.recoverySync, 0, 0);
+    if (result === gl.TIMEOUT_EXPIRED) {
+      this.map?.triggerRepaint();
+      return;
+    }
+    if (result === gl.WAIT_FAILED) {
+      throw new RadarRendererError("GPU recovery fence failed");
+    }
+    gl.deleteSync(this.recoverySync);
+    this.recoverySync = null;
+    this.recoveryPhase = "ready";
+    this.recoveryCompletedAtUnixMs = Date.now();
+    const paintWaiter = this.paintWaiters.get(this.selectionSequence);
+    if (paintWaiter && this.paintReceipt) {
+      if (paintWaiter.timeout !== null) globalThis.clearTimeout(paintWaiter.timeout);
+      this.paintWaiters.delete(this.selectionSequence);
+      paintWaiter.resolve(this.paintReceipt);
+    }
+    const snapshot = this.recoverySnapshot();
+    for (const waiter of this.recoveryWaiters) {
+      globalThis.clearTimeout(waiter.timeout);
+      waiter.resolve(snapshot);
+    }
+    this.recoveryWaiters.clear();
+    this.emit("painted");
+  }
+
+  private recoverySnapshot(): RadarRecoverySnapshot {
+    return {
+      phase: this.recoveryPhase,
+      targetResidentCount: this.models.length,
+      currentResidentCount: this.frameResources.size,
+      visibleObservationId: this.selectedObservationId,
+      visibleFramePainted: this.recoveryVisiblePainted,
+      startedAtUnixMs: this.recoveryStartedAtUnixMs,
+      completedAtUnixMs: this.recoveryCompletedAtUnixMs,
+    };
+  }
+
+  private armPaintWaiter(
+    selectionSequence: number,
+    waiter: PaintWaiter,
+    timeoutMs: number,
+  ) {
+    if (waiter.timeout !== null) globalThis.clearTimeout(waiter.timeout);
+    waiter.timeout = globalThis.setTimeout(() => {
+      this.paintWaiters.delete(selectionSequence);
+      waiter.timeout = null;
+      waiter.reject(
+        new RadarRendererError(`selection ${selectionSequence} did not paint within ${timeoutMs} ms`),
+      );
+    }, timeoutMs);
   }
 
   private emit(status: RadarRendererSnapshot["status"], error?: string) {
@@ -791,9 +1095,26 @@ export class RadarCustomLayer implements CustomLayerInterface {
   private rejectPaintWaiter(selectionSequence: number, message: string) {
     const waiter = this.paintWaiters.get(selectionSequence);
     if (!waiter) return;
-    globalThis.clearTimeout(waiter.timeout);
+    if (waiter.timeout !== null) globalThis.clearTimeout(waiter.timeout);
     this.paintWaiters.delete(selectionSequence);
     waiter.reject(new RadarRendererError(message));
+  }
+
+  private rejectRecoveryWaiters(message: string) {
+    for (const waiter of this.recoveryWaiters) {
+      globalThis.clearTimeout(waiter.timeout);
+      waiter.reject(new RadarRendererError(message));
+    }
+    this.recoveryWaiters.clear();
+  }
+
+  private failRenderer(error: unknown) {
+    this.runtimeError = error instanceof Error ? error.message : String(error);
+    for (const sequence of [...this.paintWaiters.keys()]) {
+      this.rejectPaintWaiter(sequence, this.runtimeError);
+    }
+    this.rejectRecoveryWaiters(this.runtimeError);
+    this.emit("error", this.runtimeError);
   }
 
   private buildSnapshot(
@@ -809,6 +1130,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
       selectionSequence: this.selectionSequence,
       residentObservationIds: [...this.frameResources.keys()],
       contextEpoch: this.contextEpoch,
+      recovery: this.recoverySnapshot(),
       capabilities: this.capabilities,
       metrics: this.capabilities
         ? {

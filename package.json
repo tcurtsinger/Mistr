@@ -20,10 +20,13 @@
     "tauri:build": "tauri build",
     "test:phase4:packaged": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-phase4-packaged.ps1",
     "test:phase5:packaged": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-phase5-packaged.ps1",
+    "test:phase6:packaged": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-phase6-packaged.ps1",
     "env:capture": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/capture-environment.ps1",
     "fixture:download": "node scripts/verify-fixtures.mjs --download",
     "fixture:verify": "node scripts/verify-fixtures.mjs",
     "fixture:verify:phase4": "node scripts/verify-fixtures.mjs --set phase4KtlxReflectivityLoop",
+    "fixture:verify:phase6": "node scripts/verify-fixtures.mjs --set phase6N0sCorpus && node scripts/verify-fixtures.mjs --set phase6TlxIemComparison",
+    "oracle:n0s": "node scripts/oracle/level3-n0s.mjs",
     "public:check": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-public-repo.ps1"
   },
   "dependencies": {
@@ -38,6 +41,7 @@
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.4",
     "@vitejs/plugin-react": "6.0.5",
+    "nexrad-level-3-data": "0.6.1",
     "typescript": "7.0.2",
     "vite": "8.2.0",
     "vitest": "4.1.10"

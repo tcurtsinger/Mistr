@@ -19,12 +19,13 @@ export type GateStatusName = "valid" | "below_threshold" | "range_folded";
 export interface RadarSweepCpuModel {
   observationId: string;
   siteIcao: string;
-  product: "reflectivity";
-  units: "dBZ";
+  product: "reflectivity" | "storm_relative_velocity";
+  units: "dBZ" | "kt";
   sourceKind:
     | "nexrad_level2_archive_ii"
     | "nexrad_level2_chunks"
-    | "mistr_phase2_synthetic";
+    | "mistr_phase2_synthetic"
+    | "nexrad_level3_n0s";
   generation: bigint;
   observedAtUnixMs: number;
   volumeEndedAtUnixMs: number;
@@ -38,6 +39,7 @@ export interface RadarSweepCpuModel {
   offset: number;
   rawCodes: Uint8Array;
   statuses: Uint8Array;
+  categoryValues: Float32Array | null;
   azimuths: Float32Array;
   beamWidths: Float32Array;
   elevations: Float32Array;
@@ -56,7 +58,7 @@ export interface GateInterrogation {
   rawCode: number;
   status: GateStatusName;
   value: number | null;
-  units: "dBZ";
+  units: "dBZ" | "kt";
   color: Rgba;
 }
 
@@ -82,17 +84,26 @@ export interface AlignmentReport {
 
 export function createRadarSweepCpuModel(sweep: PackedSweep): RadarSweepCpuModel {
   const metadata = sweep.metadata;
-  if (metadata.product !== "reflectivity" || metadata.units !== "dBZ") {
-    throw new RadarModelError("unsupported_product", "Phase 3 accepts reflectivity only");
+  if (
+    metadata.product === "base_velocity"
+    || ((metadata.product === "storm_relative_velocity")
+      !== (metadata.sourceKind === "nexrad_level3_n0s"))
+    || (metadata.product === "reflectivity" && metadata.units !== "dBZ")
+    || (metadata.product === "storm_relative_velocity" && metadata.units !== "kt")
+  ) {
+    throw new RadarModelError(
+      "unsupported_product",
+      "renderer accepts reflectivity or explicitly storm-relative N0S velocity",
+    );
   }
   if (metadata.dataWordSizeBits !== 8 || !(sweep.rawCodes instanceof Uint8Array)) {
     throw new RadarModelError(
       "unsupported_encoding",
-      "Phase 3 reflectivity requires its lossless native 8-bit raw encoding",
+      "radar rendering requires its lossless native 8-bit raw encoding",
     );
   }
   if (metadata.scale <= 0) {
-    throw new RadarModelError("unsupported_encoding", "reflectivity scale must be positive");
+    throw new RadarModelError("unsupported_encoding", "radar scale must be positive");
   }
   const radials = Array.from(
     { length: metadata.radialCount },
@@ -103,6 +114,9 @@ export function createRadarSweepCpuModel(sweep: PackedSweep): RadarSweepCpuModel
   const elevations = Float32Array.from(radials, (radial) => radial.elevationDegrees);
   const rawCodes = sweep.rawCodes.slice();
   const statuses = sweep.statuses.slice();
+  const categoryValues = metadata.product === "storm_relative_velocity"
+    ? sweep.values.slice()
+    : null;
   const azimuthLookup = buildAzimuthLookup(radials, AZIMUTH_LOOKUP_SIZE);
   const maxSlantRangeM = metadata.firstGateCenterM
     + (metadata.gateCount - 0.5) * metadata.gateSpacingM;
@@ -114,15 +128,16 @@ export function createRadarSweepCpuModel(sweep: PackedSweep): RadarSweepCpuModel
     );
   }
   const cpuBytes = rawCodes.byteLength + statuses.byteLength + azimuths.byteLength
-    + beamWidths.byteLength + elevations.byteLength + azimuthLookup.byteLength;
+    + beamWidths.byteLength + elevations.byteLength + azimuthLookup.byteLength
+    + (categoryValues?.byteLength ?? 0);
   const estimatedGpuBytes = rawCodes.byteLength + statuses.byteLength
     + azimuthLookup.byteLength + metadata.radialCount * 3 * Float32Array.BYTES_PER_ELEMENT
     + PALETTE_WIDTH * 4 + 6 * 2 * 4;
   return {
     observationId: metadata.observationId,
     siteIcao: metadata.siteIcao,
-    product: "reflectivity",
-    units: "dBZ",
+    product: metadata.product,
+    units: metadata.units as "dBZ" | "kt",
     sourceKind: metadata.sourceKind,
     generation: metadata.generation,
     observedAtUnixMs: Number(metadata.sweepStartedAtUnixMs),
@@ -140,6 +155,7 @@ export function createRadarSweepCpuModel(sweep: PackedSweep): RadarSweepCpuModel
     offset: metadata.offset,
     rawCodes,
     statuses,
+    categoryValues,
     azimuths,
     beamWidths,
     elevations,
@@ -226,9 +242,11 @@ export function interrogateGate(
     groundRangeM,
     rawCode,
     status,
-    value: status === "valid" ? Math.fround((rawCode - model.offset) / model.scale) : null,
-    units: "dBZ",
-    color: paletteColor(rawCode, statusCode, model.scale, model.offset),
+    value: status === "valid"
+      ? model.categoryValues?.[cell] ?? Math.fround((rawCode - model.offset) / model.scale)
+      : null,
+    units: model.units,
+    color: paletteColor(model.product, rawCode, statusCode, model.scale, model.offset),
   };
 }
 
