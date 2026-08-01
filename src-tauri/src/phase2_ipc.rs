@@ -74,17 +74,44 @@ struct TransferState {
 struct InFlightCreditGuard {
     broker: TransferBroker,
     session: u64,
+    armed: bool,
 }
 
 impl InFlightCreditGuard {
     fn new(broker: TransferBroker, session: u64) -> Self {
-        Self { broker, session }
+        Self {
+            broker,
+            session,
+            armed: true,
+        }
+    }
+
+    fn complete_phase5_for_publish(
+        mut self,
+        generation: u64,
+        evidence: Phase5LiveTransferEvidence,
+    ) -> Result<(), TransferError> {
+        let broker = self.broker.clone();
+        let mut state = broker.lock()?;
+        let credits_before = in_flight_credit_count_for_session(&state, self.session);
+        let completion = complete_for_publish_locked(&mut state, self.session, generation);
+        let credits_after = in_flight_credit_count_for_session(&state, self.session);
+        if credits_after < credits_before {
+            self.armed = false;
+        }
+        completion?;
+        state
+            .phase5_evidence_by_observation
+            .insert(evidence.observation_id.clone(), evidence);
+        Ok(())
     }
 }
 
 impl Drop for InFlightCreditGuard {
     fn drop(&mut self) {
-        self.broker.finish_without_publish(self.session);
+        if self.armed {
+            self.broker.finish_without_publish(self.session);
+        }
     }
 }
 
@@ -92,7 +119,7 @@ impl Drop for InFlightCreditGuard {
 struct ChargedPhase5Work {
     bytes: Vec<u8>,
     evidence: Phase5LiveTransferEvidence,
-    _credit: InFlightCreditGuard,
+    credit: InFlightCreditGuard,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
@@ -295,20 +322,6 @@ impl TransferBroker {
                 "active generation has no live acquisition token",
             )
         })
-    }
-
-    fn complete_phase5_for_publish(
-        &self,
-        session: u64,
-        generation: u64,
-        evidence: Phase5LiveTransferEvidence,
-    ) -> Result<(), TransferError> {
-        let mut state = self.lock()?;
-        complete_for_publish_locked(&mut state, session, generation)?;
-        state
-            .phase5_evidence_by_observation
-            .insert(evidence.observation_id.clone(), evidence);
-        Ok(())
     }
 
     fn phase5_live_evidence(
@@ -776,7 +789,7 @@ pub async fn request_phase5_live_sweep(
         Ok::<_, TransferError>(ChargedPhase5Work {
             bytes,
             evidence,
-            _credit: credit,
+            credit,
         })
     });
     let joined = enforce_live_request_timeout(timeout, async move {
@@ -786,7 +799,9 @@ pub async fn request_phase5_live_sweep(
     })
     .await?;
     let charged = joined?;
-    broker.complete_phase5_for_publish(session, generation, charged.evidence)?;
+    charged
+        .credit
+        .complete_phase5_for_publish(generation, charged.evidence)?;
     Ok(Response::new(charged.bytes))
 }
 
@@ -1232,8 +1247,8 @@ mod tests {
         let session = opened(&broker);
         broker.begin(session, 1).unwrap();
         broker.acquire(session, 1).unwrap();
-        broker
-            .complete_phase5_for_publish(session, 1, phase5_evidence(1, &"a".repeat(32)))
+        InFlightCreditGuard::new(broker.clone(), session)
+            .complete_phase5_for_publish(1, phase5_evidence(1, &"a".repeat(32)))
             .unwrap();
         assert_eq!(
             broker
@@ -1246,10 +1261,11 @@ mod tests {
 
         broker.release(session, 1, &release_id(1)).unwrap();
         broker.acquire(session, 1).unwrap();
+        let stale = InFlightCreditGuard::new(broker.clone(), session);
         broker.begin(session, 2).unwrap();
         assert_eq!(
-            broker
-                .complete_phase5_for_publish(session, 1, phase5_evidence(1, &"b".repeat(32)),)
+            stale
+                .complete_phase5_for_publish(1, phase5_evidence(1, &"b".repeat(32)))
                 .unwrap_err()
                 .code,
             "stale_generation"
@@ -1261,6 +1277,31 @@ mod tests {
                 .code,
             "phase5_evidence_not_found"
         );
+    }
+
+    #[test]
+    fn successful_guarded_publication_preserves_the_other_in_flight_credit() {
+        let broker = TransferBroker::default();
+        let session = opened(&broker);
+        broker.begin(session, 1).unwrap();
+        broker.acquire(session, 1).unwrap();
+        let first = InFlightCreditGuard::new(broker.clone(), session);
+        broker.acquire(session, 1).unwrap();
+        let second = InFlightCreditGuard::new(broker.clone(), session);
+
+        first
+            .complete_phase5_for_publish(1, phase5_evidence(1, &"a".repeat(32)))
+            .unwrap();
+        let after_first = broker.snapshot().unwrap();
+        assert_eq!(after_first.held_credits, 1);
+        assert_eq!(after_first.in_flight_credits, 1);
+        assert_eq!(after_first.available_credits, 0);
+
+        drop(second);
+        let after_second = broker.snapshot().unwrap();
+        assert_eq!(after_second.held_credits, 1);
+        assert_eq!(after_second.in_flight_credits, 0);
+        assert_eq!(after_second.available_credits, 1);
     }
 
     #[tokio::test]
