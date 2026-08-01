@@ -30,6 +30,7 @@ export class ResidentPlaybackController {
   private completedCycles = 0;
   private lastReceipt: RadarPaintReceipt | undefined;
   private operation: Promise<RadarPaintReceipt> | null = null;
+  private replacementTail: Promise<void> = Promise.resolve();
   private readonly dwellMs: number;
   private readonly latestDwellMs: number;
 
@@ -72,12 +73,33 @@ export class ResidentPlaybackController {
     }
   }
 
-  async replaceResidentFrames(
+  replaceResidentFrames(
     frames: readonly RadarSweepCpuModel[],
     beforeCommit?: () => void,
   ): Promise<RadarPaintReceipt> {
     this.assertActive();
     if (frames.length < 1) throw new Error("playback requires at least one resident frame");
+    const priorReplacement = this.replacementTail;
+    let releaseTurn = () => {};
+    const turn = new Promise<void>((resolve) => {
+      releaseTurn = resolve;
+    });
+    this.replacementTail = priorReplacement.then(() => turn, () => turn);
+    return (async () => {
+      await priorReplacement.catch(() => {});
+      try {
+        return await this.replaceResidentFramesNow(frames, beforeCommit);
+      } finally {
+        releaseTurn();
+      }
+    })();
+  }
+
+  private async replaceResidentFramesNow(
+    frames: readonly RadarSweepCpuModel[],
+    beforeCommit?: () => void,
+  ): Promise<RadarPaintReceipt> {
+    this.assertActive();
     await this.pauseAndWait();
     beforeCommit?.();
 

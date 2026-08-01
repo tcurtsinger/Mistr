@@ -170,7 +170,13 @@ describe("resident playback truth", () => {
     const replacements = [frame("replacement-a", 400), frame("replacement-b", 500)];
 
     const replacement = controller.replaceResidentFrames(replacements);
-    await Promise.resolve();
+    await vi.waitFor(() => {
+      expect(controller.snapshot()).toMatchObject({
+        generation: 8,
+        selectedObservationId: "replacement-a",
+        holdReason: "AWAITING_GPU_PAINT",
+      });
+    });
     layer.completePaint();
     await replacement;
     const pending = controller.step();
@@ -224,12 +230,14 @@ describe("resident playback truth", () => {
     await controller.establishInitialPaint();
 
     const replacement = controller.replaceResidentFrames([frame("replacement-a", 400)]);
-    await Promise.resolve();
-    expect(controller.snapshot()).toMatchObject({
-      generation: 8,
-      residentCount: 1,
-      selectedObservationId: "replacement-a",
-      lastPaintedObservationId: "frame-a",
+    const replacementFailure = expect(replacement).rejects.toThrow("paint failed");
+    await vi.waitFor(() => {
+      expect(controller.snapshot()).toMatchObject({
+        generation: 8,
+        residentCount: 1,
+        selectedObservationId: "replacement-a",
+        lastPaintedObservationId: "frame-a",
+      });
     });
     layer.failPaint();
 
@@ -243,7 +251,7 @@ describe("resident playback truth", () => {
       });
     });
     layer.completePaint();
-    await expect(replacement).rejects.toThrow("paint failed");
+    await replacementFailure;
     expect(controller.snapshot()).toMatchObject({
       generation: 7,
       residentCount: 3,
@@ -265,7 +273,14 @@ describe("resident playback truth", () => {
         if (!ownsGeneration) throw new Error("generation was superseded");
       },
     );
-    await Promise.resolve();
+    const replacementFailure = expect(replacement).rejects.toThrow("generation was superseded");
+    await vi.waitFor(() => {
+      expect(controller.snapshot()).toMatchObject({
+        generation: 8,
+        selectedObservationId: "replacement-a",
+        holdReason: "AWAITING_GPU_PAINT",
+      });
+    });
     ownsGeneration = false;
     layer.completePaint();
 
@@ -279,13 +294,64 @@ describe("resident playback truth", () => {
       });
     });
     layer.completePaint();
-    await expect(replacement).rejects.toThrow("generation was superseded");
+    await replacementFailure;
     expect(controller.snapshot()).toMatchObject({
       generation: 7,
       residentCount: 3,
       selectedObservationId: "frame-a",
       lastPaintedObservationId: "frame-a",
       playheadObservedAtUnixMs: 100,
+    });
+  });
+
+  it("keeps a newer replacement queued until an older rollback repaint completes", async () => {
+    const layer = new FakeLayer();
+    const controller = new ResidentPlaybackController(layer, frames());
+    await controller.establishInitialPaint();
+    let ownsFirstGeneration = true;
+
+    const first = controller.replaceResidentFrames(
+      [frame("replacement-a", 400)],
+      () => {
+        if (!ownsFirstGeneration) throw new Error("generation was superseded");
+      },
+    );
+    const firstFailure = expect(first).rejects.toThrow("generation was superseded");
+    await vi.waitFor(() => {
+      expect(controller.snapshot()).toMatchObject({
+        generation: 8,
+        selectedObservationId: "replacement-a",
+        holdReason: "AWAITING_GPU_PAINT",
+      });
+    });
+    ownsFirstGeneration = false;
+    const newest = controller.replaceResidentFrames([frame("replacement-b", 500)]);
+    layer.completePaint();
+
+    await vi.waitFor(() => {
+      expect(controller.snapshot()).toMatchObject({
+        generation: 7,
+        selectedObservationId: "frame-a",
+        lastPaintedObservationId: undefined,
+        holdReason: "AWAITING_GPU_PAINT",
+      });
+    });
+    layer.completePaint();
+    await firstFailure;
+
+    await vi.waitFor(() => {
+      expect(controller.snapshot()).toMatchObject({
+        generation: 8,
+        residentCount: 1,
+        selectedObservationId: "replacement-b",
+        lastPaintedObservationId: "frame-a",
+        holdReason: "AWAITING_GPU_PAINT",
+      });
+    });
+    layer.completePaint();
+    await expect(newest).resolves.toMatchObject({
+      generation: 8,
+      observationId: "replacement-b",
     });
   });
 
