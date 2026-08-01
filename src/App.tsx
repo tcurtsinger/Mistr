@@ -19,6 +19,8 @@ import {
 } from "./playback/ResidentPlaybackController";
 import {
   FramePerformanceMonitor,
+  summarizeDurations,
+  type DurationSummary,
   type FrameTimingSummary,
 } from "./playback/performanceMonitor";
 import {
@@ -45,6 +47,7 @@ const MAP_STYLE = "https://tiles.openfreemap.org/styles/dark";
 const PHASE4_FRAME_COUNT = 20;
 const PHASE4_TRANSITIONS = 1_000;
 const PHASE4_REPLACEMENT_ROUNDS = 5;
+const PHASE4_SWITCH_P95_CEILING_MS = 33.4;
 const GPU_TARGET_BYTES = 200 * 1024 * 1024;
 const GPU_HARD_CEILING_BYTES = 256 * 1024 * 1024;
 const RANGE_SOURCE_ID = "mistr-range-source";
@@ -216,6 +219,9 @@ export function App() {
             && rendererActivityDelta.frameUploadCount === 0
             && rendererActivityDelta.frameUploadBytes === 0,
           frameTiming,
+          switchTiming: summarizeDurations(
+            receipts.map((receipt) => receipt.residentSwitchLatencyMs),
+          ),
           framebufferWidth: receipts.at(-1)?.framebufferWidth ?? 0,
           framebufferHeight: receipts.at(-1)?.framebufferHeight ?? 0,
           heapBeforeBytes,
@@ -438,6 +444,7 @@ export interface Phase4ScenarioReport {
   rendererActivityDelta: RendererActivitySnapshot;
   hotPathActivityZero: boolean;
   frameTiming: FrameTimingSummary;
+  switchTiming: DurationSummary;
   framebufferWidth: number;
   framebufferHeight: number;
   heapBeforeBytes: number | null;
@@ -516,6 +523,7 @@ function overallStatus(report: Phase4Report): "PASS" | "RUNNING" | "FAIL" {
   if (!report.scenario.hotPathActivityZero) return "FAIL";
   if (!report.scenario.receiptTruthPassed || !report.scenario.replacementStable) return "FAIL";
   if (report.scenario.completedTransitions !== report.scenario.requestedTransitions) return "FAIL";
+  if (report.scenario.switchTiming.p95Ms >= PHASE4_SWITCH_P95_CEILING_MS) return "FAIL";
   if (report.scenario.frameTiming.p95Ms >= 16.7) return "FAIL";
   if (!report.scenario.frameTiming.longTaskObserverAvailable) return "FAIL";
   if (report.scenario.frameTiming.longTaskCount > 0) return "FAIL";

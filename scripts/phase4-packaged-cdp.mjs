@@ -85,6 +85,10 @@ try {
     scenarios: scenarios.map((scenario) => ({
       transitions: scenario.completedTransitions,
       frameP95Ms: scenario.frameTiming.p95Ms,
+      switchP50Ms: scenario.switchTiming.p50Ms,
+      switchP95Ms: scenario.switchTiming.p95Ms,
+      switchP99Ms: scenario.switchTiming.p99Ms,
+      switchMaximumMs: scenario.switchTiming.maximumMs,
       longTaskCount: scenario.frameTiming.longTaskCount,
       longTaskObserverAvailable: scenario.frameTiming.longTaskObserverAvailable,
       hotPathActivityZero: scenario.hotPathActivityZero,

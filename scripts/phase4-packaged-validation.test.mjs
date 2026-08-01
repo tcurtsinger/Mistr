@@ -37,6 +37,14 @@ describe("Phase 4 packaged acceptance validation", () => {
     expect(validatePhase4Acceptance(passingReport(), scenarios, passingBounds(), 1_000, 2))
       .toEqual(expect.arrayContaining(["stability_run_count", "stabilized_heap_unavailable"]));
   });
+
+  it("rejects slow GPU receipt latency even when RAF timing remains fast", () => {
+    const scenarios = passingScenarios();
+    scenarios[0].switchTiming.p95Ms = 33.4;
+
+    expect(validatePhase4Acceptance(passingReport(), scenarios, passingBounds(), 1_000, 2))
+      .toContain("run_1_switch_p95");
+  });
 });
 
 function passingReport() {
@@ -68,6 +76,13 @@ function passingScenarios() {
       p95Ms: 6.2,
       longTaskObserverAvailable: true,
       longTaskCount: 0,
+    },
+    switchTiming: {
+      sampleCount: 1_000,
+      p50Ms: 10.2,
+      p95Ms: 11.8,
+      p99Ms: 14.2,
+      maximumMs: 16,
     },
     framebufferWidth: 3_840,
     framebufferHeight: 2_160,

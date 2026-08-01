@@ -9,6 +9,14 @@ export interface FrameTimingSummary {
   longTaskObserverAvailable: boolean;
 }
 
+export interface DurationSummary {
+  sampleCount: number;
+  p50Ms: number;
+  p95Ms: number;
+  p99Ms: number;
+  maximumMs: number;
+}
+
 export class FramePerformanceMonitor {
   private frameHandle: number | null = null;
   private priorFrameAt: number | null = null;
@@ -64,15 +72,22 @@ export function summarizeFramePerformance(
   longTasks: readonly number[],
   longTaskObserverAvailable = true,
 ): FrameTimingSummary {
+  const durations = summarizeDurations(frameDurations);
   return {
-    sampleCount: frameDurations.length,
-    p50Ms: percentile(frameDurations, 0.5),
-    p95Ms: percentile(frameDurations, 0.95),
-    p99Ms: percentile(frameDurations, 0.99),
-    maximumMs: frameDurations.length > 0 ? Math.max(...frameDurations) : 0,
+    ...durations,
     longTaskCount: longTasks.filter((duration) => duration >= 50).length,
     longestTaskMs: longTasks.length > 0 ? Math.max(...longTasks) : 0,
     longTaskObserverAvailable,
+  };
+}
+
+export function summarizeDurations(values: readonly number[]): DurationSummary {
+  return {
+    sampleCount: values.length,
+    p50Ms: percentile(values, 0.5),
+    p95Ms: percentile(values, 0.95),
+    p99Ms: percentile(values, 0.99),
+    maximumMs: values.length > 0 ? Math.max(...values) : 0,
   };
 }
 

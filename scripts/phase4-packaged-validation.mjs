@@ -1,5 +1,6 @@
 export const MIN_PHASE4_TRANSITIONS = 1_000;
 export const MIN_PHASE4_STABILITY_RUNS = 2;
+export const PHASE4_SWITCH_P95_CEILING_MS = 33.4;
 
 export function parseAcceptanceWorkload(environment = process.env) {
   const transitions = Number(
@@ -69,6 +70,12 @@ export function validatePhase4Acceptance(
     if (!scenario.hotPathActivityZero) failures.push(`${prefix}_hot_path_activity`);
     if (!scenario.replacementStable) failures.push(`${prefix}_replacement_growth`);
     if (scenario.frameTiming.p95Ms >= 16.7) failures.push(`${prefix}_frame_p95`);
+    if (scenario.switchTiming?.sampleCount !== expectedTransitions) {
+      failures.push(`${prefix}_switch_sample_count`);
+    }
+    if ((scenario.switchTiming?.p95Ms ?? Infinity) >= PHASE4_SWITCH_P95_CEILING_MS) {
+      failures.push(`${prefix}_switch_p95`);
+    }
     if (!scenario.frameTiming.longTaskObserverAvailable) {
       failures.push(`${prefix}_long_task_observer_unavailable`);
     }

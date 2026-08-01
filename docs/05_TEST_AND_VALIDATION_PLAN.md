@@ -260,6 +260,7 @@ Invariant assertions:
 ### Core performance gates
 
 - P95 frame duration below 16.7 ms in the representative 4K playback/interaction scenario.
+- Per-run resident selection-to-GPU-receipt P95 below 33.4 ms, covering the selected draw and non-blocking fence observation by the following 60 Hz opportunity.
 - No recurring main-thread task over 50 ms caused by Mistr during resident playback.
 - Zero network, disk, decode, normalization, and bulk IPC activity during resident loop playback.
 - GPU radar allocations at or below 200 MiB target and never above 256 MiB hard ceiling for the initial 20-frame product loop.
