@@ -280,11 +280,10 @@ impl LiveSweepSession {
                             "complete volume has no terminal last-modified timestamp".into(),
                         )
                     })?;
-                let output = tokio::task::spawn_blocking(move || {
+                let output = run_native_work("mistr-level2-complete-decode", move || {
                     decode_safe_lowest_sweep(&bytes, RadarProduct::Reflectivity)
                 })
-                .await
-                .map_err(|error| LivePipelineError::DecodeTask(error.to_string()))?
+                .await?
                 .map_err(|error| LivePipelineError::Decode(error.to_string()))?;
                 if output.sweep.source_kind != "nexrad_level2_chunks" {
                     return Err(LivePipelineError::Decode(
@@ -405,11 +404,10 @@ impl LiveSweepSession {
         let bytes = self.assembler.assembled_contiguous()?;
         let decode_started_at_unix_ms = Utc::now().timestamp_millis();
         self.decoder_attempts = self.decoder_attempts.saturating_add(1);
-        let decoded = tokio::task::spawn_blocking(move || {
+        let decoded = run_native_work("mistr-level2-safe-decode", move || {
             decode_safe_lowest_sweep(&bytes, RadarProduct::Reflectivity)
         })
-        .await
-        .map_err(|error| LivePipelineError::DecodeTask(error.to_string()))?;
+        .await?;
         let decode_completed_at_unix_ms = Utc::now().timestamp_millis();
         match decoded {
             Ok(output) => {
@@ -467,6 +465,23 @@ fn contiguous_prefix_advanced(previous: u16, outcome: &ChunkIngestOutcome) -> bo
         ChunkIngestOutcome::Rollover { .. } => true,
         ChunkIngestOutcome::Duplicate { .. } | ChunkIngestOutcome::Late { .. } => false,
     }
+}
+
+async fn run_native_work<T, F>(thread_name: &str, work: F) -> Result<T, LivePipelineError>
+where
+    T: Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
+{
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    std::thread::Builder::new()
+        .name(thread_name.to_string())
+        .spawn(move || {
+            let _ = sender.send(work());
+        })
+        .map_err(|error| LivePipelineError::DecodeTask(error.to_string()))?;
+    receiver.await.map_err(|_| {
+        LivePipelineError::DecodeTask("native decoder stopped before returning a result".into())
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -583,6 +598,24 @@ mod tests {
         assert!(contiguous_prefix_advanced(6, &contiguous));
         assert!(!contiguous_prefix_advanced(7, &gap));
         assert!(!contiguous_prefix_advanced(7, &duplicate));
+    }
+
+    #[tokio::test]
+    async fn native_decode_wait_can_be_cancelled_without_owning_the_worker_thread() {
+        let (started_sender, started_receiver) = tokio::sync::oneshot::channel();
+        let (release_sender, release_receiver) = std::sync::mpsc::channel();
+        let task = tokio::spawn(run_native_work("mistr-test-native-work", move || {
+            let _ = started_sender.send(());
+            let _ = release_receiver.recv();
+        }));
+        started_receiver.await.expect("native worker started");
+        task.abort();
+        let join_error = tokio::time::timeout(Duration::from_millis(50), task)
+            .await
+            .expect("cancelled waiter returns without waiting for native work")
+            .expect_err("waiter is cancelled");
+        assert!(join_error.is_cancelled());
+        release_sender.send(()).expect("release native worker");
     }
 
     // Compile-time coverage for the test-only poll override without using the

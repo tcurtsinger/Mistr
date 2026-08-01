@@ -70,6 +70,31 @@ struct TransferState {
     phase5_evidence_by_observation: BTreeMap<String, Phase5LiveTransferEvidence>,
 }
 
+#[derive(Debug)]
+struct InFlightCreditGuard {
+    broker: TransferBroker,
+    session: u64,
+}
+
+impl InFlightCreditGuard {
+    fn new(broker: TransferBroker, session: u64) -> Self {
+        Self { broker, session }
+    }
+}
+
+impl Drop for InFlightCreditGuard {
+    fn drop(&mut self) {
+        self.broker.finish_without_publish(self.session);
+    }
+}
+
+#[derive(Debug)]
+struct ChargedPhase5Work {
+    bytes: Vec<u8>,
+    evidence: Phase5LiveTransferEvidence,
+    _credit: InFlightCreditGuard,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Phase4ActivitySnapshot {
@@ -710,8 +735,10 @@ pub async fn request_phase5_live_sweep(
     broker.acquire(session, generation)?;
 
     let timeout = Duration::from_secs(timeout_seconds);
-    let result = enforce_live_request_timeout(timeout, async {
-        let token = broker.live_generation_token(session, generation)?;
+    let credit = InFlightCreditGuard::new(broker.clone(), session);
+    let worker_broker = broker.clone();
+    let worker = tauri::async_runtime::spawn(async move {
+        let token = worker_broker.live_generation_token(session, generation)?;
         let client = PublicRadarClient::new()
             .map_err(|error| TransferError::new("live_client_failed", error.to_string()))?;
         let mut live = LiveSweepSession::start(client, token, &site, fresh_only)
@@ -746,19 +773,21 @@ pub async fn request_phase5_live_sweep(
             published_at_unix_ms: chrono::Utc::now().timestamp_millis(),
             safe: safe_evidence,
         };
-        Ok::<_, TransferError>((bytes, evidence))
+        Ok::<_, TransferError>(ChargedPhase5Work {
+            bytes,
+            evidence,
+            _credit: credit,
+        })
+    });
+    let joined = enforce_live_request_timeout(timeout, async move {
+        worker
+            .await
+            .map_err(|error| TransferError::new("backend_task_failed", error.to_string()))
     })
-    .await;
-
-    let (bytes, evidence) = match result {
-        Ok(value) => value,
-        Err(error) => {
-            broker.finish_without_publish(session);
-            return Err(error);
-        }
-    };
-    broker.complete_phase5_for_publish(session, generation, evidence)?;
-    Ok(Response::new(bytes))
+    .await?;
+    let charged = joined?;
+    broker.complete_phase5_for_publish(session, generation, charged.evidence)?;
+    Ok(Response::new(charged.bytes))
 }
 
 async fn enforce_live_request_timeout<F, T>(
@@ -1247,6 +1276,53 @@ mod tests {
             error.message,
             "live acquisition exceeded the complete request timeout"
         );
+    }
+
+    #[tokio::test]
+    async fn timed_out_blocking_work_retains_credit_until_native_completion() {
+        let broker = TransferBroker::default();
+        let session = broker.open_session().unwrap().session;
+        broker.begin(session, 1).unwrap();
+        broker.acquire(session, 1).unwrap();
+        let credit = InFlightCreditGuard::new(broker.clone(), session);
+        let (started_sender, started_receiver) = tokio::sync::oneshot::channel();
+        let (release_sender, release_receiver) = std::sync::mpsc::channel();
+        let worker = tokio::spawn(async move {
+            let _credit = credit;
+            tokio::task::spawn_blocking(move || {
+                let _ = started_sender.send(());
+                let _ = release_receiver.recv();
+            })
+            .await
+            .map_err(|error| TransferError::new("backend_task_failed", error.to_string()))?;
+            Ok::<(), TransferError>(())
+        });
+        started_receiver.await.expect("blocking worker started");
+
+        let error = enforce_live_request_timeout(Duration::from_millis(5), async move {
+            worker
+                .await
+                .map_err(|error| TransferError::new("backend_task_failed", error.to_string()))?
+        })
+        .await
+        .unwrap_err();
+        assert_eq!(error.code, "live_sweep_failed");
+        let timed_out = broker.snapshot().unwrap();
+        assert_eq!(timed_out.in_flight_credits, 1);
+        assert_eq!(timed_out.available_credits, 1);
+
+        release_sender.send(()).expect("release blocking worker");
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if broker.snapshot().unwrap().in_flight_credits == 0 {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("credit released after blocking work exits");
+        assert_eq!(broker.snapshot().unwrap().available_credits, 2);
     }
 
     #[test]
