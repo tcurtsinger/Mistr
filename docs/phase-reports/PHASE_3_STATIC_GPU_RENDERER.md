@@ -32,6 +32,7 @@ The executable was built with `npm run tauri:build -- --no-bundle`, then launche
 | Property | Result |
 |---|---:|
 | Fixture | `KTLX20240520_230512_V06` |
+| Source SHA-256 | `99c189c327307da6a26a9f265ee84bf9fc690dc1a7358db941949805afa4a0d3` |
 | Observation ID | `f3c4ced03212402d921c9880b485db5b` |
 | Shape | 720 radials by 1,832 gates |
 | Cells | 1,319,040 |
@@ -39,7 +40,7 @@ The executable was built with `npm run tauri:build -- --no-bundle`, then launche
 | Gate geometry | 2,125 m first center, 250 m spacing |
 | Packed transfer | 7,931,840 bytes (7.564 MiB) |
 
-Phase 1 already proved every normalized gate and detailed status against independent Py-ART 2.2.5 full-array hashes. Phase 3 does not substitute a new decoder assertion for that result; it proves those bytes survive the renderer boundary.
+The Tauri Phase 3 command embeds the committed fixture manifest at compile time and verifies both byte length and source SHA-256 before decode or encoding. A different valid archive therefore cannot be mislabeled as this proof. A release-app negative probe changed one source byte and produced `RADAR GPU ERROR` with `fixture_hash_mismatch`; the unmodified pinned archive still reached a completed paint. Phase 1 already proved every normalized gate and detailed status against independent Py-ART 2.2.5 full-array hashes. Phase 3 does not substitute a new decoder assertion for that result; it proves those bytes survive the renderer boundary.
 
 ## Renderer candidate measurement
 
@@ -138,7 +139,7 @@ The TypeScript suite now contains 45 tests across 12 files, including:
 - exact Phase 3 Tauri command arguments and leased credit release; and
 - explicit MapLibre worker URL configuration.
 
-Rust has 35 library tests plus five binary tests. The Phase 3 fixture command shares the two-credit broker, performs a hard bounded read even if the file grows after metadata inspection, decodes/encodes off the command thread, blocks stale publication, and returns the credit on every error path.
+Rust has 36 library tests plus five binary tests. The Phase 3 fixture command shares the two-credit broker, performs a hard bounded read even if the file grows after metadata inspection, rejects byte length or SHA-256 mismatches against the embedded committed manifest before decode/encoding, decodes/encodes off the command thread, blocks stale publication, and returns the credit on every error path.
 
 ## Phase gate
 

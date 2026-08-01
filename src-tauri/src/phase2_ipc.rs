@@ -3,7 +3,8 @@ use crate::packed_sweep::{
     validate_packed_sweep,
 };
 use crate::radar::{MAX_LEVEL2_INPUT_BYTES, RadarProduct, decode_level2};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
 use std::path::PathBuf;
@@ -15,6 +16,8 @@ pub const TRANSFER_CREDIT_LIMIT: u8 = 2;
 const MAX_BENCHMARK_ITERATIONS: u8 = 20;
 const MAX_DIAGNOSTIC_HOLD_MS: u64 = 2_000;
 const PHASE3_FIXTURE_NAME: &str = "KTLX20240520_230512_V06";
+const PHASE3_FIXTURE_ID: &str = "ktlx-2024-05-20-230512-v06";
+const FIXTURE_MANIFEST_JSON: &str = include_str!("../../fixtures/manifest.json");
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -459,6 +462,7 @@ pub async fn request_phase3_fixture_sweep(
     let task = tauri::async_runtime::spawn_blocking(move || {
         let path = phase3_fixture_path()?;
         let input = read_phase3_archive(&path)?;
+        verify_phase3_archive_hash(&input)?;
         let decoded = decode_level2(&input, RadarProduct::Reflectivity)
             .map_err(|error| TransferError::new("fixture_decode_failed", error.to_string()))?;
         encode_packed_sweep(&decoded.sweep, PackedSweepIdentity { generation })
@@ -482,6 +486,67 @@ pub async fn request_phase3_fixture_sweep(
     };
     broker.complete_for_publish(session, generation)?;
     Ok(Response::new(bytes))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FixtureManifest {
+    schema_version: u8,
+    fixtures: Vec<FixtureManifestEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FixtureManifestEntry {
+    id: String,
+    size_bytes: u64,
+    sha256: String,
+}
+
+fn phase3_fixture_expectation() -> Result<FixtureManifestEntry, TransferError> {
+    let manifest: FixtureManifest =
+        serde_json::from_str(FIXTURE_MANIFEST_JSON).map_err(|error| {
+            TransferError::new(
+                "fixture_manifest_invalid",
+                format!("embedded fixture manifest is invalid: {error}"),
+            )
+        })?;
+    if manifest.schema_version != 1 {
+        return Err(TransferError::new(
+            "fixture_manifest_invalid",
+            format!(
+                "embedded fixture manifest schema {} is unsupported",
+                manifest.schema_version
+            ),
+        ));
+    }
+    manifest
+        .fixtures
+        .into_iter()
+        .find(|fixture| fixture.id == PHASE3_FIXTURE_ID)
+        .ok_or_else(|| {
+            TransferError::new(
+                "fixture_manifest_invalid",
+                format!("embedded fixture manifest is missing {PHASE3_FIXTURE_ID}"),
+            )
+        })
+}
+
+fn verify_phase3_archive_hash(input: &[u8]) -> Result<(), TransferError> {
+    let expected = phase3_fixture_expectation()?;
+    let actual_sha256 = format!("{:x}", Sha256::digest(input));
+    if input.len() as u64 != expected.size_bytes || actual_sha256 != expected.sha256 {
+        return Err(TransferError::new(
+            "fixture_hash_mismatch",
+            format!(
+                "Phase 3 fixture does not match manifest entry {PHASE3_FIXTURE_ID}: expected {} bytes / {}, got {} bytes / {actual_sha256}",
+                expected.size_bytes,
+                expected.sha256,
+                input.len()
+            ),
+        ));
+    }
+    Ok(())
 }
 
 fn read_phase3_archive(path: &std::path::Path) -> Result<Vec<u8>, TransferError> {
@@ -692,6 +757,19 @@ mod tests {
             "input grew beyond the 128-byte limit while it was being read"
         );
         assert_eq!(read_bounded(&[7_u8; 128][..], 128).unwrap().len(), 128);
+    }
+
+    #[test]
+    fn phase3_fixture_hash_is_pinned_to_the_embedded_manifest() {
+        let expected = phase3_fixture_expectation().unwrap();
+        assert_eq!(expected.id, PHASE3_FIXTURE_ID);
+        assert_eq!(expected.size_bytes, 7_936_679);
+        assert_eq!(
+            expected.sha256,
+            "99c189c327307da6a26a9f265ee84bf9fc690dc1a7358db941949805afa4a0d3"
+        );
+        let error = verify_phase3_archive_hash(b"another valid archive could decode").unwrap_err();
+        assert_eq!(error.code, "fixture_hash_mismatch");
     }
 
     #[test]
