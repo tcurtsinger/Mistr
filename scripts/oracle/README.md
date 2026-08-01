@@ -16,7 +16,7 @@ cargo run --locked --manifest-path src-tauri\Cargo.toml --bin mistr-decode -- fi
 .\.oracle-venv\Scripts\python.exe scripts\oracle\compare_reports.py artifacts\phase-1\rust-reflectivity.json artifacts\phase-1\pyart-reflectivity.json --json artifacts\phase-1\comparison.json --markdown artifacts\phase-1\comparison.md
 
 # Optional Phase 3 independent visual reference (artifact remains ignored).
-.\.oracle-venv\Scripts\python.exe scripts\oracle\render_pyart.py fixtures\cache\KTLX20240520_230512_V06 --output artifacts\phase-3\pyart-reference.png
+.\.oracle-venv\Scripts\python.exe scripts\oracle\render_pyart.py fixtures\cache\KTLX20240520_230512_V06 --output artifacts\phase-3\pyart-reference.png --reference-json fixtures\expected\phase-3\pyart-ground-range.json
 ```
 
 The virtual environment, downloaded radar bytes, and generated reports are intentionally ignored by Git. The committed Phase 1 report records the stable results and hashes without publishing a multi-megabyte radar object.

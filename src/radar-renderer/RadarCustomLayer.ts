@@ -24,10 +24,12 @@ precision highp usampler2D;
 const float PI = 3.141592653589793;
 const float TWO_PI = 6.283185307179586;
 const float EARTH_RADIUS_M = 6371008.8;
+const float EFFECTIVE_EARTH_RADIUS_M = 8494666.666666666;
 uniform usampler2D u_raw_codes;
 uniform usampler2D u_statuses;
 uniform usampler2D u_azimuth_lookup;
 uniform sampler2D u_palette;
+uniform sampler2D u_elevations;
 uniform vec2 u_radar_lon_lat_radians;
 uniform float u_first_gate_center_m;
 uniform float u_gate_spacing_m;
@@ -53,13 +55,9 @@ void main() {
   float sinHalfLongitude = sin(deltaLongitude * 0.5);
   float haversine = sinHalfLatitude * sinHalfLatitude
     + cos(radarLatitude) * cos(latitude) * sinHalfLongitude * sinHalfLongitude;
-  float rangeM = 2.0 * EARTH_RADIUS_M * asin(min(1.0, sqrt(max(0.0, haversine))));
-  float gateCoordinate = (rangeM - u_first_gate_center_m) / u_gate_spacing_m;
-  if (gateCoordinate < -0.5 || gateCoordinate > float(u_gate_count) - 0.5) {
-    discard;
-  }
-  int gateIndex = clamp(int(floor(gateCoordinate + 0.5)), 0, u_gate_count - 1);
-
+  float groundRangeM = 2.0 * EARTH_RADIUS_M * asin(
+    min(1.0, sqrt(max(0.0, haversine)))
+  );
   float bearingY = sin(deltaLongitude) * cos(latitude);
   float bearingX = cos(radarLatitude) * sin(latitude)
     - sin(radarLatitude) * cos(latitude) * cos(deltaLongitude);
@@ -73,6 +71,17 @@ void main() {
   uint encodedRadial = texelFetch(u_azimuth_lookup, ivec2(lookupIndex, 0), 0).r;
   if (encodedRadial == uint(0)) discard;
   int radialIndex = int(encodedRadial - uint(1));
+  float elevation = texelFetch(u_elevations, ivec2(radialIndex, 0), 0).r;
+  float groundAngle = groundRangeM / EFFECTIVE_EARTH_RADIUS_M;
+  float beamDenominator = cos(elevation + groundAngle);
+  if (beamDenominator <= 0.0) discard;
+  float slantRangeM = EFFECTIVE_EARTH_RADIUS_M * sin(groundAngle)
+    / beamDenominator;
+  float gateCoordinate = (slantRangeM - u_first_gate_center_m) / u_gate_spacing_m;
+  if (gateCoordinate < -0.5 || gateCoordinate > float(u_gate_count) - 0.5) {
+    discard;
+  }
+  int gateIndex = clamp(int(floor(gateCoordinate + 0.5)), 0, u_gate_count - 1);
   uint status = texelFetch(u_statuses, ivec2(gateIndex, radialIndex), 0).r;
   if (status == uint(1)) discard;
   if (status == uint(2)) {
@@ -159,6 +168,7 @@ interface Uniforms {
   gateSpacing: WebGLUniformLocation;
   gateCount: WebGLUniformLocation;
   lookupSize: WebGLUniformLocation;
+  elevations: WebGLUniformLocation;
   rangeFoldedColor: WebGLUniformLocation;
 }
 
@@ -176,6 +186,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
   private statusTexture: WebGLTexture | null = null;
   private lookupTexture: WebGLTexture | null = null;
   private paletteTexture: WebGLTexture | null = null;
+  private elevationTexture: WebGLTexture | null = null;
   private uniforms: Uniforms | null = null;
   private pendingFence: WebGLSync | null = null;
   private contextEpoch = 1;
@@ -239,11 +250,13 @@ export class RadarCustomLayer implements CustomLayerInterface {
       bindTexture(gl, 1, this.statusTexture);
       bindTexture(gl, 2, this.lookupTexture);
       bindTexture(gl, 3, this.paletteTexture);
+      bindTexture(gl, 4, this.elevationTexture);
       gl.uniformMatrix4fv(this.uniforms.matrix, false, options.defaultProjectionData.mainMatrix);
       gl.uniform1i(this.uniforms.rawCodes, 0);
       gl.uniform1i(this.uniforms.statuses, 1);
       gl.uniform1i(this.uniforms.azimuthLookup, 2);
       gl.uniform1i(this.uniforms.palette, 3);
+      gl.uniform1i(this.uniforms.elevations, 4);
       gl.uniform2f(
         this.uniforms.radarLonLat,
         degreesToRadians(this.model.center.longitude),
@@ -336,7 +349,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
     const previousTexture = gl.getParameter(gl.TEXTURE_BINDING_2D) as WebGLTexture | null;
     try {
       gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-      this.rawTexture = createIntegerTexture(
+      this.rawTexture = createTexture2d(
         gl,
         this.model.gateCount,
         this.model.radialCount,
@@ -345,7 +358,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
         gl.UNSIGNED_BYTE,
         this.model.rawCodes,
       );
-      this.statusTexture = createIntegerTexture(
+      this.statusTexture = createTexture2d(
         gl,
         this.model.gateCount,
         this.model.radialCount,
@@ -354,7 +367,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
         gl.UNSIGNED_BYTE,
         this.model.statuses,
       );
-      this.lookupTexture = createIntegerTexture(
+      this.lookupTexture = createTexture2d(
         gl,
         this.model.azimuthLookup.length,
         1,
@@ -363,8 +376,21 @@ export class RadarCustomLayer implements CustomLayerInterface {
         gl.UNSIGNED_SHORT,
         this.model.azimuthLookup,
       );
+      const elevationsRadians = Float32Array.from(
+        this.model.elevations,
+        degreesToRadians,
+      );
+      this.elevationTexture = createTexture2d(
+        gl,
+        this.model.radialCount,
+        1,
+        gl.R32F,
+        gl.RED,
+        gl.FLOAT,
+        elevationsRadians,
+      );
       const palette = buildReflectivityPalette(this.model.scale, this.model.offset);
-      this.paletteTexture = createIntegerTexture(
+      this.paletteTexture = createTexture2d(
         gl,
         256,
         1,
@@ -424,6 +450,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
     if (this.statusTexture) gl.deleteTexture(this.statusTexture);
     if (this.lookupTexture) gl.deleteTexture(this.lookupTexture);
     if (this.paletteTexture) gl.deleteTexture(this.paletteTexture);
+    if (this.elevationTexture) gl.deleteTexture(this.elevationTexture);
     if (this.quadBuffer) gl.deleteBuffer(this.quadBuffer);
     if (this.vao) gl.deleteVertexArray(this.vao);
     if (this.program) gl.deleteProgram(this.program);
@@ -432,6 +459,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
     this.statusTexture = null;
     this.lookupTexture = null;
     this.paletteTexture = null;
+    this.elevationTexture = null;
     this.quadBuffer = null;
     this.vao = null;
     this.program = null;
@@ -638,7 +666,7 @@ interface CapturedGlState {
 function captureGlState(gl: WebGL2RenderingContext): CapturedGlState {
   const activeTexture = gl.getParameter(gl.ACTIVE_TEXTURE) as number;
   const textureBindings: Array<WebGLTexture | null> = [];
-  for (let unit = 0; unit < 4; unit += 1) {
+  for (let unit = 0; unit < 5; unit += 1) {
     gl.activeTexture(gl.TEXTURE0 + unit);
     textureBindings.push(gl.getParameter(gl.TEXTURE_BINDING_2D) as WebGLTexture | null);
   }
@@ -697,7 +725,7 @@ function bindTexture(
   gl.bindTexture(gl.TEXTURE_2D, texture);
 }
 
-function createIntegerTexture(
+function createTexture2d(
   gl: WebGL2RenderingContext,
   width: number,
   height: number,
@@ -780,6 +808,7 @@ function resolveUniforms(gl: WebGL2RenderingContext, program: WebGLProgram): Uni
     gateSpacing: requireUniform(gl, program, "u_gate_spacing_m"),
     gateCount: requireUniform(gl, program, "u_gate_count"),
     lookupSize: requireUniform(gl, program, "u_azimuth_lookup_size"),
+    elevations: requireUniform(gl, program, "u_elevations"),
     rangeFoldedColor: requireUniform(gl, program, "u_range_folded_color"),
   };
 }
@@ -842,8 +871,8 @@ function validateCapabilities(
       `MAX_TEXTURE_SIZE ${capabilities.maxTextureSize} is below required ${requiredTextureSize}`,
     );
   }
-  if (capabilities.maxFragmentTextureImageUnits < 4) {
-    throw new RadarRendererError("at least four fragment texture units are required");
+  if (capabilities.maxFragmentTextureImageUnits < 5) {
+    throw new RadarRendererError("at least five fragment texture units are required");
   }
 }
 

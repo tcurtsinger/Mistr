@@ -5,8 +5,10 @@ import {
   buildAzimuthLookup,
   destinationPoint,
   gateIndexForRange,
+  groundRangeForSlantRange,
   radialFromLookup,
   rangeBearing,
+  slantRangeForGroundRange,
   type LngLatPoint,
 } from "./geo";
 import { PALETTE_WIDTH, paletteColor, type Rgba } from "./palette";
@@ -32,7 +34,9 @@ export interface RadarSweepCpuModel {
   statuses: Uint8Array;
   azimuths: Float32Array;
   beamWidths: Float32Array;
+  elevations: Float32Array;
   azimuthLookup: Uint16Array;
+  maxSlantRangeM: number;
   cpuBytes: number;
   estimatedGpuBytes: number;
 }
@@ -41,7 +45,8 @@ export interface GateInterrogation {
   radialIndex: number;
   gateIndex: number;
   sourceAzimuthDegrees: number;
-  rangeM: number;
+  slantRangeM: number;
+  groundRangeM: number;
   rawCode: number;
   status: GateStatusName;
   value: number | null;
@@ -55,7 +60,8 @@ export interface GateAnchor {
   gateIndex: number;
   longitude: number;
   latitude: number;
-  expectedRangeM: number;
+  expectedSlantRangeM: number;
+  expectedGroundRangeM: number;
   recoveredRangeErrorM: number;
   recoveredBearingErrorDegrees: number;
   selectedCorrectGate: boolean;
@@ -88,15 +94,24 @@ export function createRadarSweepCpuModel(sweep: PackedSweep): RadarSweepCpuModel
   );
   const azimuths = Float32Array.from(radials, (radial) => radial.azimuthDegrees);
   const beamWidths = Float32Array.from(radials, (radial) => radial.beamWidthDegrees);
+  const elevations = Float32Array.from(radials, (radial) => radial.elevationDegrees);
   const rawCodes = sweep.rawCodes.slice();
   const statuses = sweep.statuses.slice();
   const azimuthLookup = buildAzimuthLookup(radials, AZIMUTH_LOOKUP_SIZE);
-  const maxRangeM = metadata.firstGateCenterM
+  const maxSlantRangeM = metadata.firstGateCenterM
     + (metadata.gateCount - 0.5) * metadata.gateSpacingM;
+  let maxRangeM = 0;
+  for (const elevation of elevations) {
+    maxRangeM = Math.max(
+      maxRangeM,
+      groundRangeForSlantRange(maxSlantRangeM, elevation),
+    );
+  }
   const cpuBytes = rawCodes.byteLength + statuses.byteLength + azimuths.byteLength
-    + beamWidths.byteLength + azimuthLookup.byteLength;
+    + beamWidths.byteLength + elevations.byteLength + azimuthLookup.byteLength;
   const estimatedGpuBytes = rawCodes.byteLength + statuses.byteLength
-    + azimuthLookup.byteLength + PALETTE_WIDTH * 4 + 6 * 2 * 4;
+    + azimuthLookup.byteLength + elevations.byteLength
+    + PALETTE_WIDTH * 4 + 6 * 2 * 4;
   return {
     observationId: metadata.observationId,
     siteIcao: metadata.siteIcao,
@@ -119,7 +134,9 @@ export function createRadarSweepCpuModel(sweep: PackedSweep): RadarSweepCpuModel
     statuses,
     azimuths,
     beamWidths,
+    elevations,
     azimuthLookup,
+    maxSlantRangeM,
     cpuBytes,
     estimatedGpuBytes,
   };
@@ -134,8 +151,12 @@ export function interrogateLngLat(
   if (radialIndex === null) {
     return null;
   }
-  const gateIndex = gateIndexForRange(
+  const slantRangeM = slantRangeForGroundRange(
     measured.rangeM,
+    model.elevations[radialIndex],
+  );
+  const gateIndex = gateIndexForRange(
+    slantRangeM,
     model.firstGateCenterM,
     model.gateSpacingM,
     model.gateCount,
@@ -143,14 +164,24 @@ export function interrogateLngLat(
   if (gateIndex === null) {
     return null;
   }
-  return interrogateGate(model, radialIndex, gateIndex, measured.rangeM);
+  return interrogateGate(
+    model,
+    radialIndex,
+    gateIndex,
+    slantRangeM,
+    measured.rangeM,
+  );
 }
 
 export function interrogateGate(
   model: RadarSweepCpuModel,
   radialIndex: number,
   gateIndex: number,
-  rangeM = model.firstGateCenterM + gateIndex * model.gateSpacingM,
+  slantRangeM = model.firstGateCenterM + gateIndex * model.gateSpacingM,
+  groundRangeM = groundRangeForSlantRange(
+    slantRangeM,
+    model.elevations[radialIndex],
+  ),
 ): GateInterrogation {
   if (
     !Number.isInteger(radialIndex) || radialIndex < 0 || radialIndex >= model.radialCount
@@ -166,7 +197,8 @@ export function interrogateGate(
     radialIndex,
     gateIndex,
     sourceAzimuthDegrees: model.azimuths[radialIndex],
-    rangeM,
+    slantRangeM,
+    groundRangeM,
     rawCode,
     status,
     value: status === "valid" ? Math.fround((rawCode - model.offset) / model.scale) : null,
@@ -190,11 +222,16 @@ export function createAlignmentReport(model: RadarSweepCpuModel): AlignmentRepor
   const anchors: GateAnchor[] = [];
   for (const radialIndex of radialIndices) {
     for (const gateIndex of gateIndices) {
-      const expectedRangeM = model.firstGateCenterM + gateIndex * model.gateSpacingM;
+      const expectedSlantRangeM = model.firstGateCenterM
+        + gateIndex * model.gateSpacingM;
+      const expectedGroundRangeM = groundRangeForSlantRange(
+        expectedSlantRangeM,
+        model.elevations[radialIndex],
+      );
       const point = destinationPoint(
         model.center,
         model.azimuths[radialIndex],
-        expectedRangeM,
+        expectedGroundRangeM,
       );
       const recovered = rangeBearing(model.center, point);
       const selected = interrogateLngLat(model, point);
@@ -204,8 +241,9 @@ export function createAlignmentReport(model: RadarSweepCpuModel): AlignmentRepor
         gateIndex,
         longitude: point.longitude,
         latitude: point.latitude,
-        expectedRangeM,
-        recoveredRangeErrorM: Math.abs(recovered.rangeM - expectedRangeM),
+        expectedSlantRangeM,
+        expectedGroundRangeM,
+        recoveredRangeErrorM: Math.abs(recovered.rangeM - expectedGroundRangeM),
         recoveredBearingErrorDegrees: angularDistanceDegrees(
           recovered.bearingDegrees,
           model.azimuths[radialIndex],

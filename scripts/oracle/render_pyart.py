@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 import matplotlib
@@ -12,6 +13,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.colors import BoundaryNorm, ListedColormap  # noqa: E402
 import pyart  # noqa: E402
+import numpy as np  # noqa: E402
 
 
 BOUNDS = [-32, -10, 0, 5, 20, 30, 40, 50, 60, 70, 100]
@@ -33,6 +35,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("archive", type=Path)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--reference-json", type=Path)
     arguments = parser.parse_args()
 
     radar = pyart.io.read_nexrad_archive(str(arguments.archive))
@@ -69,6 +72,46 @@ def main() -> None:
     arguments.output.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(arguments.output, bbox_inches="tight", facecolor=figure.get_facecolor())
     plt.close(figure)
+
+    if arguments.reference_json:
+        write_ground_range_reference(radar, arguments.reference_json)
+
+
+def write_ground_range_reference(radar, output: Path) -> None:
+    sweep_slice = radar.get_slice(0)
+    azimuths = radar.azimuth["data"][sweep_slice]
+    elevations = radar.elevation["data"][sweep_slice]
+    x, y, z = radar.get_gate_x_y_z(0)
+    sorted_rays = np.argsort(azimuths, kind="stable")
+    gate_indices = [0, 460, len(radar.range["data"]) - 1]
+    radial_indices = [0, 180, 360, 540, len(sorted_rays) - 1]
+    points = []
+    for radial_index in radial_indices:
+        sweep_ray_index = int(sorted_rays[radial_index])
+        for gate_index in gate_indices:
+            x_m = float(x[sweep_ray_index, gate_index])
+            y_m = float(y[sweep_ray_index, gate_index])
+            points.append(
+                {
+                    "radialIndex": radial_index,
+                    "gateIndex": gate_index,
+                    "azimuthDegrees": float(azimuths[sweep_ray_index]),
+                    "elevationDegrees": float(elevations[sweep_ray_index]),
+                    "slantRangeM": float(radar.range["data"][gate_index]),
+                    "groundRangeM": float(np.hypot(x_m, y_m)),
+                    "xM": x_m,
+                    "yM": y_m,
+                    "heightAboveRadarM": float(z[sweep_ray_index, gate_index]),
+                }
+            )
+    payload = {
+        "oracle": "arm_pyart 2.2.5 antenna_to_cartesian",
+        "model": "Doviak-Zrnic standard atmosphere, 4/3 Earth radius",
+        "effectiveEarthRadiusM": 4.0 / 3.0 * 6_371_000.0,
+        "points": points,
+    }
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
 if __name__ == "__main__":

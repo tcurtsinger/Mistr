@@ -1,6 +1,8 @@
 import type { PackedRadial } from "../packed-sweep/packedSweep";
 
 export const EARTH_MEAN_RADIUS_M = 6_371_008.8;
+// Py-ART/Doviak-Zrnic standard-atmosphere beam model uses 4/3 of 6371 km.
+export const EFFECTIVE_EARTH_RADIUS_M = 4 / 3 * 6_371_000;
 export const AZIMUTH_LOOKUP_SIZE = 4_096;
 const MAX_MERCATOR_LATITUDE = 85.051_128_779_806_6;
 
@@ -188,6 +190,35 @@ export function gateIndexForRange(
   return Math.max(0, Math.min(gateCount - 1, Math.floor(gateCoordinate + 0.5)));
 }
 
+/** Convert Level II beam slant range to surface arc distance (4/3-Earth model). */
+export function groundRangeForSlantRange(
+  slantRangeM: number,
+  elevationDegrees: number,
+): number {
+  assertBeamCoordinates(slantRangeM, elevationDegrees);
+  const elevation = degreesToRadians(elevationDegrees);
+  const groundAngle = Math.atan2(
+    slantRangeM * Math.cos(elevation),
+    EFFECTIVE_EARTH_RADIUS_M + slantRangeM * Math.sin(elevation),
+  );
+  return EFFECTIVE_EARTH_RADIUS_M * groundAngle;
+}
+
+/** Invert the 4/3-Earth beam model from surface arc distance to slant range. */
+export function slantRangeForGroundRange(
+  groundRangeM: number,
+  elevationDegrees: number,
+): number {
+  assertBeamCoordinates(groundRangeM, elevationDegrees);
+  const elevation = degreesToRadians(elevationDegrees);
+  const groundAngle = groundRangeM / EFFECTIVE_EARTH_RADIUS_M;
+  const denominator = Math.cos(elevation + groundAngle);
+  if (denominator <= 0) {
+    throw new RangeError("ground range lies beyond the beam-model horizon");
+  }
+  return EFFECTIVE_EARTH_RADIUS_M * Math.sin(groundAngle) / denominator;
+}
+
 export function angularDistanceDegrees(left: number, right: number): number {
   const difference = Math.abs(normalizeBearing(left) - normalizeBearing(right));
   return Math.min(difference, 360 - difference);
@@ -218,6 +249,19 @@ function nearestRadial(radials: readonly PackedRadial[], azimuth: number): numbe
       <= angularDistanceDegrees(azimuth, radials[next].azimuthDegrees)
     ? previous
     : next;
+}
+
+function assertBeamCoordinates(rangeM: number, elevationDegrees: number) {
+  if (!Number.isFinite(rangeM) || rangeM < 0) {
+    throw new RangeError("beam range must be finite and nonnegative");
+  }
+  if (
+    !Number.isFinite(elevationDegrees)
+    || elevationDegrees < 0
+    || elevationDegrees > 90
+  ) {
+    throw new RangeError("beam elevation must be finite and between 0 and 90 degrees");
+  }
 }
 
 function degreesToRadians(value: number): number {

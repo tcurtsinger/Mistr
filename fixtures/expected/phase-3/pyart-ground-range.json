@@ -1,0 +1,172 @@
+{
+  "oracle": "arm_pyart 2.2.5 antenna_to_cartesian",
+  "model": "Doviak-Zrnic standard atmosphere, 4/3 Earth radius",
+  "effectiveEarthRadiusM": 8494666.666666666,
+  "points": [
+    {
+      "radialIndex": 0,
+      "gateIndex": 0,
+      "azimuthDegrees": 0.25543212890625,
+      "elevationDegrees": 0.4833984375,
+      "slantRangeM": 2125.0,
+      "groundRangeM": 2124.919677734375,
+      "xM": 9.47314032069651,
+      "yM": 2124.898561445987,
+      "heightAboveRadarM": 18.0
+    },
+    {
+      "radialIndex": 0,
+      "gateIndex": 460,
+      "azimuthDegrees": 0.25543212890625,
+      "elevationDegrees": 0.4833984375,
+      "slantRangeM": 117125.0,
+      "groundRangeM": 117099.796875,
+      "xM": 522.0445831179327,
+      "yM": 117098.63320132946,
+      "heightAboveRadarM": 1795.0
+    },
+    {
+      "radialIndex": 0,
+      "gateIndex": 1831,
+      "azimuthDegrees": 0.25543212890625,
+      "elevationDegrees": 0.4833984375,
+      "slantRangeM": 459875.0,
+      "groundRangeM": 459200.875,
+      "xM": 2047.1711800889059,
+      "yM": 459196.31171311147,
+      "heightAboveRadarM": 16312.0
+    },
+    {
+      "radialIndex": 180,
+      "gateIndex": 0,
+      "azimuthDegrees": 90.252685546875,
+      "elevationDegrees": 0.4833984375,
+      "slantRangeM": 2125.0,
+      "groundRangeM": 2124.919677734375,
+      "xM": 2124.899013117512,
+      "yM": -9.371279260805535,
+      "heightAboveRadarM": 18.0
+    },
+    {
+      "radialIndex": 180,
+      "gateIndex": 460,
+      "azimuthDegrees": 90.252685546875,
+      "elevationDegrees": 0.4833984375,
+      "slantRangeM": 117125.0,
+      "groundRangeM": 117099.796875,
+      "xM": 117098.65809198504,
+      "yM": -516.431237094697,
+      "heightAboveRadarM": 1795.0
+    },
+    {
+      "radialIndex": 180,
+      "gateIndex": 1831,
+      "azimuthDegrees": 90.252685546875,
+      "elevationDegrees": 0.4833984375,
+      "slantRangeM": 459875.0,
+      "groundRangeM": 459200.875,
+      "xM": 459196.40932054655,
+      "yM": -2025.1587302441026,
+      "heightAboveRadarM": 16312.0
+    },
+    {
+      "radialIndex": 360,
+      "gateIndex": 0,
+      "azimuthDegrees": 180.252685546875,
+      "elevationDegrees": 0.4833984375,
+      "slantRangeM": 2125.0,
+      "groundRangeM": 2124.919677734375,
+      "xM": -9.371279260804933,
+      "yM": -2124.899013117512,
+      "heightAboveRadarM": 18.0
+    },
+    {
+      "radialIndex": 360,
+      "gateIndex": 460,
+      "azimuthDegrees": 180.252685546875,
+      "elevationDegrees": 0.4833984375,
+      "slantRangeM": 117125.0,
+      "groundRangeM": 117099.796875,
+      "xM": -516.4312370946639,
+      "yM": -117098.65809198504,
+      "heightAboveRadarM": 1795.0
+    },
+    {
+      "radialIndex": 360,
+      "gateIndex": 1831,
+      "azimuthDegrees": 180.252685546875,
+      "elevationDegrees": 0.4833984375,
+      "slantRangeM": 459875.0,
+      "groundRangeM": 459200.875,
+      "xM": -2025.1587302439727,
+      "yM": -459196.40932054655,
+      "heightAboveRadarM": 16312.0
+    },
+    {
+      "radialIndex": 540,
+      "gateIndex": 0,
+      "azimuthDegrees": 270.24444580078125,
+      "elevationDegrees": 0.4833984375,
+      "slantRangeM": 2125.0,
+      "groundRangeM": 2124.9196777343745,
+      "xM": -2124.900338834659,
+      "yM": 9.065695952860041,
+      "heightAboveRadarM": 18.0
+    },
+    {
+      "radialIndex": 540,
+      "gateIndex": 460,
+      "azimuthDegrees": 270.24444580078125,
+      "elevationDegrees": 0.4833984375,
+      "slantRangeM": 117125.0,
+      "groundRangeM": 117099.79687499999,
+      "xM": -117098.73114943295,
+      "yM": 499.59119195616216,
+      "heightAboveRadarM": 1795.0
+    },
+    {
+      "radialIndex": 540,
+      "gateIndex": 1831,
+      "azimuthDegrees": 270.24444580078125,
+      "elevationDegrees": 0.4833984375,
+      "slantRangeM": 459875.0,
+      "groundRangeM": 459200.875,
+      "xM": -459196.6958115987,
+      "yM": 1959.1213529896452,
+      "heightAboveRadarM": 16312.0
+    },
+    {
+      "radialIndex": 719,
+      "gateIndex": 0,
+      "azimuthDegrees": 359.7528076171875,
+      "elevationDegrees": 0.4833984375,
+      "slantRangeM": 2125.0,
+      "groundRangeM": 2124.919677734375,
+      "xM": -9.167557076653782,
+      "yM": 2124.8999018118493,
+      "heightAboveRadarM": 18.0
+    },
+    {
+      "radialIndex": 719,
+      "gateIndex": 460,
+      "azimuthDegrees": 359.7528076171875,
+      "elevationDegrees": 0.4833984375,
+      "slantRangeM": 117125.0,
+      "groundRangeM": 117099.79687499999,
+      "xM": -505.2045415009431,
+      "yM": 117098.70706603683,
+      "heightAboveRadarM": 1795.0
+    },
+    {
+      "radialIndex": 719,
+      "gateIndex": 1831,
+      "azimuthDegrees": 359.7528076171875,
+      "elevationDegrees": 0.4833984375,
+      "slantRangeM": 459875.0,
+      "groundRangeM": 459200.875,
+      "xM": -1981.1338166440084,
+      "yM": 459196.6013697904,
+      "heightAboveRadarM": 16312.0
+    }
+  ]
+}

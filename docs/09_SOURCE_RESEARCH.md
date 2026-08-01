@@ -227,6 +227,7 @@ Mistr Phase 3 rechecked the pinned MapLibre 6.1.0 package types/source and curre
 - The public render input supplies `defaultProjectionData.mainMatrix`; Mistr does not read MapLibre private transform or painter state.
 - MapLibre 6 is ESM-only, requires WebGL2, and loads a module worker. In Vite, Mistr explicitly bundles that worker with `?worker&url` and configures it through public `setWorkerUrl` before map construction.
 - The WebGL2 texture/readback/fence operations used by the renderer are standard public WebGL 2.0 APIs.
+- Level II gate distances are beam slant ranges. Mistr uses Py-ART's documented Doviak-Zrnic standard-atmosphere equations (4/3 of a 6,371 km Earth radius) to convert between slant range and surface placement after selecting the measured radial elevation.
 
 Sources:
 
@@ -235,3 +236,4 @@ Sources:
 - [MapLibre custom-layer example](https://maplibre.org/maplibre-gl-js/docs/examples/add-a-custom-style-layer/)
 - [MapLibre v6.0.0 release notes](https://github.com/maplibre/maplibre-gl-js/releases/tag/v6.0.0)
 - [WebGL 2.0 specification](https://registry.khronos.org/webgl/specs/latest/2.0/)
+- [Py-ART `antenna_to_cartesian` equations](https://arm-doe.github.io/pyart-docs-travis/API/generated/pyart.core.antenna_to_cartesian.html)

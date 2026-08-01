@@ -8,7 +8,7 @@ import {
   interrogateLngLat,
   RadarModelError,
 } from "./cpuModel";
-import { destinationPoint } from "./geo";
+import { destinationPoint, groundRangeForSlantRange } from "./geo";
 
 const GOLDEN_PATH = new URL(
   "../../fixtures/expected/phase-2/packed-sweep-v1.bin",
@@ -29,8 +29,8 @@ describe("RadarSweepCpuModel", () => {
       sourceKind: "mistr_phase2_synthetic",
       radialCount: 2,
       gateCount: 3,
-      cpuBytes: 8_220,
-      estimatedGpuBytes: 9_276,
+      cpuBytes: 8_228,
+      estimatedGpuBytes: 9_284,
     });
     expect([...model.rawCodes]).toEqual([0, 1, 68, 2, 86, 193]);
     expect([...model.statuses]).toEqual([1, 2, 0, 0, 0, 0]);
@@ -62,7 +62,10 @@ describe("RadarSweepCpuModel", () => {
     const point = destinationPoint(
       model.center,
       model.azimuths[1],
-      model.firstGateCenterM + 2 * model.gateSpacingM,
+      groundRangeForSlantRange(
+        model.firstGateCenterM + 2 * model.gateSpacingM,
+        model.elevations[1],
+      ),
     );
     expect(interrogateLngLat(model, point)).toMatchObject({
       radialIndex: 1,
