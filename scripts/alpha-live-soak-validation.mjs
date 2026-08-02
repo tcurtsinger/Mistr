@@ -34,7 +34,12 @@ export function validateAlphaLiveSoak(report, targetFrames) {
   requireGate(failures, report?.recovery?.recovery?.phase === "ready", "live history context recovery did not complete");
   requireGate(failures, sameMembers(report?.recovery?.before?.residentObservationIds, report?.recovery?.after?.residentObservationIds), "context recovery changed live residency");
   requireGate(failures, report?.recovery?.after?.lastPaintedObservationId === report?.scrub?.newestObservationId, "context recovery did not repaint the visible newest frame");
-  requireGate(failures, report?.final?.timelineText?.includes(`BUILDING ${targetFrames}/20`), "partial live history is not labeled in the timeline");
+  if (targetFrames < 20) {
+    requireGate(failures, report?.final?.timelineText?.includes(`BUILDING ${targetFrames}/20`), "partial live history is not labeled in the timeline");
+  } else {
+    requireGate(failures, report?.final?.timelineText?.includes("20 / 20"), "full live history position is not labeled in the timeline");
+    requireGate(failures, !report?.final?.timelineText?.includes("BUILDING"), "full live history is still labeled as building");
+  }
   requireGate(failures, !/\bINCOMPLETE\b/i.test(report?.final?.bodyText ?? ""), "UI labels an incomplete observation");
   requireGate(failures, report?.fatalErrors?.length === 0, "soak encountered a fatal product error");
   return failures;
