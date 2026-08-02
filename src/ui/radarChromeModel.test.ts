@@ -60,6 +60,7 @@ describe("radar chrome model", () => {
 
   it("keeps archive, acquisition, failure, and live freshness explicit", () => {
     expect(freshnessPresentation("archive", 0, 100_000).label).toBe("ARCHIVE LOOP");
+    expect(freshnessPresentation("archive_frame", 0, 100_000).label).toBe("ARCHIVE FRAME");
     expect(freshnessPresentation("updating", undefined, 100_000).label).toBe("UPDATING LIVE");
     expect(freshnessPresentation("error", undefined, 100_000).label).toBe("RADAR ERROR");
     expect(freshnessPresentation("live", 60_000, 100_000)).toEqual({

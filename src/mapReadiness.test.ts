@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { updateMapReadiness } from "./mapReadiness";
+import { mapReadinessError, updateMapReadiness } from "./mapReadiness";
 
 describe("updateMapReadiness", () => {
   it("reports an initial load failure", () => {
@@ -18,5 +18,11 @@ describe("updateMapReadiness", () => {
     expect(updateMapReadiness("BASEMAP READY", "error")).toBe(
       "BASEMAP READY",
     );
+  });
+
+  it("surfaces only an initial basemap failure as unavailable", () => {
+    expect(mapReadinessError("INITIALIZING")).toBeNull();
+    expect(mapReadinessError("BASEMAP READY")).toBeNull();
+    expect(mapReadinessError("BASEMAP UNAVAILABLE")).toBe("Basemap unavailable");
   });
 });

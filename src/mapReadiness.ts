@@ -18,3 +18,7 @@ export function updateMapReadiness(
   // telemetry when that diagnostic surface is introduced.
   return current === "BASEMAP READY" ? current : "BASEMAP UNAVAILABLE";
 }
+
+export function mapReadinessError(current: MapReadiness): string | null {
+  return current === "BASEMAP UNAVAILABLE" ? "Basemap unavailable" : null;
+}

@@ -14,7 +14,7 @@ import type {
 } from "maplibre-gl";
 import fixtureManifest from "../fixtures/manifest.json";
 import { configureMapLibreWorker } from "./mapWorker";
-import { updateMapReadiness, type MapReadiness } from "./mapReadiness";
+import { mapReadinessError, updateMapReadiness, type MapReadiness } from "./mapReadiness";
 import {
   PackedSweepTransferClient,
   tauriInvokeFunction,
@@ -126,6 +126,9 @@ export function App() {
   });
   const [interrogation, setInterrogation] = useState<GateInterrogation | null>(null);
   const [paintedProduct, setPaintedProduct] = useState<RadarSweepCpuModel["product"]>("reflectivity");
+  const [paintedSourceKind, setPaintedSourceKind] = useState<RadarSweepCpuModel["sourceKind"]>(
+    "nexrad_level2_archive_ii",
+  );
   const [timelineFrames, setTimelineFrames] = useState<TimelineFrame[]>([]);
   const [selectedSite, setSelectedSite] = useState("KTLX");
   const [requestedSite, setRequestedSite] = useState<string | null>(null);
@@ -425,6 +428,7 @@ export function App() {
       paintedSiteRef.current = initialModel.siteIcao;
       radarModelRef.current = initialModel;
       setPaintedProduct(initialModel.product);
+      setPaintedSourceKind(initialModel.sourceKind);
       liveDisplay = initialLiveDisplay(frameTruth(initialModel, newestReceipt));
       publishPhase5({ display: liveDisplay });
       const activityAtResidency = await client.phase4ActivitySnapshot();
@@ -539,6 +543,7 @@ export function App() {
           paintedSiteRef.current = model.siteIcao;
           radarModelRef.current = model;
           setPaintedProduct(model.product);
+          setPaintedSourceKind(model.sourceKind);
           setTimelineFrames([timelineFrame(model)]);
           inspectionMarkerRef.current?.remove();
           inspectionMarkerRef.current = null;
@@ -646,6 +651,7 @@ export function App() {
           modelsById.set(model.observationId, model);
           radarModelRef.current = model;
           setPaintedProduct(model.product);
+          setPaintedSourceKind(model.sourceKind);
           setTimelineFrames([timelineFrame(model)]);
           updateDiagnosticSources(instance, model, alignment);
           const firstValid = model.statuses.findIndex((status) => status === 0);
@@ -708,6 +714,8 @@ export function App() {
         selectedSiteRef.current = paintedModel.siteIcao;
         radarModelRef.current = paintedModel;
         setPaintedProduct(paintedModel.product);
+        setPaintedSourceKind(paintedModel.sourceKind);
+        updateDiagnosticSources(instance, paintedModel, createAlignmentReport(paintedModel));
         setSelectedSite(paintedModel.siteIcao);
         setRequestedSite(null);
         setSiteRequestError(null);
@@ -787,15 +795,17 @@ export function App() {
   const rendererError = phase4.kind === "complete"
     ? rendererFailureMessage(phase4.report.renderer)
     : null;
-  const radarUnavailableError = initializationError ?? rendererError;
+  const radarUnavailableError = initializationError ?? rendererError ?? mapReadinessError(mapState);
   const freshnessSource = radarUnavailableError || siteRequestError || playbackError
     ? "error"
     : phase5.display.kind === "acquiring"
       ? "updating"
-      : phase5.display.kind === "painted"
-        ? "live"
-        : phase5.display.kind === "degraded"
-          ? "error"
+      : phase5.display.kind === "degraded"
+        ? "error"
+        : paintedSourceKind === "nexrad_level3_n0s"
+          ? "archive_frame"
+          : phase5.display.kind === "painted"
+            ? "live"
           : displayedAtUnixMs === undefined
             ? "waiting"
             : "archive";

@@ -72,11 +72,12 @@ export function playbackPresentation(
 }
 
 export function freshnessPresentation(
-  source: "live" | "archive" | "updating" | "error" | "waiting",
+  source: "live" | "archive" | "archive_frame" | "updating" | "error" | "waiting",
   observedAtUnixMs: number | undefined,
   nowUnixMs: number,
 ): FreshnessPresentation {
   if (source === "archive") return { kind: "archive", label: "ARCHIVE LOOP" };
+  if (source === "archive_frame") return { kind: "archive", label: "ARCHIVE FRAME" };
   if (source === "updating") return { kind: "updating", label: "UPDATING LIVE" };
   if (source === "error") return { kind: "error", label: "RADAR ERROR" };
   if (source === "waiting" || observedAtUnixMs === undefined) {
