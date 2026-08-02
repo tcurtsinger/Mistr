@@ -36,7 +36,7 @@ function validReport() {
       contextHasPopup: null,
     },
     forcedColors: { focusOutlineVisible: true },
-    reducedMotion: { matches: true },
+    reducedMotion: { matches: true, transitionDuration: "1e-05s", animationDuration: "0.01ms" },
     contrast: { inactiveSample: 6.65 },
     visiblePrototypeTerms: [],
   };
@@ -54,6 +54,7 @@ describe("Alpha readiness packaged validation", () => {
     ["keyboard scrub", (report) => { report.keyboard.sliderAfter = 0; }],
     ["unnamed control", (report) => { report.accessibility.unnamedInteractive = ["button"]; }],
     ["forced colors", (report) => { report.forcedColors.focusOutlineVisible = false; }],
+    ["reduced-motion styles", (report) => { report.reducedMotion.transitionDuration = "0.2s"; }],
     ["contrast", (report) => { report.contrast.inactiveSample = 4.2; }],
     ["prototype terminology", (report) => { report.visiblePrototypeTerms = ["benchmark"]; }],
   ])("rejects %s regression", (_name, mutate) => {

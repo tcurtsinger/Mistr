@@ -37,6 +37,16 @@ export function validateAlphaReadiness(report) {
   requireGate(failures, report?.accessibility?.contextHasPopup === null, "site selector claims a popup role the panel does not implement");
   requireGate(failures, report?.forcedColors?.focusOutlineVisible === true, "Windows forced-colors focus is not visible");
   requireGate(failures, report?.reducedMotion?.matches === true, "reduced-motion preference was not honored");
+  requireGate(
+    failures,
+    maximumCssDurationMs(report?.reducedMotion?.transitionDuration) <= 0.1,
+    "reduced-motion preference did not suppress chrome transitions",
+  );
+  requireGate(
+    failures,
+    maximumCssDurationMs(report?.reducedMotion?.animationDuration) <= 0.1,
+    "reduced-motion preference did not suppress chrome animations",
+  );
   requireGate(failures, report?.contrast?.inactiveSample >= 4.5, "inactive inspection instruction fails text contrast");
   requireGate(failures, report?.visiblePrototypeTerms?.length === 0, "normal UI exposes engineering terminology");
   return failures;
@@ -44,4 +54,15 @@ export function validateAlphaReadiness(report) {
 
 function requireGate(failures, passed, message) {
   if (!passed) failures.push(message);
+}
+
+function maximumCssDurationMs(value) {
+  if (typeof value !== "string" || value.length === 0) return Number.POSITIVE_INFINITY;
+  const durations = value.split(",").map(duration => {
+    const match = duration.trim().match(/^([0-9]*\.?[0-9]+(?:e[+-]?[0-9]+)?)(ms|s)$/i);
+    if (!match) return Number.POSITIVE_INFINITY;
+    const amount = Number(match[1]);
+    return match[2].toLowerCase() === "s" ? amount * 1_000 : amount;
+  });
+  return Math.max(...durations);
 }
