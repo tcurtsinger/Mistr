@@ -4,7 +4,7 @@
 
 **Merged baseline:** [PR #11 — Harden radar site selection and product chrome](https://github.com/tcurtsinger/Mistr/pull/11), merge commit `ccb4a02`
 
-**Active change:** Radar rendering quality with top-context `Smooth` and `Native` display modes; ready-for-review pull request pending publication
+**Active change:** [PR #12 — Improve radar rendering quality](https://github.com/tcurtsinger/Mistr/pull/12)
 
 **Branch:** `codex/mistr-radar-rendering-quality`
 
@@ -129,7 +129,7 @@ Release readiness also corrects a demonstrated installer defect: prior bundles d
 
 ## Pull-request checkpoint
 
-PR #8, rolling-history [PR #9](https://github.com/tcurtsinger/Mistr/pull/9), release-readiness [PR #10](https://github.com/tcurtsinger/Mistr/pull/10), and UI/live-site hardening [PR #11](https://github.com/tcurtsinger/Mistr/pull/11) are merged. The rendering-quality branch is prepared for publication as a **ready-for-review** pull request, never a draft. Local and packaged validation passed. Only the repository owner merges.
+PR #8, rolling-history [PR #9](https://github.com/tcurtsinger/Mistr/pull/9), release-readiness [PR #10](https://github.com/tcurtsinger/Mistr/pull/10), and UI/live-site hardening [PR #11](https://github.com/tcurtsinger/Mistr/pull/11) are merged. Rendering quality [PR #12](https://github.com/tcurtsinger/Mistr/pull/12) is **ready for review**, not a draft. Local and packaged validation passed; GitHub CI was in progress with no comments or submitted reviews at this checkpoint. Only the repository owner merges.
 
 Review workflow:
 
