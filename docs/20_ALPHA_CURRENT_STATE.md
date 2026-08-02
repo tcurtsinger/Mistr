@@ -4,7 +4,7 @@
 
 **Merged release baseline:** [PR #10 — Qualify Mistr Alpha release readiness](https://github.com/tcurtsinger/Mistr/pull/10), merge commit `61e6692`
 
-**Active change:** UI and live-site hardening after owner hands-on review
+**Active change:** [PR #11 — Harden radar site selection and product chrome](https://github.com/tcurtsinger/Mistr/pull/11)
 
 **Branch:** `codex/mistr-ui-hardening`
 
@@ -112,7 +112,7 @@ Release readiness also corrects a demonstrated installer defect: prior bundles d
 
 ## Pull-request checkpoint
 
-PR #8, rolling-history [PR #9](https://github.com/tcurtsinger/Mistr/pull/9), and release-readiness [PR #10](https://github.com/tcurtsinger/Mistr/pull/10) are merged. The active UI/live-site hardening branch has passed local and packaged validation and is ready to open as a ready-for-review pull request. Only the repository owner merges.
+PR #8, rolling-history [PR #9](https://github.com/tcurtsinger/Mistr/pull/9), and release-readiness [PR #10](https://github.com/tcurtsinger/Mistr/pull/10) are merged. UI/live-site hardening [PR #11](https://github.com/tcurtsinger/Mistr/pull/11) is **ready for review**, not a draft. Local and packaged validation passed; GitHub CI was in progress at this checkpoint. Only the repository owner merges.
 
 Review workflow:
 

@@ -1,6 +1,6 @@
 # Alpha UI and Live-Site Hardening
 
-**Status:** Implemented and validated; pull request pending
+**Status:** Implemented and validated in [PR #11](https://github.com/tcurtsinger/Mistr/pull/11), ready for review
 
 **Checkpoint:** 2026-08-02
 
