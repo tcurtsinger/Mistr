@@ -29,22 +29,12 @@ describe("reflectivity palette", () => {
     ]);
   });
 
-  it("keeps every valid reflectivity code visible without a low-return cutoff", () => {
+  it("keeps every valid reflectivity code operationally opaque without a low-return cutoff", () => {
     const palette = buildReflectivityPalette(2, 66);
-    const alphas: number[] = [];
 
     for (let rawCode = 2; rawCode < 256; rawCode += 1) {
-      const alpha = palette[rawCode * 4 + 3];
-      expect(alpha).toBeGreaterThan(0);
-      alphas.push(alpha);
+      expect(palette[rawCode * 4 + 3]).toBe(255);
     }
-
-    for (let index = 1; index < alphas.length; index += 1) {
-      expect(alphas[index]).toBeGreaterThanOrEqual(alphas[index - 1]);
-      expect(alphas[index] - alphas[index - 1]).toBeLessThanOrEqual(4);
-    }
-
-    expect(alphas[0]).toBeLessThan(32);
   });
 
   it("maps the exact unrounded code-to-dBZ value before color interpolation", () => {
@@ -59,11 +49,17 @@ describe("reflectivity palette", () => {
     expect(colorForReflectivity(exactDbz)).not.toEqual(colorForReflectivity(3));
   });
 
-  it("preserves exact anchor colors while interpolating between them", () => {
-    expect(colorForReflectivity(-32)).toEqual([57, 80, 110, 18]);
-    expect(colorForReflectivity(20)).toEqual([39, 163, 57, 156]);
-    expect(colorForReflectivity(50)).toEqual([211, 46, 50, 244]);
-    expect(colorForReflectivity(2.5)).toEqual([40, 167, 153, 56]);
+  it("pins the NOAA operational SR_BREF anchor colors and interpolates between them", () => {
+    expect(colorForReflectivity(-32)).toEqual([145, 137, 105, 255]);
+    expect(colorForReflectivity(0)).toEqual([123, 136, 174, 255]);
+    expect(colorForReflectivity(20)).toEqual([48, 214, 91, 255]);
+    expect(colorForReflectivity(30)).toEqual([10, 115, 12, 255]);
+    expect(colorForReflectivity(40)).toEqual([244, 202, 23, 255]);
+    expect(colorForReflectivity(50)).toEqual([208, 8, 8, 255]);
+    expect(colorForReflectivity(60)).toEqual([241, 185, 253, 255]);
+    expect(colorForReflectivity(70)).toEqual([130, 0, 231, 255]);
+    expect(colorForReflectivity(80)).toEqual([130, 0, 231, 255]);
+    expect(colorForReflectivity(2.5)).toEqual([103, 121, 169, 255]);
   });
 
   it("keeps N0S categories separate from reflectivity scaling", () => {

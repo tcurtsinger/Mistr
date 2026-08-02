@@ -38,9 +38,9 @@ Status remains categorical and authoritative:
 
 ## 4. Reflectivity palette
 
-The Alpha reflectivity ramp is a meteorological data palette, not Stormlight chrome. It progresses from restrained blue/cyan weak returns through green, yellow, orange, red, magenta, and pale extreme returns.
+The Alpha reflectivity ramp is a meteorological data palette, not Stormlight chrome. It is pinned to the official NOAA/NWS [`SR_BREF` `radar_reflectivity` WMS legend](https://opengeo.ncep.noaa.gov/geoserver/kamx/wms?service=WMS&request=GetLegendGraphic&version=1.0.0&format=image%2Fpng&layer=kamx_sr_bref&style=radar_reflectivity) captured from the KAMX service on 2026-08-02. Five-dBZ anchors from -25 through 70 dBZ progress through neutral weak returns, blue/cyan, green, yellow/orange, red, magenta, and purple. The reference URL and capture date are recorded with the constants; the downloaded provider image remains an ignored local diagnostic, never a repository fixture.
 
-Every valid raw code has nonzero alpha. Very weak returns begin at low opacity and opacity rises gradually and monotonically. There is no low-dBZ hard cutoff: clear-air and weak biological returns remain available without visually overpowering stronger storm structure.
+The official reference renders valid reflectivity pixels fully opaque and no-data pixels transparent. Mistr mirrors that behavior: every valid raw code has alpha 255, below-threshold remains transparent, and no low-dBZ hard cutoff discards clear-air or weak biological returns. Because the radar layer remains below map labels, opacity does not erase operational place and road context.
 
 Palette anchors may interpolate color and alpha for presentation, but each lookup starts from the exact dBZ computed for that raw code. This color interpolation does not create, replace, or alter a measured value.
 
@@ -82,7 +82,7 @@ The application never reverse-engineers a dBZ value from a filtered screen color
 Source-level evidence must prove:
 
 1. every valid reflectivity raw code maps through the exact scale/offset equation;
-2. every valid palette entry has nonzero alpha and low-return alpha increases gradually without a hard threshold;
+2. the pinned five-dBZ colors and fully opaque valid entries match the captured NOAA/NWS operational `SR_BREF` reference without a low-return cutoff;
 3. below-threshold, range-folded, missing, and unknown statuses remain distinct;
 4. uploaded palette bytes remain correctly premultiplied for WebGL;
 5. `Smooth` and `Native` use the same observation and point interrogation result;
@@ -93,7 +93,9 @@ The combined packaged Windows/WebView2 matrix must cover direct scrub, resident 
 
 ### Current Alpha evidence
 
-The release WebView2 renderer compiled both shader paths and passed separate `Native` and `Smooth` 1,000-transition resident-playback scenarios at 3840x2160 with zero long tasks, zero hot-path acquisition, and zero hot-path frame uploads. Switching `Native` to `Smooth` changed neither observation/receipt truth nor the 53,099,312-byte resident GPU set and caused no upload. Automated isolated-pixel evidence found substantial signal in both modes, a 35.5% changed-pixel ratio, and 7.9% background retained in common; generated overview and close-zoom captures confirm that `Smooth` closes false hairline seams between normally adjacent beams while retaining genuine missing/status regions, while `Native` retains exact polar bins.
+The release WebView2 renderer compiled both shader paths and passed separate `Native` and `Smooth` 1,000-transition resident-playback scenarios at 3840x2160 with zero long tasks, zero hot-path acquisition, and zero hot-path frame uploads. Switching `Native` to `Smooth` changed neither observation/receipt truth nor the 53,099,312-byte resident GPU set and caused no upload. Automated isolated-pixel evidence found substantial signal in both modes, a 66.9% changed-pixel ratio, and 8.0% background retained in common; generated overview and close-zoom captures confirm that `Smooth` closes false hairline seams between normally adjacent beams while retaining genuine missing/status regions, while `Native` retains exact polar bins.
+
+A timestamp-matched 2026-08-02 22:08:23Z live KAMX check compared Mistr's packaged Smooth Level II draw with the official KAMX `SR_BREF` WMS frame. The operational color bands and storm structure aligned without the prior early yellow/orange severity shift. The comparison validates presentation rather than source identity: NOAA's WMS product includes its own Level III/MRMS processing, while Mistr continues to render independently decoded Level II measurements.
 
 The same release build passed both modes at 3840x2160, 1100x700, and 1024x640, including keyboard mode selection, one-panel behavior, accessible active-mode naming, focus restoration, forced-colors focus, and reduced motion. Live acquisition with generation supersession, a successive observation, direct oldest/newest scrubbing, and two cold-start context-recovery passes also succeeded.
 

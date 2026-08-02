@@ -7,31 +7,33 @@ interface PaletteAnchor {
   color: Rgba;
 }
 
-// These anchors define presentation only. Every valid raw code still maps to
-// its exact dBZ value before color lookup; interpolation here never changes the
-// measured value used by interrogation or playback truth. Very weak valid
-// returns remain visible with restrained, gradually increasing opacity instead
-// of being discarded by a display threshold.
+// These anchors pin Mistr to the operational NOAA/NWS SR_BREF
+// `radar_reflectivity` WMS legend captured from the KAMX service on 2026-08-02:
+// https://opengeo.ncep.noaa.gov/geoserver/kamx/wms
+// The legend is a continuous five-dBZ ramp from -25 through 70 dBZ. Its valid
+// pixels are fully opaque while no-data pixels are transparent. Presentation
+// never changes the exact dBZ used by interrogation or playback truth.
 const REFLECTIVITY_ANCHORS: readonly PaletteAnchor[] = [
-  { dbz: -32, color: [57, 80, 110, 18] },
-  { dbz: -20, color: [44, 98, 132, 24] },
-  { dbz: -10, color: [34, 126, 157, 34] },
-  { dbz: 0, color: [35, 159, 168, 48] },
-  { dbz: 5, color: [45, 175, 137, 64] },
-  { dbz: 10, color: [55, 185, 94, 88] },
-  { dbz: 15, color: [62, 189, 67, 116] },
-  { dbz: 20, color: [39, 163, 57, 156] },
-  { dbz: 25, color: [154, 192, 52, 196] },
-  { dbz: 30, color: [234, 214, 50, 222] },
-  { dbz: 35, color: [245, 169, 43, 230] },
-  { dbz: 40, color: [243, 119, 38, 236] },
-  { dbz: 45, color: [232, 67, 41, 240] },
-  { dbz: 50, color: [211, 46, 50, 244] },
-  { dbz: 55, color: [187, 45, 100, 246] },
-  { dbz: 60, color: [190, 52, 162, 248] },
-  { dbz: 65, color: [217, 104, 196, 250] },
-  { dbz: 70, color: [244, 226, 240, 252] },
-  { dbz: 80, color: [250, 250, 252, 255] },
+  { dbz: -25, color: [145, 137, 105, 255] },
+  { dbz: -20, color: [164, 161, 107, 255] },
+  { dbz: -15, color: [194, 195, 155, 255] },
+  { dbz: -10, color: [193, 197, 180, 255] },
+  { dbz: -5, color: [162, 168, 180, 255] },
+  { dbz: 0, color: [123, 136, 174, 255] },
+  { dbz: 5, color: [83, 106, 163, 255] },
+  { dbz: 10, color: [80, 133, 183, 255] },
+  { dbz: 15, color: [88, 193, 184, 255] },
+  { dbz: 20, color: [48, 214, 91, 255] },
+  { dbz: 25, color: [12, 175, 17, 255] },
+  { dbz: 30, color: [10, 115, 12, 255] },
+  { dbz: 35, color: [132, 160, 4, 255] },
+  { dbz: 40, color: [244, 202, 23, 255] },
+  { dbz: 45, color: [244, 178, 23, 255] },
+  { dbz: 50, color: [208, 8, 8, 255] },
+  { dbz: 55, color: [169, 8, 8, 255] },
+  { dbz: 60, color: [241, 185, 253, 255] },
+  { dbz: 65, color: [241, 116, 253, 255] },
+  { dbz: 70, color: [130, 0, 231, 255] },
 ];
 
 export const RANGE_FOLDED_COLOR: Rgba = [144, 91, 211, 220];
