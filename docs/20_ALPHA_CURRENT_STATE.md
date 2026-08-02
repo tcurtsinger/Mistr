@@ -98,8 +98,9 @@ One isolated intermediate Phase 4 stabilized-heap measurement failure did not re
 At this checkpoint:
 
 - PR #8 is open and marked ready for review;
-- GitHub CI is green;
-- GitHub reports a clean merge state; and
+- the code-bearing product-foundation commit passed GitHub CI;
+- the documentation-only handoff update triggered a fresh CI run, which was queued at the checkpoint;
+- GitHub may report an unstable merge state while that new check is incomplete; and
 - no conversation comments, submitted reviews, or review threads have appeared yet.
 
 The automated code review is expected to be running. Re-read the live PR before taking action rather than assuming this checkpoint is still current.
