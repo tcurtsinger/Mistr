@@ -264,6 +264,34 @@ describe("resident playback truth", () => {
     });
   });
 
+  it("holds direct resident interaction throughout an atomic replacement", async () => {
+    const layer = new FakeLayer();
+    const controller = new ResidentPlaybackController(layer, frames());
+    await controller.establishInitialPaint();
+
+    const replacement = controller.replaceResidentFrames([
+      frame("replacement-a", 400),
+      frame("replacement-b", 500),
+    ]);
+    expect(controller.snapshot().residentReplacementPending).toBe(true);
+    await expect(controller.scrub(1)).rejects.toThrow("history is being replaced");
+
+    await vi.waitFor(() => {
+      expect(controller.snapshot()).toMatchObject({
+        selectedObservationId: "replacement-a",
+        residentReplacementPending: true,
+      });
+    });
+    layer.completePaint();
+    await replacement;
+
+    expect(controller.snapshot().residentReplacementPending).toBe(false);
+    const scrub = controller.scrub(1);
+    await Promise.resolve();
+    layer.completePaint();
+    await expect(scrub).resolves.toMatchObject({ observationId: "replacement-b" });
+  });
+
   it("appends a live frame and follows it when paused on newest", async () => {
     const layer = new FakeLayer();
     const controller = new ResidentPlaybackController(layer, frames());

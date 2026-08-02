@@ -1,0 +1,629 @@
+{
+    "verifiedAt":  "2026-08-02",
+    "sources":  [
+                    "https://www.roc.noaa.gov/build-loaded.php",
+                    "https://unidata-nexrad-level2-chunks.s3.amazonaws.com/?list-type=2\u0026delimiter=%2F\u0026max-keys=1000"
+                ],
+    "sites":  [
+                  {
+                      "id":  "KABR",
+                      "name":  "Aberdeen, SD"
+                  },
+                  {
+                      "id":  "KABX",
+                      "name":  "Albuquerque, NM"
+                  },
+                  {
+                      "id":  "KAKQ",
+                      "name":  "Wakefield, VA"
+                  },
+                  {
+                      "id":  "KAMA",
+                      "name":  "Amarillo, TX"
+                  },
+                  {
+                      "id":  "KAMX",
+                      "name":  "Miami, FL"
+                  },
+                  {
+                      "id":  "KAPX",
+                      "name":  "Gaylord/Alpena, MI"
+                  },
+                  {
+                      "id":  "KARX",
+                      "name":  "La Crosse, WI"
+                  },
+                  {
+                      "id":  "KATX",
+                      "name":  "Seattle, WA"
+                  },
+                  {
+                      "id":  "KBBX",
+                      "name":  "Beale AFB, CA"
+                  },
+                  {
+                      "id":  "KBGM",
+                      "name":  "Binghamton, NY"
+                  },
+                  {
+                      "id":  "KBHX",
+                      "name":  "Eureka, CA"
+                  },
+                  {
+                      "id":  "KBIS",
+                      "name":  "Bismarck, ND"
+                  },
+                  {
+                      "id":  "KBLX",
+                      "name":  "Billings, MT"
+                  },
+                  {
+                      "id":  "KBMX",
+                      "name":  "Birmingham, AL"
+                  },
+                  {
+                      "id":  "KBOX",
+                      "name":  "Boston, MA"
+                  },
+                  {
+                      "id":  "KBRO",
+                      "name":  "Brownsville, TX"
+                  },
+                  {
+                      "id":  "KBUF",
+                      "name":  "Buffalo, NY"
+                  },
+                  {
+                      "id":  "KBYX",
+                      "name":  "Key West, FL"
+                  },
+                  {
+                      "id":  "KCAE",
+                      "name":  "Columbia, SC"
+                  },
+                  {
+                      "id":  "KCBW",
+                      "name":  "Caribou, ME"
+                  },
+                  {
+                      "id":  "KCBX",
+                      "name":  "Boise, ID"
+                  },
+                  {
+                      "id":  "KCCX",
+                      "name":  "State College, PA"
+                  },
+                  {
+                      "id":  "KCLE",
+                      "name":  "Cleveland, OH"
+                  },
+                  {
+                      "id":  "KCLX",
+                      "name":  "Charleston, SC"
+                  },
+                  {
+                      "id":  "KCRP",
+                      "name":  "Corpus Christi, TX"
+                  },
+                  {
+                      "id":  "KCXX",
+                      "name":  "Burlington, VT"
+                  },
+                  {
+                      "id":  "KCYS",
+                      "name":  "Cheyenne, WY"
+                  },
+                  {
+                      "id":  "KDAX",
+                      "name":  "Sacramento, CA"
+                  },
+                  {
+                      "id":  "KDDC",
+                      "name":  "Dodge City, KS"
+                  },
+                  {
+                      "id":  "KDFX",
+                      "name":  "Laughlin AFB, TX"
+                  },
+                  {
+                      "id":  "KDGX",
+                      "name":  "Jackson, MS"
+                  },
+                  {
+                      "id":  "KDIX",
+                      "name":  "Philadelphia, PA"
+                  },
+                  {
+                      "id":  "KDLH",
+                      "name":  "Duluth, MN"
+                  },
+                  {
+                      "id":  "KDMX",
+                      "name":  "Des Moines, IA"
+                  },
+                  {
+                      "id":  "KDOX",
+                      "name":  "Dover AFB, DE"
+                  },
+                  {
+                      "id":  "KDTX",
+                      "name":  "Detroit, MI"
+                  },
+                  {
+                      "id":  "KDVN",
+                      "name":  "Davenport, IA"
+                  },
+                  {
+                      "id":  "KDYX",
+                      "name":  "Dyess AFB, TX"
+                  },
+                  {
+                      "id":  "KEAX",
+                      "name":  "Kansas City, MO"
+                  },
+                  {
+                      "id":  "KEMX",
+                      "name":  "Tucson, AZ"
+                  },
+                  {
+                      "id":  "KENX",
+                      "name":  "Albany, NY"
+                  },
+                  {
+                      "id":  "KEOX",
+                      "name":  "Ft Rucker (Novosel), AL"
+                  },
+                  {
+                      "id":  "KEPZ",
+                      "name":  "El Paso, TX"
+                  },
+                  {
+                      "id":  "KESX",
+                      "name":  "Las Vegas, NV"
+                  },
+                  {
+                      "id":  "KEVX",
+                      "name":  "Eglin AFB, FL"
+                  },
+                  {
+                      "id":  "KEWX",
+                      "name":  "San Antonio, TX"
+                  },
+                  {
+                      "id":  "KEYX",
+                      "name":  "Edwards AFB, CA"
+                  },
+                  {
+                      "id":  "KFCX",
+                      "name":  "Blacksburg, VA"
+                  },
+                  {
+                      "id":  "KFDR",
+                      "name":  "Altus AFB, OK"
+                  },
+                  {
+                      "id":  "KFDX",
+                      "name":  "Cannon AFB, NM"
+                  },
+                  {
+                      "id":  "KFFC",
+                      "name":  "Atlanta, GA"
+                  },
+                  {
+                      "id":  "KFSD",
+                      "name":  "Sioux Falls, SD"
+                  },
+                  {
+                      "id":  "KFSX",
+                      "name":  "Flagstaff, AZ"
+                  },
+                  {
+                      "id":  "KFTG",
+                      "name":  "Denver, CO"
+                  },
+                  {
+                      "id":  "KFWS",
+                      "name":  "Ft Worth, TX"
+                  },
+                  {
+                      "id":  "KGGW",
+                      "name":  "Glasgow, MT"
+                  },
+                  {
+                      "id":  "KGJX",
+                      "name":  "Grand Junction, CO"
+                  },
+                  {
+                      "id":  "KGLD",
+                      "name":  "Goodland, KS"
+                  },
+                  {
+                      "id":  "KGRB",
+                      "name":  "Green Bay, WI"
+                  },
+                  {
+                      "id":  "KGRK",
+                      "name":  "Ft Hood (Cavazos), TX"
+                  },
+                  {
+                      "id":  "KGRR",
+                      "name":  "Grand Rapids, MI"
+                  },
+                  {
+                      "id":  "KGSP",
+                      "name":  "Greer, SC"
+                  },
+                  {
+                      "id":  "KGWX",
+                      "name":  "Columbus AFB, MS"
+                  },
+                  {
+                      "id":  "KGYX",
+                      "name":  "Portland, ME"
+                  },
+                  {
+                      "id":  "KHDC",
+                      "name":  "New Orleans/Hammond, LA"
+                  },
+                  {
+                      "id":  "KHDX",
+                      "name":  "Holloman AFB, NM"
+                  },
+                  {
+                      "id":  "KHGX",
+                      "name":  "Houston, TX"
+                  },
+                  {
+                      "id":  "KHNX",
+                      "name":  "San Joaquin, CA"
+                  },
+                  {
+                      "id":  "KHPX",
+                      "name":  "Ft Campbell, KY"
+                  },
+                  {
+                      "id":  "KHTX",
+                      "name":  "Huntsville/Hytop, AL"
+                  },
+                  {
+                      "id":  "KICT",
+                      "name":  "Wichita, KS"
+                  },
+                  {
+                      "id":  "KICX",
+                      "name":  "Cedar City, UT"
+                  },
+                  {
+                      "id":  "KILN",
+                      "name":  "Cincinnati, OH"
+                  },
+                  {
+                      "id":  "KILX",
+                      "name":  "Lincoln, IL"
+                  },
+                  {
+                      "id":  "KIND",
+                      "name":  "Indianapolis, IN"
+                  },
+                  {
+                      "id":  "KINX",
+                      "name":  "Tulsa, OK"
+                  },
+                  {
+                      "id":  "KIWA",
+                      "name":  "Phoenix, AZ"
+                  },
+                  {
+                      "id":  "KIWX",
+                      "name":  "North Webster, IN"
+                  },
+                  {
+                      "id":  "KJAX",
+                      "name":  "Jacksonville, FL"
+                  },
+                  {
+                      "id":  "KJGX",
+                      "name":  "Robins AFB, GA"
+                  },
+                  {
+                      "id":  "KJKL",
+                      "name":  "Jackson, KY"
+                  },
+                  {
+                      "id":  "KLBB",
+                      "name":  "Lubbock, TX"
+                  },
+                  {
+                      "id":  "KLCH",
+                      "name":  "Lake Charles, LA"
+                  },
+                  {
+                      "id":  "KLGX",
+                      "name":  "Langley Hill, WA"
+                  },
+                  {
+                      "id":  "KLNX",
+                      "name":  "North Platte, NE"
+                  },
+                  {
+                      "id":  "KLOT",
+                      "name":  "Chicago, IL"
+                  },
+                  {
+                      "id":  "KLRX",
+                      "name":  "Elko, NV"
+                  },
+                  {
+                      "id":  "KLSX",
+                      "name":  "St Louis, MO"
+                  },
+                  {
+                      "id":  "KLTX",
+                      "name":  "Wilmington, NC"
+                  },
+                  {
+                      "id":  "KLVX",
+                      "name":  "Louisville, KY"
+                  },
+                  {
+                      "id":  "KLWX",
+                      "name":  "Sterling VA (DC)"
+                  },
+                  {
+                      "id":  "KLZK",
+                      "name":  "Little Rock, AR"
+                  },
+                  {
+                      "id":  "KMAF",
+                      "name":  "Midland/Odessa, TX"
+                  },
+                  {
+                      "id":  "KMAX",
+                      "name":  "Medford, OR"
+                  },
+                  {
+                      "id":  "KMHX",
+                      "name":  "Morehead City, NC"
+                  },
+                  {
+                      "id":  "KMKX",
+                      "name":  "Milwaukee, WI"
+                  },
+                  {
+                      "id":  "KMLB",
+                      "name":  "Melbourne, FL"
+                  },
+                  {
+                      "id":  "KMOB",
+                      "name":  "Mobile, AL"
+                  },
+                  {
+                      "id":  "KMPX",
+                      "name":  "Minneapolis, MN"
+                  },
+                  {
+                      "id":  "KMQT",
+                      "name":  "Marquette, MI"
+                  },
+                  {
+                      "id":  "KMRX",
+                      "name":  "Morristown, TN"
+                  },
+                  {
+                      "id":  "KMSX",
+                      "name":  "Missoula, MT"
+                  },
+                  {
+                      "id":  "KMTX",
+                      "name":  "Salt Lake City, UT"
+                  },
+                  {
+                      "id":  "KMUX",
+                      "name":  "San Francisco, CA"
+                  },
+                  {
+                      "id":  "KMVX",
+                      "name":  "Grand Forks, ND"
+                  },
+                  {
+                      "id":  "KMXX",
+                      "name":  "Maxwell AFB, AL"
+                  },
+                  {
+                      "id":  "KNKX",
+                      "name":  "San Diego, CA"
+                  },
+                  {
+                      "id":  "KNQA",
+                      "name":  "Memphis, TN"
+                  },
+                  {
+                      "id":  "KOAX",
+                      "name":  "Omaha, NE"
+                  },
+                  {
+                      "id":  "KOHX",
+                      "name":  "Nashville, TN"
+                  },
+                  {
+                      "id":  "KOKX",
+                      "name":  "New York, NY"
+                  },
+                  {
+                      "id":  "KOTX",
+                      "name":  "Spokane, WA"
+                  },
+                  {
+                      "id":  "KPAH",
+                      "name":  "Paducah, KY"
+                  },
+                  {
+                      "id":  "KPBZ",
+                      "name":  "Pittsburgh, PA"
+                  },
+                  {
+                      "id":  "KPDT",
+                      "name":  "Pendleton, OR"
+                  },
+                  {
+                      "id":  "KPOE",
+                      "name":  "Ft Polk (Johnson), LA"
+                  },
+                  {
+                      "id":  "KPUX",
+                      "name":  "Pueblo, CO"
+                  },
+                  {
+                      "id":  "KRAX",
+                      "name":  "Raleigh/Durham, NC"
+                  },
+                  {
+                      "id":  "KRGX",
+                      "name":  "Reno, NV"
+                  },
+                  {
+                      "id":  "KRIW",
+                      "name":  "Riverton, WY"
+                  },
+                  {
+                      "id":  "KRLX",
+                      "name":  "Charleston, WV"
+                  },
+                  {
+                      "id":  "KRTX",
+                      "name":  "Portland, OR"
+                  },
+                  {
+                      "id":  "KSFX",
+                      "name":  "Pocatello, ID"
+                  },
+                  {
+                      "id":  "KSGF",
+                      "name":  "Springfield, MO"
+                  },
+                  {
+                      "id":  "KSHV",
+                      "name":  "Shreveport, LA"
+                  },
+                  {
+                      "id":  "KSJT",
+                      "name":  "San Angelo, TX"
+                  },
+                  {
+                      "id":  "KSOX",
+                      "name":  "Santa Ana Mtn., CA"
+                  },
+                  {
+                      "id":  "KSRX",
+                      "name":  "Fort Smith, AR"
+                  },
+                  {
+                      "id":  "KTBW",
+                      "name":  "Tampa Bay, FL"
+                  },
+                  {
+                      "id":  "KTFX",
+                      "name":  "Great Falls, MT"
+                  },
+                  {
+                      "id":  "KTLH",
+                      "name":  "Tallahassee, FL"
+                  },
+                  {
+                      "id":  "KTLX",
+                      "name":  "Oklahoma City, OK"
+                  },
+                  {
+                      "id":  "KTWX",
+                      "name":  "Topeka, KS"
+                  },
+                  {
+                      "id":  "KTYX",
+                      "name":  "Ft Drum, NY"
+                  },
+                  {
+                      "id":  "KUDX",
+                      "name":  "Rapid City, SD"
+                  },
+                  {
+                      "id":  "KUEX",
+                      "name":  "Hastings, NE"
+                  },
+                  {
+                      "id":  "KVAX",
+                      "name":  "Moody AFB, GA"
+                  },
+                  {
+                      "id":  "KVBX",
+                      "name":  "Vandenberg SFB, CA"
+                  },
+                  {
+                      "id":  "KVNX",
+                      "name":  "Vance AFB, OK"
+                  },
+                  {
+                      "id":  "KVTX",
+                      "name":  "Los Angeles, CA"
+                  },
+                  {
+                      "id":  "KVWX",
+                      "name":  "Evansville, IN"
+                  },
+                  {
+                      "id":  "KYUX",
+                      "name":  "Yuma/Phoenix, AZ"
+                  },
+                  {
+                      "id":  "PABC",
+                      "name":  "Bethel, AK"
+                  },
+                  {
+                      "id":  "PACG",
+                      "name":  "Sitka, AK"
+                  },
+                  {
+                      "id":  "PAEC",
+                      "name":  "Nome, AK"
+                  },
+                  {
+                      "id":  "PAHG",
+                      "name":  "Anchorage/Kenai, AK"
+                  },
+                  {
+                      "id":  "PAIH",
+                      "name":  "Middleton Island, AK"
+                  },
+                  {
+                      "id":  "PAKC",
+                      "name":  "King Salmon, AK"
+                  },
+                  {
+                      "id":  "PAPD",
+                      "name":  "Fairbanks, AK"
+                  },
+                  {
+                      "id":  "PGUA",
+                      "name":  "Andersen AFB, Guam"
+                  },
+                  {
+                      "id":  "PHKI",
+                      "name":  "South Kauai, HI"
+                  },
+                  {
+                      "id":  "PHKM",
+                      "name":  "Kamuela, HI"
+                  },
+                  {
+                      "id":  "PHMO",
+                      "name":  "Molokai, HI"
+                  },
+                  {
+                      "id":  "PHWA",
+                      "name":  "South Shore, HI"
+                  },
+                  {
+                      "id":  "TJUA",
+                      "name":  "San Juan, PR"
+                  }
+              ]
+}

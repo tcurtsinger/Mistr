@@ -2,11 +2,11 @@
 
 **Checkpoint:** 2026-08-02
 
-**Merged product engine:** [PR #9 — Add bounded rolling live radar history](https://github.com/tcurtsinger/Mistr/pull/9), merge commit `444d500`
+**Merged release baseline:** [PR #10 — Qualify Mistr Alpha release readiness](https://github.com/tcurtsinger/Mistr/pull/10), merge commit `61e6692`
 
-**Active change:** [PR #10 — Qualify Mistr Alpha release readiness](https://github.com/tcurtsinger/Mistr/pull/10)
+**Active change:** UI and live-site hardening after owner hands-on review
 
-**Branch:** `codex/mistr-alpha-release-readiness`
+**Branch:** `codex/mistr-ui-hardening`
 
 This document is the durable starting point for the next Mistr development session. Verify the active pull request, checks, and thread state on GitHub before acting because review status can change after this checkpoint.
 
@@ -19,6 +19,7 @@ Windows is the Alpha release platform. Shared Tauri, Rust, React, TypeScript, Ma
 ## Current user experience
 
 - The radar map fills the window beneath the approved compact floating controls.
+- The content-sized top context contains one canonical searchable site picker; fixed Alpha product/tilt facts live in About and the menu does not duplicate site selection.
 - The top context names the site that actually painted, never merely the requested site.
 - The bottom bar keeps displayed scan time, freshness, playback state/position, and active dBZ visible.
 - Direct timeline dragging scrubs resident observations; there are no dedicated previous/next buttons.
@@ -26,18 +27,25 @@ Windows is the Alpha release platform. Shared Tauri, Rust, React, TypeScript, Ma
 - Initial load, successful site change, and recenter fit measured radar coverage; user pan and zoom remain free afterward.
 - A partial live loop adds `BUILDING n/20` beside the visible playback position without hiding freshness or disabling resident interaction.
 - No prototype phases, fixture selectors, benchmark buttons, or engineering counters appear in the normal product surface.
+- Engineering alignment anchors remain installed for packaged evidence but are hidden in the product map.
 
 ## Current runtime behavior
 
 ### First launch
 
-Without a stored site, Mistr opens the pinned 20-observation KTLX reflectivity archive loop, paints its newest observation, remains paused, and explicitly says `ARCHIVE LOOP`.
+Mistr opens the pinned 20-observation KTLX reflectivity archive loop and paints its newest observation as a safe startup bridge. It then automatically acquires current live radar for the stored site or KTLX on a fresh profile. Before the first paint, the playback area shows plain-language preparation progress instead of `0 / 0`, `PAUSED`, or an inspect prompt.
 
 ### Stored site and site selection
 
 The archive establishes a safe initial display. Mistr then acquires the selected site's current safe Level II reflectivity observation. The site label changes and persistence occurs only after matching GPU paint truth. Failed or superseded requests preserve the last trustworthy painted radar.
 
-The Alpha site list remains KTLX, KOUN, KINX, KVNX, and KFDR.
+The Alpha catalog contains the 155 operational WSR-88D identifiers currently present in the fixed Unidata Level II chunks provider and the NOAA Radar Operations Center inventory, including Alaska, Hawaii, Guam, and Puerto Rico. KOUN is a test radar with no current provider prefix and is intentionally excluded, along with TDWR, decommissioned/test, foreign, and other provider-absent identifiers. TypeScript and Rust read the same committed catalog, so unsupported identifiers fail before network work.
+
+Initial volume discovery first requests the bounded list of populated provider ring slots and then compares only that dense set under a 64-probe hard cap. A live KINX check on this branch completed in 3.14 seconds with 12 total requests including seven downloaded chunks; the prior sparse-slot search took about 40 seconds and 731 requests. Exact-next background polling remains unchanged after the initial cursor is established.
+
+The existing resident archive/live loop remains playable and scrubbable while another site's network and decode work is staged. The controller pauses only for its bounded atomic replacement and authoritative GPU paint. A compact visible notice names both the radar still displayed and the live site being loaded; failure copy explains that the last completed scan remains visible.
+
+The complete catalog, discovery, UI, evidence, and rollback contract is [Alpha UI and Live-Site Hardening](23_ALPHA_UI_AND_SITE_HARDENING.md).
 
 ### Rolling live history
 
@@ -86,6 +94,8 @@ The merged rolling-history change passed:
 
 The release-readiness branch now passes `npm run verify`: the public-repository scan, documentation links, 154 frontend tests, the production frontend build, Rust formatting, clippy with warnings denied, 89 Rust tests, and Rust check. Generated fixtures, provider responses, installed-product reports, screenshots, and installers remain ignored and uncommitted.
 
+The current UI/live-site hardening branch passes the full source-level `npm run verify` contract plus packaged Windows validation. The packaged Phase 4 run completed both 1,000-transition scenarios at 3840x2160 with zero long tasks and zero hot-path acquisition/uploads. Packaged Phase 5 cancelled a superseded site request and painted chronological KTLX volumes 666 and 667 with direct oldest/newest scrub. Both Phase 6 passes succeeded. The readiness matrix passed at 3840x2160, 1100x700, and 1024x640 with correct keyboard focus/return, a stable playback bar, no unnamed controls, forced-colors focus, reduced motion, and 5.09:1 inactive-instruction contrast.
+
 The final release executable and bundles also pass:
 
 - the packaged live soak with exact-next KTLX volumes 569 through 572, four chronological resident frames, exactly four incremental uploads, direct oldest/newest scrub, bounded GPU memory, and real context recovery;
@@ -102,7 +112,7 @@ Release readiness also corrects a demonstrated installer defect: prior bundles d
 
 ## Pull-request checkpoint
 
-PR #8 and rolling-history [PR #9](https://github.com/tcurtsinger/Mistr/pull/9) are merged. Release-readiness [PR #10](https://github.com/tcurtsinger/Mistr/pull/10) is **ready for review**, not a draft. Every automated gate is complete, and the remaining unsigned-installer owner decision is stated plainly. Only the repository owner merges.
+PR #8, rolling-history [PR #9](https://github.com/tcurtsinger/Mistr/pull/9), and release-readiness [PR #10](https://github.com/tcurtsinger/Mistr/pull/10) are merged. The active UI/live-site hardening branch has passed local and packaged validation and is ready to open as a ready-for-review pull request. Only the repository owner merges.
 
 Review workflow:
 
@@ -116,7 +126,7 @@ Review workflow:
 
 ## Next decision after this change merges
 
-Do not begin national radar work. Review the release-readiness evidence and make an explicit owner release/no-release decision. Real sleep/wake and clean-machine installation are closed. The final NSIS and MSI files are intentionally unsigned; the remaining owner action is to inspect or explicitly accept the Windows warning and document the user-facing installation instructions before a public Alpha artifact is described as ready.
+Do not begin national radar work. Continue owner-led UI and runtime hardening, then return to Store packaging only after the normal radar surface is accepted. Real sleep/wake and clean-machine installation are closed. The existing NSIS and MSI evidence remains useful, but new public packaging waits for this surface to stabilize.
 
 ## Public-repository safety
 

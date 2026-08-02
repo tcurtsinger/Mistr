@@ -104,7 +104,7 @@ async function exerciseKeyboard() {
   await evaluate("document.querySelector('.edge-trigger').click()");
   await delay(100);
   const menu = await evaluate(`(()=>({
-    focus:document.activeElement?.textContent?.replace(/\\s+/g,' ').trim(),
+    focus:document.activeElement?.getAttribute('aria-label') || document.activeElement?.textContent?.replace(/\\s+/g,' ').trim(),
     focusVisible:document.activeElement?.matches(':focus-visible') ?? false,
     openPanels:document.querySelectorAll('.tool-panel').length
   }))()`);
@@ -119,7 +119,7 @@ async function exerciseKeyboard() {
   await evaluate("document.querySelector('.context-selector').click()");
   await delay(100);
   const context = await evaluate(`(()=>({
-    focus:document.activeElement?.textContent?.replace(/\\s+/g,' ').trim(),
+    focus:document.activeElement?.getAttribute('aria-label') || document.activeElement?.textContent?.replace(/\\s+/g,' ').trim(),
     focusVisible:document.activeElement?.matches(':focus-visible') ?? false
   }))()`);
   await pressKey("Escape", "Escape", 27);
@@ -284,7 +284,7 @@ async function waitForRadar() {
   const deadline = Date.now() + 120_000;
   while (Date.now() < deadline) {
     if (await evaluate("Boolean(window.__MISTR_PHASE4__)") ) return;
-    const errorText = await evaluate("document.querySelector('.benchmark-error')?.textContent ?? null");
+    const errorText = await evaluate("document.querySelector('.radar-notice[role=alert]')?.textContent ?? null");
     if (errorText) throw new Error(`packaged app failed before readiness: ${errorText}`);
     await delay(250);
   }

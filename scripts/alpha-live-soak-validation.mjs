@@ -1,8 +1,8 @@
 export function validateAlphaLiveSoak(report, targetFrames) {
   const failures = [];
   requireGate(failures, Number.isSafeInteger(targetFrames) && targetFrames >= 4 && targetFrames <= 20, "invalid soak target");
-  requireGate(failures, report?.siteSwitch?.pendingTopSite === "KTLX", "requested KOUN was claimed before it painted");
-  requireGate(failures, report?.siteSwitch?.pendingFreshness === "UPDATING KOUN", "pending site was not named in freshness");
+  requireGate(failures, report?.siteSwitch?.pendingTopSite === "KTLX", "requested KINX was claimed before it painted");
+  requireGate(failures, report?.siteSwitch?.pendingFreshness === "UPDATING KINX", "pending site was not named in freshness");
   requireGate(failures, report?.siteSwitch?.finalTopSite === "KTLX", "superseding KTLX did not own final site truth");
   requireGate(failures, report?.historyEvents?.length === targetFrames, "soak did not observe every history size");
   requireGate(failures, report?.final?.history?.residentCount === targetFrames, "final live history count is wrong");

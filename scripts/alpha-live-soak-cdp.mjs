@@ -33,7 +33,7 @@ try {
   await delay(1_000);
 
   const archiveUploads = await evaluate("window.__MISTR_PHASE4__.report().renderer.metrics.frameUploadCount");
-  await selectSite("KOUN");
+  await selectSite("KINX");
   await delay(75);
   const pendingTruth = await surfaceTruth();
   await delay(175);
@@ -199,7 +199,7 @@ async function waitForRadar() {
   const deadline = Date.now() + 120_000;
   while (Date.now() < deadline) {
     if (await evaluate("Boolean(window.__MISTR_PHASE4__ && window.__MISTR_PHASE5__ && window.__MISTR_PHASE6__)")) return;
-    const errorText = await evaluate("document.querySelector('.benchmark-error')?.textContent ?? null");
+    const errorText = await evaluate("document.querySelector('.radar-notice[role=alert]')?.textContent ?? null");
     if (errorText) throw new Error(`packaged app failed before soak: ${errorText}`);
     await delay(250);
   }

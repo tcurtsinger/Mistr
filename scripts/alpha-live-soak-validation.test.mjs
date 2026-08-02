@@ -4,7 +4,7 @@ import { validateAlphaLiveSoak } from "./alpha-live-soak-validation.mjs";
 function validReport(targetFrames = 4) {
   const ids = Array.from({ length: targetFrames }, (_value, index) => `observation-${index + 1}`);
   return {
-    siteSwitch: { pendingTopSite: "KTLX", pendingFreshness: "UPDATING KOUN", finalTopSite: "KTLX" },
+    siteSwitch: { pendingTopSite: "KTLX", pendingFreshness: "UPDATING KINX", finalTopSite: "KTLX" },
     historyEvents: ids.map((observationId, index) => ({
       residentCount: index + 1,
       site: "KTLX",
@@ -54,7 +54,7 @@ describe("Alpha live soak validation", () => {
   });
 
   it.each([
-    ["site claim", (report) => { report.siteSwitch.pendingTopSite = "KOUN"; }],
+    ["site claim", (report) => { report.siteSwitch.pendingTopSite = "KINX"; }],
     ["history gap", (report) => { report.historyEvents[2].volumeIndex = 7; }],
     ["duplicate", (report) => { report.historyEvents[3].observationId = "observation-3"; }],
     ["upload", (report) => { report.preRecoveryFrameUploadDelta = 5; }],

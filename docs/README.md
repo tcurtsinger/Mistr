@@ -51,6 +51,7 @@ The numbered documents and phase reports below are historical architecture and a
 | [20_ALPHA_CURRENT_STATE.md](20_ALPHA_CURRENT_STATE.md) | Current product/runtime state, validation evidence, review workflow, and the exact next development milestone |
 | [21_BOUNDED_ROLLING_LIVE_HISTORY.md](21_BOUNDED_ROLLING_LIVE_HISTORY.md) | Exact-next live polling cursor, bounded incremental GPU history, playback truth, rollback, and packaged evidence |
 | [22_ALPHA_RELEASE_READINESS.md](22_ALPHA_RELEASE_READINESS.md) | Operational soak, installed-product, accessibility, lifecycle, and public Alpha release gates |
+| [23_ALPHA_UI_AND_SITE_HARDENING.md](23_ALPHA_UI_AND_SITE_HARDENING.md) | Full operational WSR-88D catalog, bounded discovery, startup/status truth, and hands-on UI remediation |
 | [phase-reports/PHASE_2_PACKED_WIRE_AND_IPC.md](phase-reports/PHASE_2_PACKED_WIRE_AND_IPC.md) | Phase 2 cross-language, packaged IPC, timing, and memory evidence |
 | [phase-reports/PHASE_3_STATIC_GPU_RENDERER.md](phase-reports/PHASE_3_STATIC_GPU_RENDERER.md) | Phase 3 packaged GPU, alignment, palette, coexistence, and performance evidence |
 | [phase-reports/PHASE_4_RESIDENT_PLAYBACK.md](phase-reports/PHASE_4_RESIDENT_PLAYBACK.md) | Phase 4 real 20-observation residency, 4K playback, paint truth, and resource evidence |

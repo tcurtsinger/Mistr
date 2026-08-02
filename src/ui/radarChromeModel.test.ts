@@ -7,17 +7,17 @@ import {
   normalizeRadarSite,
   paintedFrameIndex,
   playbackErrorAfterRendererStatus,
-  playbackInteractionReady,
   playbackPresentation,
-    radarProductLabel,
-    rendererFailureMessage,
-    timelinePosition,
+  radarInitializationLabel,
+  rendererFailureMessage,
+  timelinePosition,
 } from "./radarChromeModel";
 
 describe("radar chrome model", () => {
-  it("restores only strict four-character US NEXRAD site identifiers", () => {
+  it("restores only sites in the provider-qualified operational catalog", () => {
     expect(normalizeRadarSite(" ktlx ")).toBe("KTLX");
-    expect(normalizeRadarSite("K1N2")).toBe("K1N2");
+    expect(normalizeRadarSite(" pgua ")).toBe("PGUA");
+    expect(normalizeRadarSite("KOUN")).toBe("KTLX");
     expect(normalizeRadarSite("TLX")).toBe("KTLX");
     expect(normalizeRadarSite("../../secret")).toBe("KTLX");
   });
@@ -33,11 +33,6 @@ describe("radar chrome model", () => {
       selectedObservationId: "requested",
       lastPaintedObservationId: "painted",
     })).toBe(1);
-  });
-
-  it("labels the product that actually painted", () => {
-    expect(radarProductLabel("reflectivity")).toBe("REFLECTIVITY");
-    expect(radarProductLabel("storm_relative_velocity")).toBe("STORM-RELATIVE VELOCITY");
   });
 
   it("surfaces only an active renderer failure", () => {
@@ -56,18 +51,32 @@ describe("radar chrome model", () => {
     expect(playbackErrorAfterRendererStatus("scrub timed out", "painted")).toBeNull();
   });
 
-  it("blocks stale timeline interaction throughout live acquisition", () => {
-    expect(playbackInteractionReady("acquiring")).toBe(false);
-    expect(playbackInteractionReady("idle")).toBe(true);
-    expect(playbackInteractionReady("painted")).toBe(true);
-    expect(playbackInteractionReady("refreshing")).toBe(true);
-    expect(playbackInteractionReady("degraded")).toBe(true);
-  });
-
   it("labels newest paused state from the painted frame position", () => {
     expect(playbackPresentation({ playing: false }, 19, 20)).toBe("PAUSED · NEWEST");
     expect(playbackPresentation({ playing: false }, 4, 20)).toBe("PAUSED");
     expect(playbackPresentation({ playing: true }, 4, 20)).toBe("PLAYING");
+  });
+
+  it("keeps active playback stable through routine GPU paint waits", () => {
+    expect(playbackPresentation({
+      playing: true,
+      holdReason: "AWAITING_GPU_PAINT",
+    }, 4, 20)).toBe("PLAYING");
+    expect(playbackPresentation({
+      playing: false,
+      holdReason: "AWAITING_GPU_PAINT",
+    }, 4, 20)).toBe("LOADING SCAN");
+    expect(playbackPresentation({
+      playing: true,
+      holdReason: "GPU_RECOVERY_VISIBLE_FIRST",
+    }, 4, 20)).toBe("RECOVERING");
+  });
+
+  it("turns internal startup stages into visible product-language progress", () => {
+    expect(radarInitializationLabel("OPENING RESIDENT LOOP")).toBe("OPENING RADAR HISTORY");
+    expect(radarInitializationLabel("DECODING OBSERVATION 12/20"))
+      .toBe("LOADING HISTORY 12/20");
+    expect(radarInitializationLabel(undefined)).toBe("READYING DISPLAY");
   });
 
   it("keeps archive, acquisition, failure, and live freshness explicit", () => {
@@ -83,7 +92,8 @@ describe("radar chrome model", () => {
 
   it("distinguishes a retrying live refresh from an unavailable first acquisition", () => {
     expect(liveFailureLabel("KTLX", true)).toBe("RETRYING KTLX");
-    expect(liveFailureLabel("KOUN", false)).toBe("KOUN UNAVAILABLE");
+    expect(liveFailureLabel("KINX", false)).toBe("KINX UNAVAILABLE");
+    expect(() => liveFailureLabel("KOUN", false)).toThrow("supported NEXRAD site");
     expect(() => liveFailureLabel("bad", true)).toThrow("supported NEXRAD site");
   });
 
@@ -92,7 +102,7 @@ describe("radar chrome model", () => {
     expect(userFacingRadarError("map")).toContain("Check your connection");
     expect(userFacingRadarError("playback")).toContain("last completed scan");
     expect(userFacingRadarError("live_retrying", "KTLX")).toContain("while Mistr retries");
-    expect(userFacingRadarError("live_unavailable", "KOUN")).toContain("choose the site again");
+    expect(userFacingRadarError("live_unavailable", "KINX")).toContain("choose the site again");
     expect(() => userFacingRadarError("live_unavailable", "bad")).toThrow("supported NEXRAD site");
   });
 

@@ -13,6 +13,7 @@ import type {
   MapMouseEvent,
 } from "maplibre-gl";
 import fixtureManifest from "../fixtures/manifest.json";
+import { RADAR_SITES } from "./data/radarSites";
 import { configureMapLibreWorker } from "./mapWorker";
 import { mapReadinessError, updateMapReadiness, type MapReadiness } from "./mapReadiness";
 import {
@@ -43,6 +44,7 @@ import {
   type RadarSweepCpuModel,
 } from "./radar-renderer/cpuModel";
 import { destinationPoint } from "./radar-renderer/geo";
+import { HIDDEN_DIAGNOSTIC_LAYOUT } from "./radar-renderer/diagnosticLayerStyle";
 import {
   evaluateLayerCoexistence,
   type LayerCoexistenceReport,
@@ -69,7 +71,7 @@ import {
   MAX_LIVE_HISTORY_FRAMES,
 } from "./live/liveHistory";
 import { SiteRequestTracker } from "./live/siteRequestTracker";
-import { RadarChrome, type RadarSiteOption } from "./ui/RadarChrome";
+import { RadarChrome } from "./ui/RadarChrome";
 import {
   freshnessPresentation,
   liveFailureLabel,
@@ -77,9 +79,8 @@ import {
   normalizeRadarSite,
   paintedFrameIndex,
   playbackErrorAfterRendererStatus,
-  playbackInteractionReady,
   playbackPresentation,
-  radarProductLabel,
+  radarInitializationLabel,
   rendererFailureMessage,
   type TimelineFrame,
 } from "./ui/radarChromeModel";
@@ -101,13 +102,6 @@ const DEFAULT_CENTER: [number, number] = [-97.27776, 35.333363];
 const LAST_SITE_STORAGE_KEY = "mistr.lastRadarSite";
 const RADAR_ENGINE_PREPARING_ERROR = "Radar engine is still preparing the resident loop";
 const LIVE_POLL_RETRY_MS = 15_000;
-const ALPHA_SITES: readonly RadarSiteOption[] = [
-  { id: "KTLX", name: "Oklahoma City, Oklahoma" },
-  { id: "KOUN", name: "Norman, Oklahoma" },
-  { id: "KINX", name: "Tulsa, Oklahoma" },
-  { id: "KVNX", name: "Vance AFB, Oklahoma" },
-  { id: "KFDR", name: "Frederick, Oklahoma" },
-];
 
 configureMapLibreWorker();
 
@@ -136,7 +130,6 @@ export function App() {
     display: initialLiveDisplay(),
   });
   const [interrogation, setInterrogation] = useState<GateInterrogation | null>(null);
-  const [paintedProduct, setPaintedProduct] = useState<RadarSweepCpuModel["product"]>("reflectivity");
   const [paintedSourceKind, setPaintedSourceKind] = useState<RadarSweepCpuModel["sourceKind"]>(
     "nexrad_level2_archive_ii",
   );
@@ -237,7 +230,6 @@ export function App() {
       ) return;
       radarModelRef.current = paintedModel;
       paintedSiteRef.current = paintedModel.siteIcao;
-      setPaintedProduct(paintedModel.product);
       setPaintedSourceKind(paintedModel.sourceKind);
       const synchronized = retainPaintedFallback(
         liveDisplay,
@@ -511,7 +503,6 @@ export function App() {
       if (!initialModel) throw new Error("newest painted archive frame is unknown");
       paintedSiteRef.current = initialModel.siteIcao;
       radarModelRef.current = initialModel;
-      setPaintedProduct(initialModel.product);
       setPaintedSourceKind(initialModel.sourceKind);
       liveDisplay = initialLiveDisplay(frameTruth(initialModel, newestReceipt));
       publishPhase5({ display: liveDisplay });
@@ -678,7 +669,6 @@ export function App() {
           });
           paintedSiteRef.current = paintedModel.siteIcao;
           radarModelRef.current = paintedModel;
-          setPaintedProduct(paintedModel.product);
           setPaintedSourceKind(paintedModel.sourceKind);
           setTimelineFrames(nextHistory.map(timelineFrame));
           if (!appendingHistory) {
@@ -823,7 +813,6 @@ export function App() {
           modelsById.clear();
           modelsById.set(model.observationId, model);
           radarModelRef.current = model;
-          setPaintedProduct(model.product);
           setPaintedSourceKind(model.sourceKind);
           setTimelineFrames([timelineFrame(model)]);
           updateDiagnosticSources(instance, model, alignment);
@@ -889,7 +878,6 @@ export function App() {
         paintedSiteRef.current = paintedModel.siteIcao;
         selectedSiteRef.current = paintedModel.siteIcao;
         radarModelRef.current = paintedModel;
-        setPaintedProduct(paintedModel.product);
         setPaintedSourceKind(paintedModel.sourceKind);
         updateDiagnosticSources(instance, paintedModel, createAlignmentReport(paintedModel));
         setSelectedSite(paintedModel.siteIcao);
@@ -905,32 +893,33 @@ export function App() {
         });
         return receipt;
       };
-      if (hasStoredSite()) {
-        const startupSite = selectedSiteRef.current;
-        const requestSequence = siteRequestTrackerRef.current.begin();
-        setRequestedSite(startupSite);
-        startupAcquisition = startLiveSession(startupSite).then(
-          () => {
-            if (siteRequestTrackerRef.current.isCurrent(requestSequence)) {
-              setSelectedSite(startupSite);
-              setRequestedSite(null);
-              storeLastSite(startupSite);
-              setSiteRequestError(null);
-            }
-          },
-          (error: unknown) => {
-            if (siteRequestTrackerRef.current.isCurrent(requestSequence)) {
-              const fallbackSite = paintedSiteRef.current;
-              selectedSiteRef.current = fallbackSite;
-              setSelectedSite(fallbackSite);
-              setRequestedSite(null);
-              // A failed refresh does not earn persistence. Keep the last
-              // successfully painted live-site preference for the next launch.
-              setSiteRequestError(error instanceof Error ? error.message : String(error));
-            }
-          },
-        );
-      }
+      // The packaged archive is a safe first paint, not a permanent demo mode.
+      // Every launch proceeds to current live radar; a stored site chooses the
+      // target and a fresh profile starts with KTLX.
+      const startupSite = selectedSiteRef.current;
+      const requestSequence = siteRequestTrackerRef.current.begin();
+      setRequestedSite(startupSite);
+      startupAcquisition = startLiveSession(startupSite).then(
+        () => {
+          if (siteRequestTrackerRef.current.isCurrent(requestSequence)) {
+            setSelectedSite(startupSite);
+            setRequestedSite(null);
+            storeLastSite(startupSite);
+            setSiteRequestError(null);
+          }
+        },
+        (error: unknown) => {
+          if (siteRequestTrackerRef.current.isCurrent(requestSequence)) {
+            const fallbackSite = paintedSiteRef.current;
+            selectedSiteRef.current = fallbackSite;
+            setSelectedSite(fallbackSite);
+            setRequestedSite(null);
+            // A failed refresh does not earn persistence. Keep the last
+            // successfully painted live-site preference for the next launch.
+            setSiteRequestError(error instanceof Error ? error.message : String(error));
+          }
+        },
+      );
     };
 
     setPhase4({ kind: "running", stage: "OPENING RESIDENT LOOP" });
@@ -1017,6 +1006,25 @@ export function App() {
                 ? userFacingRadarError("initialization")
                 : userFacingRadarError("live_unavailable", selectedSite)
               : null;
+  const preparingFailed = displayedAtUnixMs === undefined && Boolean(radarUnavailableError);
+  const preparingLabel = displayedAtUnixMs === undefined
+    ? preparingFailed
+      ? "NO RADAR SCAN DISPLAYED"
+      : radarInitializationLabel(phase4.kind === "running" ? phase4.stage : undefined)
+    : undefined;
+  const pendingSite = phase5.display.kind === "acquiring"
+    ? phase5.display.requestedSite
+    : undefined;
+  const displayedSite = phase5.display.lastComplete?.site ?? selectedSite;
+  const displayedSource = paintedSourceKind === "nexrad_level2_chunks" ? "live radar" : "archive radar";
+  const radarNotice = userFacingError
+    ? { kind: "error" as const, message: userFacingError }
+    : pendingSite
+      ? {
+          kind: "info" as const,
+          message: `Showing ${displayedSite} ${displayedSource} while ${pendingSite} live radar loads.`,
+        }
+      : undefined;
 
   const togglePlayback = () => {
     const controller = playbackControllerRef.current;
@@ -1113,16 +1121,15 @@ export function App() {
         playbackReady={Boolean(playbackControllerRef.current)
           && phase4.kind === "complete"
           && !rendererError
-          && playbackInteractionReady(phase5.display.kind)}
+          && !playback?.residentReplacementPending}
         playing={playback?.playing ?? false}
-        productLabel={radarProductLabel(paintedProduct)}
+        preparingFailed={preparingFailed}
+        preparingLabel={preparingLabel}
+        radarNotice={radarNotice}
         selectedSite={selectedSite}
         siteSelectionReady={siteSelectionReady}
-        sites={ALPHA_SITES}
+        sites={RADAR_SITES}
       />
-      {userFacingError ? (
-        <p className="benchmark-error sr-only" role="alert">{userFacingError}</p>
-      ) : null}
     </main>
   );
 }
@@ -1160,14 +1167,6 @@ function restoreLastSite(): string {
     return normalizeRadarSite(globalThis.localStorage?.getItem(LAST_SITE_STORAGE_KEY));
   } catch {
     return "KTLX";
-  }
-}
-
-function hasStoredSite(): boolean {
-  try {
-    return globalThis.localStorage?.getItem(LAST_SITE_STORAGE_KEY) !== null;
-  } catch {
-    return false;
   }
 }
 
@@ -1411,6 +1410,7 @@ function installDiagnosticLayers(
     id: RANGE_LAYER_ID,
     type: "line",
     source: RANGE_SOURCE_ID,
+    layout: HIDDEN_DIAGNOSTIC_LAYOUT,
     paint: {
       "line-color": "#5ed7e8",
       "line-width": 1,
@@ -1427,6 +1427,7 @@ function installDiagnosticLayers(
     id: ANCHOR_LAYER_ID,
     type: "circle",
     source: ANCHOR_SOURCE_ID,
+    layout: HIDDEN_DIAGNOSTIC_LAYOUT,
     paint: {
       "circle-radius": 3,
       "circle-color": "#d8fbff",

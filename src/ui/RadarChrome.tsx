@@ -1,11 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { filterRadarSites, type RadarSiteOption } from "../data/radarSites";
 import type { GateInterrogation } from "../radar-renderer/cpuModel";
 import { timelinePosition, type FreshnessPresentation } from "./radarChromeModel";
-
-export interface RadarSiteOption {
-  id: string;
-  name: string;
-}
 
 export interface RadarChromeProps {
   appVersion: string;
@@ -24,13 +20,15 @@ export interface RadarChromeProps {
   playbackLabel: string;
   playbackReady: boolean;
   playing: boolean;
-  productLabel: string;
+  preparingFailed?: boolean;
+  preparingLabel?: string;
+  radarNotice?: { kind: "info" | "error"; message: string };
   selectedSite: string;
   siteSelectionReady: boolean;
   sites: readonly RadarSiteOption[];
 }
 
-type OpenPanel = "menu" | "menu-sites" | "context-sites" | "about" | null;
+type OpenPanel = "menu" | "context-sites" | "about" | null;
 
 export function RadarChrome({
   appVersion,
@@ -49,7 +47,9 @@ export function RadarChrome({
   playbackLabel,
   playbackReady,
   playing,
-  productLabel,
+  preparingFailed,
+  preparingLabel,
+  radarNotice,
   selectedSite,
   siteSelectionReady,
   sites,
@@ -91,7 +91,7 @@ export function RadarChrome({
       : "mistr-tool-panel";
     const frame = globalThis.requestAnimationFrame(() => {
       document.getElementById(panelId)
-        ?.querySelector<HTMLButtonElement>("button:not(:disabled)")
+        ?.querySelector<HTMLElement>("input:not(:disabled), button:not(:disabled)")
         ?.focus();
     });
     return () => globalThis.cancelAnimationFrame(frame);
@@ -103,16 +103,17 @@ export function RadarChrome({
   };
   const timestamp = formatScanTimestamp(displayedAtUnixMs);
   const sample = formatSample(interrogation);
+  const menuPanelOpen = openPanel === "menu" || openPanel === "about";
 
   return (
     <div className="radar-chrome">
       <button
         aria-controls="mistr-tool-panel"
-        aria-expanded={openPanel === "menu" || openPanel === "menu-sites" || openPanel === "about"}
-        aria-label={openPanel ? "Close Mistr menu" : "Open Mistr menu"}
-        className={`edge-trigger${openPanel ? " edge-trigger--active" : ""}`}
+        aria-expanded={menuPanelOpen}
+        aria-label={menuPanelOpen ? "Close Mistr menu" : "Open Mistr menu"}
+        className={`edge-trigger${menuPanelOpen ? " edge-trigger--active" : ""}`}
         onClick={() => {
-          if (openPanel) closePanel();
+          if (menuPanelOpen) closePanel();
           else {
             panelOriginRef.current = "menu";
             setOpenPanel("menu");
@@ -121,11 +122,11 @@ export function RadarChrome({
         ref={menuTriggerRef}
         type="button"
       >
-        <MenuIcon open={openPanel !== null} />
+        <MenuIcon open={menuPanelOpen} />
       </button>
 
       <nav aria-label="Radar context" className="context-bar">
-        <span className="mistr-wordmark" aria-label="Mistr">MISTR</span>
+        <span className="mistr-wordmark" aria-label="Mistr">Mistr</span>
         <span aria-hidden="true" className="instrument-divider" />
         <button
           aria-controls="mistr-context-site-panel"
@@ -146,16 +147,6 @@ export function RadarChrome({
           <strong>{selectedSite}</strong>
           <ChevronIcon />
         </button>
-        <span aria-hidden="true" className="instrument-divider" />
-        <span aria-label={`Radar product: ${productLabel.toLowerCase()}`} className="context-readout">
-          <span>PRODUCT</span>
-          <strong>{productLabel}</strong>
-        </span>
-        <span aria-hidden="true" className="instrument-divider" />
-        <span aria-label="Elevation angle: 0.5 degrees" className="context-readout context-readout--elevation">
-          <span>ELEVATION</span>
-          <strong>0.5°</strong>
-        </span>
       </nav>
 
       {openPanel === "context-sites" ? (
@@ -171,18 +162,9 @@ export function RadarChrome({
 
       {openPanel === "menu" ? (
         <aside aria-label="Mistr menu" className="tool-panel tool-panel--left" id="mistr-tool-panel">
-          <PanelHeader eyebrow="MISTR MENU" supporting={`${selectedSite} · CURRENT RADAR`} />
+          <PanelHeader eyebrow="Menu" supporting={`${selectedSite} · CURRENT RADAR`} />
           <div className="menu-group">
-            <p>RADAR</p>
-            <button
-              disabled={!siteSelectionReady}
-              onClick={() => setOpenPanel("menu-sites")}
-              type="button"
-            >
-              <RadarIcon />
-              <span><strong>Radar sites</strong><small>Choose a NEXRAD station</small></span>
-              <ChevronIcon direction="right" />
-            </button>
+            <p>MAP</p>
             <button onClick={() => { onRecenter(); closePanel(); }} type="button">
               <RecenterIcon />
               <span><strong>Recenter radar</strong><small>Return to {selectedSite}</small></span>
@@ -199,34 +181,34 @@ export function RadarChrome({
         </aside>
       ) : null}
 
-      {openPanel === "menu-sites" ? (
-        <SitePanel
-          className="tool-panel--left"
-          currentSite={selectedSite}
-          id="mistr-tool-panel"
-          onBack={() => setOpenPanel("menu")}
-          onSelect={selectSite}
-          selectionReady={siteSelectionReady}
-          sites={sites}
-        />
-      ) : null}
-
       {openPanel === "about" ? (
         <aside aria-label="About Mistr" className="tool-panel tool-panel--left" id="mistr-tool-panel">
           <PanelBack onClick={() => setOpenPanel("menu")} />
-          <PanelHeader eyebrow="ABOUT MISTR" supporting={`VERSION ${appVersion}`} />
+          <PanelHeader eyebrow="About Mistr" supporting={`VERSION ${appVersion}`} />
           <div className="about-copy">
             <p>A focused desktop instrument for inspecting measured NEXRAD radar.</p>
             <p>Radar data is provided through public NOAA NEXRAD distribution on AWS Open Data and Unidata infrastructure. No NOAA endorsement is implied.</p>
             <dl>
               <div><dt>MAP</dt><dd>{mapStatus}</dd></div>
-              <div><dt>PRODUCT</dt><dd>BASE REFLECTIVITY</dd></div>
+              <div><dt>RADAR</dt><dd>BASE REFLECTIVITY · LOWEST TILT</dd></div>
             </dl>
           </div>
         </aside>
       ) : null}
 
-      <section aria-label="Radar playback" className="playback-bar">
+      {preparingLabel ? (
+        <section
+          aria-label="Radar preparation"
+          className={`playback-bar playback-bar--preparing${preparingFailed ? " playback-bar--failed" : ""}`}
+        >
+          <span aria-hidden="true" className="preparing-indicator" />
+          <span className="preparing-copy">
+            <strong>{preparingFailed ? "RADAR UNAVAILABLE" : "PREPARING RADAR"}</strong>
+            <small>{preparingLabel}</small>
+          </span>
+        </section>
+      ) : (
+        <section aria-label="Radar playback" className="playback-bar">
         <div className="scan-time" aria-label={`Displayed scan ${timestamp.accessible}`}>
           <span>{timestamp.date}</span>
           <strong>{timestamp.time}</strong>
@@ -267,10 +249,24 @@ export function RadarChrome({
         <output className={`sample-readout${sample ? " sample-readout--active" : ""}`}>
           {sample ?? "CLICK TO INSPECT"}
         </output>
-      </section>
+        </section>
+      )}
+
+      {radarNotice ? (
+        <p
+          className={`radar-notice radar-notice--${radarNotice.kind}`}
+          role={radarNotice.kind === "error" ? "alert" : "status"}
+        >
+          {radarNotice.message}
+        </p>
+      ) : null}
 
       <p aria-live="polite" className="sr-only">
-        {playbackLabel}. Radar {freshness.kind}. {sample ?? "No radar point selected."}
+        {radarNotice || preparingFailed
+          ? ""
+          : preparingLabel
+          ? `Preparing radar. ${preparingLabel}.`
+          : `${playbackLabel}. Radar ${freshness.kind}. ${sample ?? "No radar point selected."}`}
       </p>
     </div>
   );
@@ -293,12 +289,31 @@ function SitePanel({
   selectionReady: boolean;
   sites: readonly RadarSiteOption[];
 }) {
+  const [query, setQuery] = useState("");
+  const filteredSites = filterRadarSites(sites, query);
+
   return (
     <aside aria-label="Radar sites" className={`tool-panel ${className}`} id={id}>
       {onBack ? <PanelBack onClick={onBack} /> : null}
-      <PanelHeader eyebrow="RADAR SITES" supporting="SELECT ONE NEXRAD STATION" />
-      <div className="site-list">
-        {sites.map((site) => {
+      <PanelHeader eyebrow="Radar sites" supporting={`${sites.length} WSR-88D STATIONS`} />
+      <div className="site-search">
+        <SearchIcon />
+        <input
+          aria-controls={`${id}-site-list`}
+          aria-label="Search radar sites"
+          onChange={(event) => setQuery(event.currentTarget.value)}
+          placeholder="Search ID or place"
+          type="search"
+          value={query}
+        />
+      </div>
+      <p aria-live="polite" className="sr-only" role="status">
+        {filteredSites.length === 0
+          ? "No matching radar sites."
+          : `${filteredSites.length} radar ${filteredSites.length === 1 ? "site" : "sites"}.`}
+      </p>
+      <div className="site-list" id={`${id}-site-list`}>
+        {filteredSites.map((site) => {
           const current = site.id === currentSite;
           return (
             <button
@@ -313,6 +328,9 @@ function SitePanel({
             </button>
           );
         })}
+        {filteredSites.length === 0 ? (
+          <p className="site-list__empty">No matching radar sites.</p>
+        ) : null}
       </div>
     </aside>
   );
@@ -391,10 +409,6 @@ function PauseIcon() {
   return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 7v10M15 7v10" /></svg>;
 }
 
-function RadarIcon() {
-  return <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7" /><path d="M12 12 17 7M12 3v2M21 12h-2M12 19v2M5 12H3" /></svg>;
-}
-
 function RecenterIcon() {
   return <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6" /><path d="M12 2v4M22 12h-4M12 22v-4M2 12h4" /></svg>;
 }
@@ -405,4 +419,8 @@ function InfoIcon() {
 
 function CheckIcon() {
   return <svg aria-hidden="true" className="check-icon" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" /></svg>;
+}
+
+function SearchIcon() {
+  return <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6" /><path d="m16 16 4 4" /></svg>;
 }
