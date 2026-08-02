@@ -68,6 +68,7 @@ import {
   normalizeRadarSite,
   paintedFrameIndex,
   playbackErrorAfterRendererStatus,
+  playbackInteractionReady,
   playbackPresentation,
   radarProductLabel,
   rendererFailureMessage,
@@ -905,7 +906,8 @@ export function App() {
         playbackLabel={radarUnavailableError ? "RADAR UNAVAILABLE" : playbackLabel}
         playbackReady={Boolean(playbackControllerRef.current)
           && phase4.kind === "complete"
-          && !rendererError}
+          && !rendererError
+          && playbackInteractionReady(phase5.display.kind)}
         playing={playback?.playing ?? false}
         productLabel={radarProductLabel(paintedProduct)}
         selectedSite={selectedSite}

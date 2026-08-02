@@ -79,7 +79,7 @@ The automated `__MISTR_PHASE4__`, `__MISTR_PHASE5__`, and `__MISTR_PHASE6__` API
 The product-foundation change has passed:
 
 - the full `npm run verify` suite;
-- 110 frontend tests;
+- 111 frontend tests;
 - 87 Rust tests across the workspace binaries and library;
 - public-repository scanning for 182 candidate files;
 - documentation-link validation;
@@ -93,7 +93,7 @@ The Impeccable finish review found five material issues—stale dBZ after frame 
 
 Intermittent single-run Phase 4 stabilized-heap measurement failures are recorded transparently as `DRF-004` in [Deferred review findings](DEFERRED_REVIEW_FINDINGS.md). The latest occurrence retained zero long tasks, zero hot-path work, normal timing, and 20-frame residency, then passed an immediate rerun of the exact same source state. No acceptance threshold was relaxed.
 
-Pull-request review later demonstrated twelve defects, all corrected on the branch:
+Pull-request review later demonstrated thirteen defects, all corrected on the branch:
 
 - A persisted-site startup acquisition could overlap the Phase 4 or Phase 6 packaged gate after those runners observed their diagnostic APIs. The runners now cross an explicit archive-preparation barrier that supersedes and awaits startup work, restores all 20 archive observations, and only then begins measurement or recovery checks.
 - A failed startup refresh could overwrite the stored last-successful live site with the painted KTLX archive fallback. Failed acquisitions now preserve the stored live-site preference; only a successful matching live paint updates it.
@@ -107,12 +107,13 @@ Pull-request review later demonstrated twelve defects, all corrected on the bran
 - An initial style/basemap failure could leave radar initialization idle while freshness claimed only `WAITING FOR RADAR`. Initial basemap unavailability now participates in the explicit radar-error truth and clears if the style later loads successfully.
 - The single measured N0S diagnostic frame could still be labeled `ARCHIVE LOOP`. Painted source truth now distinguishes the one-frame Level III evidence as `ARCHIVE FRAME` without changing the normal 20-frame archive label.
 - The archive-preparation barrier could restore KTLX radar pixels after a persisted non-KTLX acquisition without restoring the range and anchor guides. It now rebuilds those diagnostic sources from the same authoritative painted archive model before packaged gates continue.
+- Playback controls could remain active while a live request replaced the controller's 20-frame archive with one resident frame, allowing a stale slider index to latch an error after the new paint. Playback interaction is now disabled for the acquisition/replacement window and returns only after success or recoverable failure settles.
 
 The full verification suite passed after these corrections. The final review-fix state also passed the Phase 4 gate, the Phase 5 live/cancellation gate, and both Phase 6 packaged restart passes; the final N0S evidence image labels the painted product as `STORM-RELATIVE VELOCITY`, reports `ARCHIVE FRAME`, and shows the truthful `1 / 1` timeline.
 
 ## Pull-request checkpoint
 
-At this checkpoint, PR #8 remains open and marked ready for review. Automated review submitted twelve actionable threads covering the corrections above, and the branch now fixes all twelve. Two top-level conversation comments requested automated reviews; no other conversation feedback had appeared. Re-read the live PR, checks, and thread state before taking action because CI and review status can change after this checkpoint.
+At this checkpoint, PR #8 remains open and marked ready for review. Automated review submitted thirteen actionable threads covering the corrections above, and the branch now fixes all thirteen. Two top-level conversation comments requested automated reviews; no other conversation feedback had appeared. Re-read the live PR, checks, and thread state before taking action because CI and review status can change after this checkpoint.
 
 ## Required review workflow
 

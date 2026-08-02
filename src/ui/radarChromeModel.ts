@@ -24,6 +24,8 @@ export interface RendererStatusLike {
   error?: string;
 }
 
+export type LiveDisplayKind = "idle" | "acquiring" | "painted" | "degraded";
+
 const SITE_PATTERN = /^K[A-Z0-9]{3}$/;
 
 export function normalizeRadarSite(value: string | null | undefined, fallback = "KTLX"): string {
@@ -45,6 +47,10 @@ export function playbackErrorAfterRendererStatus(
   status: RendererStatusLike["status"],
 ): string | null {
   return status === "painted" ? null : current;
+}
+
+export function playbackInteractionReady(displayKind: LiveDisplayKind): boolean {
+  return displayKind !== "acquiring";
 }
 
 export function paintedFrameIndex(

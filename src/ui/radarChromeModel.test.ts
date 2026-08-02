@@ -5,6 +5,7 @@ import {
   normalizeRadarSite,
   paintedFrameIndex,
   playbackErrorAfterRendererStatus,
+  playbackInteractionReady,
   playbackPresentation,
   radarProductLabel,
   rendererFailureMessage,
@@ -50,6 +51,13 @@ describe("radar chrome model", () => {
     expect(playbackErrorAfterRendererStatus("scrub timed out", "error"))
       .toBe("scrub timed out");
     expect(playbackErrorAfterRendererStatus("scrub timed out", "painted")).toBeNull();
+  });
+
+  it("blocks stale timeline interaction throughout live acquisition", () => {
+    expect(playbackInteractionReady("acquiring")).toBe(false);
+    expect(playbackInteractionReady("idle")).toBe(true);
+    expect(playbackInteractionReady("painted")).toBe(true);
+    expect(playbackInteractionReady("degraded")).toBe(true);
   });
 
   it("labels newest paused state from the painted frame position", () => {
