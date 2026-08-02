@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { GateInterrogation } from "../radar-renderer/cpuModel";
 import { timelinePosition, type FreshnessPresentation } from "./radarChromeModel";
 
@@ -55,6 +55,19 @@ export function RadarChrome({
   sites,
 }: RadarChromeProps) {
   const [openPanel, setOpenPanel] = useState<OpenPanel>(null);
+  const menuTriggerRef = useRef<HTMLButtonElement>(null);
+  const contextTriggerRef = useRef<HTMLButtonElement>(null);
+  const panelOriginRef = useRef<"menu" | "context">("menu");
+
+  const closePanel = useCallback((restoreFocus = true) => {
+    const returnTarget = panelOriginRef.current === "context"
+      ? contextTriggerRef.current
+      : menuTriggerRef.current;
+    setOpenPanel(null);
+    if (restoreFocus) {
+      globalThis.requestAnimationFrame(() => returnTarget?.focus());
+    }
+  }, []);
 
   useEffect(() => {
     setOpenPanel(null);
@@ -62,15 +75,31 @@ export function RadarChrome({
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpenPanel(null);
+      if (event.key === "Escape" && openPanel) {
+        event.preventDefault();
+        closePanel();
+      }
     };
     globalThis.addEventListener("keydown", onKeyDown);
     return () => globalThis.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [closePanel, openPanel]);
+
+  useEffect(() => {
+    if (!openPanel) return;
+    const panelId = openPanel === "context-sites"
+      ? "mistr-context-site-panel"
+      : "mistr-tool-panel";
+    const frame = globalThis.requestAnimationFrame(() => {
+      document.getElementById(panelId)
+        ?.querySelector<HTMLButtonElement>("button:not(:disabled)")
+        ?.focus();
+    });
+    return () => globalThis.cancelAnimationFrame(frame);
+  }, [openPanel]);
 
   const selectSite = (site: string) => {
     onSelectSite(site);
-    setOpenPanel(null);
+    closePanel();
   };
   const timestamp = formatScanTimestamp(displayedAtUnixMs);
   const sample = formatSample(interrogation);
@@ -82,7 +111,14 @@ export function RadarChrome({
         aria-expanded={openPanel === "menu" || openPanel === "menu-sites" || openPanel === "about"}
         aria-label={openPanel ? "Close Mistr menu" : "Open Mistr menu"}
         className={`edge-trigger${openPanel ? " edge-trigger--active" : ""}`}
-        onClick={() => setOpenPanel((current) => current ? null : "menu")}
+        onClick={() => {
+          if (openPanel) closePanel();
+          else {
+            panelOriginRef.current = "menu";
+            setOpenPanel("menu");
+          }
+        }}
+        ref={menuTriggerRef}
         type="button"
       >
         <MenuIcon open={openPanel !== null} />
@@ -92,11 +128,18 @@ export function RadarChrome({
         <span className="mistr-wordmark" aria-label="Mistr">MISTR</span>
         <span aria-hidden="true" className="instrument-divider" />
         <button
+          aria-controls="mistr-context-site-panel"
           aria-expanded={openPanel === "context-sites"}
-          aria-haspopup="dialog"
           className="context-selector"
           disabled={!siteSelectionReady}
-          onClick={() => setOpenPanel((current) => current === "context-sites" ? null : "context-sites")}
+          onClick={() => {
+            if (openPanel === "context-sites") closePanel();
+            else {
+              panelOriginRef.current = "context";
+              setOpenPanel("context-sites");
+            }
+          }}
+          ref={contextTriggerRef}
           type="button"
         >
           <span className="context-selector__label">SITE</span>
@@ -140,7 +183,7 @@ export function RadarChrome({
               <span><strong>Radar sites</strong><small>Choose a NEXRAD station</small></span>
               <ChevronIcon direction="right" />
             </button>
-            <button onClick={() => { onRecenter(); setOpenPanel(null); }} type="button">
+            <button onClick={() => { onRecenter(); closePanel(); }} type="button">
               <RecenterIcon />
               <span><strong>Recenter radar</strong><small>Return to {selectedSite}</small></span>
             </button>

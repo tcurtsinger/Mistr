@@ -1,7 +1,7 @@
 [package]
 name = "mistr"
-version = "0.0.1"
-description = "Native-data NEXRAD rendering feasibility prototype"
+version = "0.1.0"
+description = "High-resolution selected-site NEXRAD radar for desktop"
 authors = ["Mistr contributors"]
 edition = "2024"
 rust-version = "1.85"

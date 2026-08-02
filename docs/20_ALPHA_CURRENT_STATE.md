@@ -2,11 +2,11 @@
 
 **Checkpoint:** 2026-08-02
 
-**Merged foundation:** [PR #8 — Establish the Mistr Alpha radar surface](https://github.com/tcurtsinger/Mistr/pull/8), merge commit `6a9df18`
+**Merged product engine:** [PR #9 — Add bounded rolling live radar history](https://github.com/tcurtsinger/Mistr/pull/9), merge commit `444d500`
 
-**Active change:** [PR #9 — Add bounded rolling live radar history](https://github.com/tcurtsinger/Mistr/pull/9)
+**Active change:** Alpha release readiness
 
-**Branch:** `codex/mistr-rolling-live-history`
+**Branch:** `codex/mistr-alpha-release-readiness`
 
 This document is the durable starting point for the next Mistr development session. Verify the active pull request, checks, and thread state on GitHub before acting because review status can change after this checkpoint.
 
@@ -73,7 +73,7 @@ The `window.__MISTR_PHASE4__`, `window.__MISTR_PHASE5__`, and `window.__MISTR_PH
 
 ## Validation state
 
-The rolling-history change has passed:
+The merged rolling-history change passed:
 
 - 126 frontend tests;
 - 89 Rust tests across the library and workspace binaries;
@@ -84,13 +84,25 @@ The rolling-history change has passed:
 - both packaged Phase 6 N0S, context-recovery, minimize/restore, and cold-restart passes; and
 - compact 1100x700 layout inspection with no document overflow and both floating instruments inside the viewport.
 
-The final `npm run verify` passed on this branch, including documentation links, the repository-publication scan, all frontend and Rust tests, the production frontend build, Rust formatting, clippy, and check. The release Tauri executable used by the packaged Phase 4, Phase 5, Phase 6, and compact-layout checks also passed. Generated fixtures, provider responses, packaged reports, and screenshots remain ignored and uncommitted.
+The release-readiness branch now passes `npm run verify`: the public-repository scan, documentation links, 154 frontend tests, the production frontend build, Rust formatting, clippy with warnings denied, 89 Rust tests, and Rust check. Generated fixtures, provider responses, installed-product reports, screenshots, and installers remain ignored and uncommitted.
 
-The Phase 4 stabilized-heap gate initially repeated the previously documented measurement edge after the heavier rolling/context lifecycle. The runner now performs a second explicit DevTools garbage collection and settling interval before taking each stabilized sample; no threshold changed. The unchanged release executable then passed with final samples of 85,095,638 and 87,938,245 bytes. `DRF-004` remains open if same-state growth repeats under the strengthened measurement.
+The final release executable and bundles also pass:
+
+- the packaged live soak with exact-next KTLX volumes 569 through 572, four chronological resident frames, exactly four incremental uploads, direct oldest/newest scrub, bounded GPU memory, and real context recovery;
+- the packaged accessibility/readiness gate at 3840x2160, 1100x700, and 1024x640, including keyboard focus/return, forced colors, reduced motion, accessibility-tree names, slider truth, stable playback position, and 5.09:1 inactive-instruction contrast;
+- two consecutive packaged Phase 4 runs, each containing two 1,000-transition scenarios with zero long tasks, zero hot-path acquisition/uploads, 20 resident frames, and unchanged heap limits;
+- both packaged Phase 6 cold-start, N0S, context-recovery, minimize/restore, and restart passes;
+- final `0.1.0` NSIS and MSI upgrade-from-`0.0.1`, installed first-launch 20-frame GPU paint, and uninstall checks;
+- independent NSIS and MSI install/launch/uninstall in a clean Windows 11 Enterprise Sandbox; and
+- a real Windows sleep/wake cycle with a 34,387 ms heartbeat gap, active pre-sleep playback, 20 painted residents before and after wake, resumed playback, and a matching post-wake direct-scrub receipt.
+
+The repeated Phase 4 heap finding was investigated rather than waived. Allocation sampling traced the retained growth to MapLibre's parsed offscreen basemap tiles at 4K, not radar observations. Mistr now disables that out-of-view parsed-tile cache, and the runner waits for MapLibre's public `idle` signal before its existing two garbage collections. No threshold changed. Two consecutive final stabilized pairs were 79,102,293 to 83,581,348 bytes and 79,183,520 to 84,097,819 bytes. `DRF-004` is closed.
+
+Release readiness also corrects a demonstrated installer defect: prior bundles did not carry the pinned archive resources and could remain running while unable to establish first-launch radar outside the repository. The exact 20 hash-pinned archives are now explicit ignored build resources, resolved through Tauri's packaged resource directory. The real sleep/wake gate closes `DRF-003`, and the enhanced public scanner closes `DRF-001` and `DRF-002`. See [Alpha Release Readiness](22_ALPHA_RELEASE_READINESS.md).
 
 ## Pull-request checkpoint
 
-PR #8 is merged. Rolling-history [PR #9](https://github.com/tcurtsinger/Mistr/pull/9) is **ready for review**, not a draft. Only the repository owner merges.
+PR #8 and rolling-history [PR #9](https://github.com/tcurtsinger/Mistr/pull/9) are merged. The release-readiness branch will be committed, pushed, and opened as a new **ready-for-review** pull request only after the automated gates finish and every remaining manual release blocker is stated plainly. Only the repository owner merges.
 
 Review workflow:
 
@@ -104,13 +116,7 @@ Review workflow:
 
 ## Next decision after this change merges
 
-Do not begin national radar work. The next step is an Alpha release-readiness review, including:
-
-1. the deferred controlled Windows sleep/wake lifecycle pass (`DRF-003`);
-2. an extended real selected-site operational soak using the committed exact-next cursor;
-3. clean-machine Windows install, launch, update/uninstall, and unsigned-build messaging checks;
-4. final accessibility, compact/4K visual, failure-copy, and public-repository audit; and
-5. an explicit owner decision on the remaining release blockers before any new product surface is added.
+Do not begin national radar work. Review the release-readiness evidence and make an explicit owner release/no-release decision. Real sleep/wake and clean-machine installation are closed. The final NSIS and MSI files are intentionally unsigned; the remaining owner action is to inspect or explicitly accept the Windows warning and document the user-facing installation instructions before a public Alpha artifact is described as ready.
 
 ## Public-repository safety
 

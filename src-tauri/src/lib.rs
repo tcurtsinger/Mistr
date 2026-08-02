@@ -11,6 +11,11 @@ use tauri::{Manager, webview::PageLoadEvent};
 pub fn run() {
     tauri::Builder::default()
         .manage(phase2_ipc::TransferBroker::default())
+        .setup(|app| {
+            let resource_root = app.path().resource_dir()?;
+            app.manage(phase2_ipc::RuntimeResources::new(resource_root));
+            Ok(())
+        })
         .on_page_load(|webview, payload| {
             if payload.event() == PageLoadEvent::Started
                 && let Err(error) = webview

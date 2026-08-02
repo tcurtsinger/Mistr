@@ -43,12 +43,15 @@ foreach ($file in $candidateFiles) {
 $secretPatterns = @(
   ("-----BEGIN (RSA |EC |OPENSSH |ENCRYPTED )?" + "PRIVATE KEY-----"),
   ("-----BEGIN PGP " + "PRIVATE KEY BLOCK-----"),
+  ("Pu" + "TTY-User-Key-File-[23]:(?s:.*?)Private-Lines:\s*[1-9][0-9]*"),
   "AKIA[0-9A-Z]{16}",
+  ("AS" + "IA[0-9A-Z]{16}"),
   "gh[pousr]_[A-Za-z0-9_]{20,}",
   "github_pat_[A-Za-z0-9_]{20,}",
   "npm_[A-Za-z0-9]{20,}",
   '(?i)["'']?(password|secret|api[_-]?key|access[_-]?token|_authToken)["'']?\s*[:=]\s*["''](?!\$\{|<)[^"''\r\n]{8,}["'']',
   '(?i)["'']?(password|secret|api[_-]?key|access[_-]?token|_authToken)["'']?\s*[:=]\s*(?!\$\{|<)[A-Za-z0-9_./+=-]{8,}'
+  ('(?i)["'']?(aws[_-]?session[_-]?to' + 'ken)["'']?\s*[:=]\s*(?!\$\{|<)[A-Za-z0-9_./+=-]{16,}')
 )
 
 $binaryExtensions = @(".7z", ".dll", ".exe", ".gif", ".gz", ".ico", ".icns", ".jpeg", ".jpg", ".msi", ".nexrad", ".pdf", ".png", ".webp", ".zip")

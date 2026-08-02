@@ -76,6 +76,8 @@ The product earns additional capabilities only when they improve live storm insp
 - Pinned public-data fixtures and expected results live under `fixtures/`.
 - Architecture and accepted engineering decisions live under `docs/`, including the packed wire, GPU renderer, resident playback, live freshness/fallback, and recovery records.
 - Packaged Windows validation scripts reproduce critical WebView2, 4K, performance, lifecycle, and recovery behavior.
+- Windows installers bundle the exact hash-pinned first-launch archive resources, so safe initial radar does not depend on a developer checkout or ignored local cache.
+- MapLibre does not retain a parsed out-of-view tile cache; visible basemap tiles and the browser's normal network cache remain available while 4K pan/zoom cannot accumulate hundreds of offscreen vector tiles in JavaScript memory.
 - No customer testimonials, market adoption claims, or commercial performance evidence exists and future product work must not invent them.
 
 ## Product Principles
@@ -89,5 +91,7 @@ The product earns additional capabilities only when they improve live storm insp
 ## Accessibility & Inclusion
 
 Mistr is mouse-and-keyboard first. Core site selection, map navigation, and radar transport controls must remain keyboard operable, expose meaningful accessible names and focus state, and communicate operational status through text or structure rather than color alone.
+
+Temporary panels move keyboard focus into their first available action and return it to the originating trigger when selected or dismissed. Windows forced-colors mode retains a visible focus outline, and failure text distinguishes an unavailable first acquisition from a retry that is preserving already-painted live radar.
 
 No additional product-specific accessibility needs have been confirmed for Alpha v1.

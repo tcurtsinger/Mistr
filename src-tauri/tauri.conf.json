@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Mistr",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "identifier": "com.tcurtsinger.mistr",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -28,6 +28,28 @@
   "bundle": {
     "active": true,
     "targets": ["nsis", "msi"],
+    "resources": {
+      "../fixtures/cache/KTLX20240520_202103_V06": "fixtures/cache/KTLX20240520_202103_V06",
+      "../fixtures/cache/KTLX20240520_202943_V06": "fixtures/cache/KTLX20240520_202943_V06",
+      "../fixtures/cache/KTLX20240520_203824_V06": "fixtures/cache/KTLX20240520_203824_V06",
+      "../fixtures/cache/KTLX20240520_204705_V06": "fixtures/cache/KTLX20240520_204705_V06",
+      "../fixtures/cache/KTLX20240520_205546_V06": "fixtures/cache/KTLX20240520_205546_V06",
+      "../fixtures/cache/KTLX20240520_210417_V06": "fixtures/cache/KTLX20240520_210417_V06",
+      "../fixtures/cache/KTLX20240520_211257_V06": "fixtures/cache/KTLX20240520_211257_V06",
+      "../fixtures/cache/KTLX20240520_212128_V06": "fixtures/cache/KTLX20240520_212128_V06",
+      "../fixtures/cache/KTLX20240520_213008_V06": "fixtures/cache/KTLX20240520_213008_V06",
+      "../fixtures/cache/KTLX20240520_213848_V06": "fixtures/cache/KTLX20240520_213848_V06",
+      "../fixtures/cache/KTLX20240520_214728_V06": "fixtures/cache/KTLX20240520_214728_V06",
+      "../fixtures/cache/KTLX20240520_215607_V06": "fixtures/cache/KTLX20240520_215607_V06",
+      "../fixtures/cache/KTLX20240520_220439_V06": "fixtures/cache/KTLX20240520_220439_V06",
+      "../fixtures/cache/KTLX20240520_221320_V06": "fixtures/cache/KTLX20240520_221320_V06",
+      "../fixtures/cache/KTLX20240520_222159_V06": "fixtures/cache/KTLX20240520_222159_V06",
+      "../fixtures/cache/KTLX20240520_223039_V06": "fixtures/cache/KTLX20240520_223039_V06",
+      "../fixtures/cache/KTLX20240520_223919_V06": "fixtures/cache/KTLX20240520_223919_V06",
+      "../fixtures/cache/KTLX20240520_224800_V06": "fixtures/cache/KTLX20240520_224800_V06",
+      "../fixtures/cache/KTLX20240520_225641_V06": "fixtures/cache/KTLX20240520_225641_V06",
+      "../fixtures/cache/KTLX20240520_230512_V06": "fixtures/cache/KTLX20240520_230512_V06"
+    },
     "icon": ["icons/icon.ico"],
     "shortDescription": "High-resolution NEXRAD radar for desktop",
     "longDescription": "A focused desktop radar instrument with decoded NEXRAD data, GPU-resident playback, and an interactive MapLibre map."

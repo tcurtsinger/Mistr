@@ -47,6 +47,10 @@ try {
       true,
       phase4ScenarioTimeoutMs(transitions),
     );
+    // Rapid synthetic camera changes can leave the public basemap's tile
+    // workers finishing requests after the radar scenario itself completes.
+    // Wait for MapLibre's public idle signal before claiming a stabilized heap.
+    await evaluate("window.__MISTR_PHASE4__.settleMap()", true, 35_000);
     await call("HeapProfiler.collectGarbage");
     await delay(500);
     await call("HeapProfiler.collectGarbage");
