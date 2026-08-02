@@ -42,6 +42,7 @@ try {
   await delay(1_000);
 
   const archiveUploads = await evaluate("window.__MISTR_PHASE4__.report().renderer.metrics.frameUploadCount");
+  await evaluate(`window.__MISTR_PHASE5__.setHistoryLimitForDiagnostics(${targetFrames})`);
   await selectSite("KINX");
   const pendingTruth = await waitForPendingSite("KINX");
   await selectSite("KTLX");

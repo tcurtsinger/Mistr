@@ -221,6 +221,7 @@ export function App() {
     let residentLiveHistory: readonly RadarSweepCpuModel[] | null = null;
     let liveSweepCursor: LiveSweepCursor | null = null;
     let liveBackfillCursor: LiveSweepCursor | null = null;
+    let diagnosticHistoryLimit = MAX_LIVE_HISTORY_FRAMES;
     let liveDisplay = initialLiveDisplay();
     let latestPhase5: Phase5Report = { display: liveDisplay };
     const modelsById = new Map<string, RadarSweepCpuModel>();
@@ -843,12 +844,16 @@ export function App() {
           }
         }
       };
-      const runLiveBackfill = async (site: string, pollingSession: number) => {
+      const runLiveBackfill = async (
+        site: string,
+        pollingSession: number,
+        historyLimit: number,
+      ): Promise<boolean> => {
         while (
           !cancelled
           && pollingSession === livePollingSession
           && residentLiveHistory
-          && residentLiveHistory.length < MAX_LIVE_HISTORY_FRAMES
+          && residentLiveHistory.length < historyLimit
         ) {
           try {
             await acquireLive(site, true, 30, "before");
@@ -864,15 +869,23 @@ export function App() {
             if (!cancelled && pollingSession === livePollingSession) {
               setLiveHistoryStatus("partial");
             }
-            return;
+            return false;
           }
         }
-        if (!cancelled && pollingSession === livePollingSession) {
-          setLiveHistoryStatus("full");
+        const residentCount = residentLiveHistory?.length ?? 0;
+        const reachedHistoryLimit = !cancelled
+          && pollingSession === livePollingSession
+          && residentCount >= historyLimit;
+        if (reachedHistoryLimit) {
+          setLiveHistoryStatus(
+            residentCount >= MAX_LIVE_HISTORY_FRAMES ? "full" : "partial",
+          );
         }
+        return reachedHistoryLimit && historyLimit < MAX_LIVE_HISTORY_FRAMES;
       };
       const startLiveSession = async (site: string): Promise<Phase5Report> => {
         const pollingSession = livePollingSession + 1;
+        const historyLimit = diagnosticHistoryLimit;
         livePollingSession = pollingSession;
         liveSweepCursor = null;
         liveBackfillCursor = null;
@@ -880,8 +893,8 @@ export function App() {
         const report = await acquireLive(site, false);
         if (!cancelled && pollingSession === livePollingSession) {
           setLiveHistoryStatus("loading");
-          void runLiveBackfill(site, pollingSession).then(() => {
-            if (!cancelled && pollingSession === livePollingSession) {
+          void runLiveBackfill(site, pollingSession, historyLimit).then((stoppedAtLimit) => {
+            if (!cancelled && pollingSession === livePollingSession && !stoppedAtLimit) {
               void runLivePolling(site, pollingSession);
             }
           });
@@ -895,6 +908,16 @@ export function App() {
       ));
       globalThis.__MISTR_PHASE5__ = {
         report: () => latestPhase5,
+        setHistoryLimitForDiagnostics: (frameCount) => {
+          if (
+            !Number.isSafeInteger(frameCount)
+            || frameCount < 4
+            || frameCount > MAX_LIVE_HISTORY_FRAMES
+          ) {
+            throw new Error("diagnostic history limit must be between 4 and 20 frames");
+          }
+          diagnosticHistoryLimit = frameCount;
+        },
         startSession: async (site) => {
           const normalized = normalizeRadarSite(site);
           selectedSiteRef.current = normalized;
@@ -1729,6 +1752,7 @@ declare global {
   };
   var __MISTR_PHASE5__: undefined | {
     report(): Phase5Report;
+    setHistoryLimitForDiagnostics(frameCount: number): void;
     startSession(site: string): Promise<Phase5Report>;
     stopSession(): Promise<Phase5Report>;
     acquire(site: string, freshOnly?: boolean, timeoutSeconds?: number): Promise<Phase5Report>;

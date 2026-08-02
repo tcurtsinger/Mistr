@@ -68,6 +68,7 @@ These workstation measurements are diagnostic evidence, not a universal latency 
 - Frontend tests cover prepend ordering, deduplication, render-key/generation rules, non-CONUS site acceptance, and truthful one-frame/loading/partial/full copy.
 - Rust tests cover explicit before/after request validation, previous-slot wrap, strict older-time selection, and preservation of current/exact-next behavior.
 - The packaged live soak must validate current-first paint, bounded predecessor accumulation, chronology, direct scrub, site supersession, and real context recovery without waiting for future scans.
+- Shortened 4–19-frame soak modes must stop inside the backfill loop at their configured target rather than relying on an external sampling interval; these diagnostic limits never change the product's 20-frame history bound.
 - Phase 4 must still lazy-load its complete archive before performance scenarios.
 - Phase 5 and Phase 6 must continue to pass their existing cancellation, paint-receipt, N0S, and context-recovery gates.
 
