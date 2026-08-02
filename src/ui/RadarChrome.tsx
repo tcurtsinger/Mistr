@@ -24,6 +24,7 @@ export interface RadarChromeProps {
   playbackReady: boolean;
   playing: boolean;
   selectedSite: string;
+  siteSelectionReady: boolean;
   sites: readonly RadarSiteOption[];
 }
 
@@ -46,6 +47,7 @@ export function RadarChrome({
   playbackReady,
   playing,
   selectedSite,
+  siteSelectionReady,
   sites,
 }: RadarChromeProps) {
   const [openPanel, setOpenPanel] = useState<OpenPanel>(null);
@@ -89,6 +91,7 @@ export function RadarChrome({
           aria-expanded={openPanel === "context-sites"}
           aria-haspopup="dialog"
           className="context-selector"
+          disabled={!siteSelectionReady}
           onClick={() => setOpenPanel((current) => current === "context-sites" ? null : "context-sites")}
           type="button"
         >
@@ -114,6 +117,7 @@ export function RadarChrome({
           currentSite={selectedSite}
           id="mistr-context-site-panel"
           onSelect={selectSite}
+          selectionReady={siteSelectionReady}
           sites={sites}
         />
       ) : null}
@@ -123,7 +127,11 @@ export function RadarChrome({
           <PanelHeader eyebrow="MISTR MENU" supporting={`${selectedSite} · CURRENT RADAR`} />
           <div className="menu-group">
             <p>RADAR</p>
-            <button onClick={() => setOpenPanel("menu-sites")} type="button">
+            <button
+              disabled={!siteSelectionReady}
+              onClick={() => setOpenPanel("menu-sites")}
+              type="button"
+            >
               <RadarIcon />
               <span><strong>Radar sites</strong><small>Choose a NEXRAD station</small></span>
               <ChevronIcon direction="right" />
@@ -151,6 +159,7 @@ export function RadarChrome({
           id="mistr-tool-panel"
           onBack={() => setOpenPanel("menu")}
           onSelect={selectSite}
+          selectionReady={siteSelectionReady}
           sites={sites}
         />
       ) : null}
@@ -226,6 +235,7 @@ function SitePanel({
   id,
   onBack,
   onSelect,
+  selectionReady,
   sites,
 }: {
   className: string;
@@ -233,6 +243,7 @@ function SitePanel({
   id: string;
   onBack?: () => void;
   onSelect(site: string): void;
+  selectionReady: boolean;
   sites: readonly RadarSiteOption[];
 }) {
   return (
@@ -245,6 +256,7 @@ function SitePanel({
           return (
             <button
               aria-current={current ? "true" : undefined}
+              disabled={!selectionReady}
               key={site.id}
               onClick={() => onSelect(site.id)}
               type="button"

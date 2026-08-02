@@ -79,9 +79,9 @@ The automated `__MISTR_PHASE4__`, `__MISTR_PHASE5__`, and `__MISTR_PHASE6__` API
 The product-foundation change has passed:
 
 - the full `npm run verify` suite;
-- 105 frontend tests;
+- 106 frontend tests;
 - 87 Rust tests across the workspace binaries and library;
-- public-repository scanning for 180 candidate files;
+- public-repository scanning for 182 candidate files;
 - documentation-link validation;
 - production frontend and release Tauri builds;
 - packaged Windows/WebView2 Phase 4 at 3840x2160 with two 1,000-transition scenarios, zero long tasks, and zero hot-path acquisition/upload activity;
@@ -91,13 +91,20 @@ The product-foundation change has passed:
 
 The Impeccable finish review found five material issues—stale dBZ after frame changes, premature site relabeling, hidden compact dBZ, repeated screen-reader freshness announcements, and over-wide 4K framing. All five were fixed and the targeted re-review confirmed them resolved.
 
-One isolated intermediate Phase 4 stabilized-heap measurement failure did not reproduce in two later final-build runs. It is recorded transparently as `DRF-004` in [Deferred review findings](DEFERRED_REVIEW_FINDINGS.md); no acceptance threshold was relaxed.
+Intermittent single-run Phase 4 stabilized-heap measurement failures are recorded transparently as `DRF-004` in [Deferred review findings](DEFERRED_REVIEW_FINDINGS.md). The latest occurrence retained zero long tasks, zero hot-path work, normal timing, and 20-frame residency, then passed an immediate rerun of the exact same source state. No acceptance threshold was relaxed.
 
-Pull-request review later demonstrated two defects. First, a persisted-site startup acquisition could overlap the Phase 4 or Phase 6 packaged gate after those runners observed their diagnostic APIs. The runners now cross an explicit archive-preparation barrier that supersedes and awaits startup work, restores all 20 archive observations, and only then begins measurement or recovery checks. Second, a failed startup refresh could overwrite the stored last-successful live site with the painted KTLX archive fallback. Failed acquisitions now preserve the stored live-site preference; only a successful matching live paint updates it. The full verification suite passed after both corrections, and both affected packaged gates passed after the isolation correction.
+Pull-request review later demonstrated four defects, all corrected on the branch:
+
+- A persisted-site startup acquisition could overlap the Phase 4 or Phase 6 packaged gate after those runners observed their diagnostic APIs. The runners now cross an explicit archive-preparation barrier that supersedes and awaits startup work, restores all 20 archive observations, and only then begins measurement or recovery checks.
+- A failed startup refresh could overwrite the stored last-successful live site with the painted KTLX archive fallback. Failed acquisitions now preserve the stored live-site preference; only a successful matching live paint updates it.
+- A superseded request for the same site could still pass a site-string callback guard and overwrite the result of the newer request. Startup and interactive callbacks now require a unique current request sequence.
+- Selecting a site before the resident engine became ready could leave a preparation-only error latched over the healthy archive. Site-selection controls now remain disabled until acquisition is available, and the preparation-only error is cleared at that boundary.
+
+The full verification suite passed after these corrections, and both affected packaged gates passed after the isolation correction.
 
 ## Pull-request checkpoint
 
-At this checkpoint, PR #8 remains open and marked ready for review. Automated review submitted two actionable threads: packaged-gate isolation from persisted startup acquisition, and preservation of the stored live-site preference after a startup refresh failure. The branch now fixes both as described above. No conversation comments or other review threads had appeared. Re-read the live PR, checks, and thread state before taking action because CI and review status can change after this checkpoint.
+At this checkpoint, PR #8 remains open and marked ready for review. Automated review submitted four actionable threads covering the corrections above, and the branch now fixes all four. One top-level conversation comment requested the latest automated review; no other conversation feedback had appeared. Re-read the live PR, checks, and thread state before taking action because CI and review status can change after this checkpoint.
 
 ## Required review workflow
 

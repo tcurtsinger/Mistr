@@ -61,6 +61,7 @@ import {
   type LiveDisplayState,
   type PaintedFrameTruth,
 } from "./live/liveDisplayState";
+import { SiteRequestTracker } from "./live/siteRequestTracker";
 import { RadarChrome, type RadarSiteOption } from "./ui/RadarChrome";
 import {
   freshnessPresentation,
@@ -85,6 +86,7 @@ const DIAGNOSTIC_LAYER_IDS = {
 };
 const DEFAULT_CENTER: [number, number] = [-97.27776, 35.333363];
 const LAST_SITE_STORAGE_KEY = "mistr.lastRadarSite";
+const RADAR_ENGINE_PREPARING_ERROR = "Radar engine is still preparing the resident loop";
 const ALPHA_SITES: readonly RadarSiteOption[] = [
   { id: "KTLX", name: "Oklahoma City, Oklahoma" },
   { id: "KOUN", name: "Norman, Oklahoma" },
@@ -100,6 +102,7 @@ export function App() {
   const map = useRef<MapLibreMap | null>(null);
   const playbackControllerRef = useRef<ResidentPlaybackController | null>(null);
   const selectedSiteRef = useRef(restoreLastSite());
+  const siteRequestTrackerRef = useRef(new SiteRequestTracker());
   const paintedSiteRef = useRef("KTLX");
   const radarModelRef = useRef<RadarSweepCpuModel | null>(null);
   const inspectionMarkerRef = useRef<maplibregl.Marker | null>(null);
@@ -123,6 +126,7 @@ export function App() {
   const [selectedSite, setSelectedSite] = useState("KTLX");
   const [requestedSite, setRequestedSite] = useState<string | null>(null);
   const [siteRequestError, setSiteRequestError] = useState<string | null>(null);
+  const [siteSelectionReady, setSiteSelectionReady] = useState(false);
   const [dismissPanelsSignal, setDismissPanelsSignal] = useState(0);
   const [nowUnixMs, setNowUnixMs] = useState(Date.now());
 
@@ -576,6 +580,10 @@ export function App() {
         }
       };
       acquireLiveRef.current = (site, freshOnly) => acquireLive(site, freshOnly);
+      setSiteSelectionReady(true);
+      setSiteRequestError((current) => (
+        current === RADAR_ENGINE_PREPARING_ERROR ? null : current
+      ));
       globalThis.__MISTR_PHASE5__ = {
         report: () => latestPhase5,
         acquire: acquireLive,
@@ -665,6 +673,7 @@ export function App() {
         // Packaged gates reuse the normal WebView profile. Supersede and await
         // any persisted-site startup request before restoring the measured
         // archive loop, so live publication cannot overlap gate measurements.
+        siteRequestTrackerRef.current.invalidate();
         const generation = Math.max(
           transferGeneration + 1,
           layer.getSnapshot().generation + 1,
@@ -703,10 +712,11 @@ export function App() {
       };
       if (hasStoredSite()) {
         const startupSite = selectedSiteRef.current;
+        const requestSequence = siteRequestTrackerRef.current.begin();
         setRequestedSite(startupSite);
         startupAcquisition = acquireLive(startupSite, false).then(
           () => {
-            if (selectedSiteRef.current === startupSite) {
+            if (siteRequestTrackerRef.current.isCurrent(requestSequence)) {
               setSelectedSite(startupSite);
               setRequestedSite(null);
               storeLastSite(startupSite);
@@ -714,7 +724,7 @@ export function App() {
             }
           },
           (error: unknown) => {
-            if (selectedSiteRef.current === startupSite) {
+            if (siteRequestTrackerRef.current.isCurrent(requestSequence)) {
               const fallbackSite = paintedSiteRef.current;
               selectedSiteRef.current = fallbackSite;
               setSelectedSite(fallbackSite);
@@ -741,6 +751,7 @@ export function App() {
 
     return () => {
       cancelled = true;
+      siteRequestTrackerRef.current.invalidate();
       controller?.dispose();
       if (playbackControllerRef.current === controller) playbackControllerRef.current = null;
       if (clickHandler) instance.off("click", clickHandler);
@@ -808,9 +819,10 @@ export function App() {
     const normalized = normalizeRadarSite(site);
     const acquire = acquireLiveRef.current;
     if (!acquire) {
-      setSiteRequestError("Radar engine is still preparing the resident loop");
+      setSiteRequestError(RADAR_ENGINE_PREPARING_ERROR);
       return;
     }
+    const requestSequence = siteRequestTrackerRef.current.begin();
     selectedSiteRef.current = normalized;
     setRequestedSite(normalized);
     setSiteRequestError(null);
@@ -821,7 +833,7 @@ export function App() {
     interrogationObservationRef.current = null;
     void acquire(normalized, false).then(
       () => {
-        if (selectedSiteRef.current === normalized) {
+        if (siteRequestTrackerRef.current.isCurrent(requestSequence)) {
           setSelectedSite(normalized);
           setRequestedSite(null);
           storeLastSite(normalized);
@@ -829,7 +841,7 @@ export function App() {
         }
       },
       (error: unknown) => {
-        if (selectedSiteRef.current === normalized) {
+        if (siteRequestTrackerRef.current.isCurrent(requestSequence)) {
           const fallbackSite = paintedSiteRef.current;
           selectedSiteRef.current = fallbackSite;
           setSelectedSite(fallbackSite);
@@ -868,6 +880,7 @@ export function App() {
         playbackReady={Boolean(playbackControllerRef.current) && phase4.kind === "complete"}
         playing={playback?.playing ?? false}
         selectedSite={selectedSite}
+        siteSelectionReady={siteSelectionReady}
         sites={ALPHA_SITES}
       />
       {phase4.kind === "error" ? (

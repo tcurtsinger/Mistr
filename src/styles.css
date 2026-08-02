@@ -377,6 +377,10 @@ button { color: inherit; }
 .playback-toggle:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .playback-toggle:disabled { opacity: 0.38; cursor: not-allowed; }
 
+.context-selector:disabled,
+.menu-group button:disabled,
+.site-list button:disabled { opacity: 0.45; cursor: not-allowed; }
+
 .timeline { position: relative; min-width: 0; padding-top: 3px; }
 .timeline input {
   position: relative;

@@ -35,13 +35,13 @@ This ledger keeps review feedback visible without turning low-probability edge c
 - **Reason:** Automatically suspending the primary workstation is disruptive and can sever the active development/review session. CDP page freezing is not an honest substitute because it intentionally suppresses `requestAnimationFrame`. Actual WebGL context loss, minimize/restore, offline/online, DPI overrides, and cold restart passed twice.
 - **Revisit:** Before a public Mistr Alpha release, run one controlled Windows sleep/wake cycle while radar playback is active and save the Phase 6 report plus a post-wake paint receipt.
 
-### DRF-004 - Isolated Phase 4 stabilized-heap measurement failure
+### DRF-004 - Intermittent Phase 4 stabilized-heap measurement edge
 
 - **Origin:** Alpha product-foundation packaged validation.
 - **Area:** `scripts/phase4-packaged-cdp.mjs` and WebView2 `performance.memory` sampling.
 - **Disposition:** Deferred measurement edge case.
-- **Reason:** One intermediate 4K run exceeded the stabilized-heap-growth acceptance threshold after both 1,000-transition scenarios even though it had zero long tasks, zero hot-path uploads/acquisition, and normal frame/switch timings. Two subsequent runs of the final packaged build passed the same gate, including explicit garbage collection and stabilization sampling. There is no repeated product leak demonstrated on the current commit.
-- **Revisit:** If the gate fails again on the same commit or on a second Windows machine, retain all per-scenario heap samples and investigate before relaxing any threshold.
+- **Reason:** An intermediate product-foundation 4K run exceeded the stabilized-heap-growth acceptance threshold after both 1,000-transition scenarios even though it had zero long tasks, zero hot-path uploads/acquisition, and normal frame/switch timings; two subsequent final-build runs passed. A later review-fix build produced the same single-run measurement failure with every functional and timing gate passing, then passed an immediate rerun of the exact same source state. Both failing reports were retained in ignored local artifacts. There is still no same-state repeated failure or demonstrated product leak, and no threshold was relaxed.
+- **Revisit:** If the gate fails twice on the same source state or reproduces on a second Windows machine, retain all per-scenario heap samples and investigate before relaxing any threshold.
 
 ## Closed items
 
