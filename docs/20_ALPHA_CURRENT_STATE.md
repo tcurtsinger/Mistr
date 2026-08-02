@@ -4,7 +4,7 @@
 
 **Merged foundation:** [PR #8 — Establish the Mistr Alpha radar surface](https://github.com/tcurtsinger/Mistr/pull/8), merge commit `6a9df18`
 
-**Active change:** Bounded rolling live reflectivity history
+**Active change:** [PR #9 — Add bounded rolling live radar history](https://github.com/tcurtsinger/Mistr/pull/9)
 
 **Branch:** `codex/mistr-rolling-live-history`
 
@@ -90,7 +90,7 @@ The Phase 4 stabilized-heap gate initially repeated the previously documented me
 
 ## Pull-request checkpoint
 
-PR #8 is merged. The rolling-history branch will be committed, pushed, and opened as a new **ready-for-review** pull request after all final checks pass. It must not be left as a draft, and only the repository owner merges.
+PR #8 is merged. Rolling-history [PR #9](https://github.com/tcurtsinger/Mistr/pull/9) is **ready for review**, not a draft. Only the repository owner merges.
 
 Review workflow:
 
