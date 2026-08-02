@@ -151,6 +151,17 @@ pub struct LiveHistoryCursorArgs {
     pub volume_started_at_unix_ms: i64,
 }
 
+#[derive(Debug, Clone)]
+pub struct RuntimeResources {
+    root: PathBuf,
+}
+
+impl RuntimeResources {
+    pub fn new(root: PathBuf) -> Self {
+        Self { root }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct TransferBroker {
     inner: Arc<Mutex<TransferState>>,
@@ -695,16 +706,18 @@ pub async fn request_phase3_fixture_sweep(
 #[tauri::command]
 pub async fn request_phase4_fixture_sweep(
     state: tauri::State<'_, TransferBroker>,
+    resources: tauri::State<'_, RuntimeResources>,
     session: u64,
     generation: u64,
     fixture_id: String,
 ) -> Result<Response, TransferError> {
     let broker = state.inner().clone();
+    let resource_root = resources.root.clone();
     broker.acquire(session, generation)?;
     let worker_broker = broker.clone();
     let task = tauri::async_runtime::spawn_blocking(move || {
         let fixture = phase4_fixture_expectation(&fixture_id)?;
-        let path = phase4_fixture_path(&fixture)?;
+        let path = phase4_fixture_path(&fixture, &resource_root)?;
         let input = read_fixture_archive(&path, &fixture)?;
         worker_broker.record_phase4_disk_read()?;
         verify_fixture_archive_hash(&input, &fixture, "Phase 4")?;
@@ -1141,7 +1154,10 @@ fn phase3_fixture_path() -> Result<PathBuf, TransferError> {
         .join(PHASE3_FIXTURE_NAME))
 }
 
-fn phase4_fixture_path(fixture: &FixtureManifestEntry) -> Result<PathBuf, TransferError> {
+fn phase4_fixture_path(
+    fixture: &FixtureManifestEntry,
+    resource_root: &std::path::Path,
+) -> Result<PathBuf, TransferError> {
     let relative = std::path::Path::new(&fixture.local_path);
     if relative.is_absolute()
         || relative
@@ -1169,7 +1185,11 @@ fn phase4_fixture_path(fixture: &FixtureManifestEntry) -> Result<PathBuf, Transf
             format!("failed to resolve current directory: {error}"),
         )
     })?;
-    Ok(current.join("fixtures").join(relative))
+    let development_path = current.join("fixtures").join(relative);
+    if development_path.is_file() {
+        return Ok(development_path);
+    }
+    Ok(resource_root.join("fixtures").join(relative))
 }
 
 fn phase6_fixture_path(fixture: &FixtureManifestEntry) -> Result<PathBuf, TransferError> {

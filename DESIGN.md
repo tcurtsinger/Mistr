@@ -207,6 +207,9 @@ Persistent instruments use one continuous rounded silhouette apiece. Internal gr
 ### Status and Recovery
 - Loading, partial history, stale/retrying, graphics recovery, and failure states use established regions in the context or playback bar.
 - The last trustworthy painted observation remains visible whenever safe.
+- A failed first live acquisition names the unavailable site; a recoverable background failure says `RETRYING SITE` rather than implying that valid painted radar disappeared.
+- Opening a temporary panel moves keyboard focus into its first action. Escape, selection, or explicit close returns focus to the trigger that opened it.
+- Windows forced-colors mode uses a system-color outline rather than relying on chrome glow or box shadow for focus.
 
 ## Do's and Don'ts
 

@@ -464,7 +464,7 @@ button { color: inherit; }
 .freshness--stale,
 .freshness--error { color: var(--danger); }
 .freshness--archive { color: #b9bfd0; }
-.sample-readout { min-width: 92px; color: #6f7585; text-align: right; }
+.sample-readout { min-width: 92px; color: var(--quiet); text-align: right; }
 .sample-readout--active { color: var(--rose-light); }
 
 .inspection-marker {
@@ -525,4 +525,27 @@ button { color: inherit; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+}
+
+@media (forced-colors: active) {
+  button:focus,
+  input:focus {
+    outline: 2px solid Highlight !important;
+    outline-offset: 3px;
+    box-shadow: none !important;
+  }
+
+  .context-bar,
+  .edge-trigger,
+  .playback-bar,
+  .tool-panel { border-color: CanvasText; }
+
+  .instrument-divider,
+  .timeline input::-webkit-slider-runnable-track { background: CanvasText; }
+
+  .timeline input::-webkit-slider-thumb {
+    border-color: Canvas;
+    background: Highlight;
+    box-shadow: none;
+  }
 }

@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   formatAge,
   freshnessPresentation,
+  liveFailureLabel,
+  userFacingRadarError,
   normalizeRadarSite,
   paintedFrameIndex,
   playbackErrorAfterRendererStatus,
@@ -77,6 +79,21 @@ describe("radar chrome model", () => {
       kind: "fresh",
       label: "FRESH · 00:40",
     });
+  });
+
+  it("distinguishes a retrying live refresh from an unavailable first acquisition", () => {
+    expect(liveFailureLabel("KTLX", true)).toBe("RETRYING KTLX");
+    expect(liveFailureLabel("KOUN", false)).toBe("KOUN UNAVAILABLE");
+    expect(() => liveFailureLabel("bad", true)).toThrow("supported NEXRAD site");
+  });
+
+  it("keeps product failure copy actionable and free of diagnostic detail", () => {
+    expect(userFacingRadarError("initialization")).toContain("Restart Mistr");
+    expect(userFacingRadarError("map")).toContain("Check your connection");
+    expect(userFacingRadarError("playback")).toContain("last completed scan");
+    expect(userFacingRadarError("live_retrying", "KTLX")).toContain("while Mistr retries");
+    expect(userFacingRadarError("live_unavailable", "KOUN")).toContain("choose the site again");
+    expect(() => userFacingRadarError("live_unavailable", "bad")).toThrow("supported NEXRAD site");
   });
 
   it("makes a partial rolling live loop explicit without hiding playback position", () => {

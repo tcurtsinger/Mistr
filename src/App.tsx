@@ -72,6 +72,8 @@ import { SiteRequestTracker } from "./live/siteRequestTracker";
 import { RadarChrome, type RadarSiteOption } from "./ui/RadarChrome";
 import {
   freshnessPresentation,
+  liveFailureLabel,
+  userFacingRadarError,
   normalizeRadarSite,
   paintedFrameIndex,
   playbackErrorAfterRendererStatus,
@@ -168,6 +170,9 @@ export function App() {
         bearing: 0,
         pitch: 0,
         attributionControl: false,
+        // Keep the basemap's out-of-view vector-tile cache bounded at 4K.
+        // Radar observations have their own independently bounded residency.
+        maxTileCacheSize: 0,
         maxPitch: 0,
         dragRotate: false,
         touchPitch: false,
@@ -571,6 +576,7 @@ export function App() {
         },
         prepareArchive: () => prepareArchiveForDiagnostics?.()
           ?? Promise.reject(new Error("archive diagnostic preparation is unavailable")),
+        settleMap: (timeoutMs) => waitForMapIdle(instance, timeoutMs),
         layerOrder: () => currentLayerCoexistenceReport(instance).actualDiagnosticOrder,
       };
       const acquireLive = async (
@@ -594,7 +600,9 @@ export function App() {
         liveDisplay = appendingHistory
           ? beginLiveRefresh(liveDisplay, generation, site)
           : beginLiveDisplay(liveDisplay, generation, site, freshOnly);
-        publishPhase5({ display: liveDisplay });
+        publishPhase5(appendingHistory
+          ? { ...latestPhase5, display: liveDisplay }
+          : { display: liveDisplay });
         let lease: Awaited<ReturnType<PackedSweepTransferClient["requestPhase5Live"]>> | undefined;
         let stagedObservationId: string | undefined;
         let priorStagedModel: RadarSweepCpuModel | undefined;
@@ -964,7 +972,8 @@ export function App() {
   const rendererError = phase4.kind === "complete"
     ? rendererFailureMessage(phase4.report.renderer)
     : null;
-  const radarUnavailableError = initializationError ?? rendererError ?? mapReadinessError(mapState);
+  const mapError = mapReadinessError(mapState);
+  const radarUnavailableError = initializationError ?? rendererError ?? mapError;
   const freshnessSource = radarUnavailableError || siteRequestError || playbackError
     ? "error"
     : phase5.display.kind === "acquiring"
@@ -981,7 +990,33 @@ export function App() {
   const freshness = freshnessPresentation(freshnessSource, displayedAtUnixMs, nowUnixMs);
   if (freshnessSource === "updating") {
     freshness.label = `UPDATING ${requestedSite ?? selectedSite}`;
+  } else if (phase5.display.kind === "degraded") {
+    const failedSite = phase5.display.requestedSite;
+    const retrying = phase5.display.lastComplete?.source === "nexrad_level2_chunks"
+      && phase5.display.lastComplete.site === failedSite;
+    freshness.label = liveFailureLabel(failedSite, retrying);
   }
+  const liveFailureSite = phase5.display.kind === "degraded"
+    ? phase5.display.requestedSite
+    : undefined;
+  const liveRetrying = phase5.display.kind === "degraded"
+    && phase5.display.lastComplete?.source === "nexrad_level2_chunks"
+    && phase5.display.lastComplete.site === liveFailureSite;
+  const userFacingError = initializationError
+    ? userFacingRadarError("initialization")
+    : rendererError
+      ? userFacingRadarError("renderer")
+      : mapError
+        ? userFacingRadarError("map")
+        : playbackError
+          ? userFacingRadarError("playback")
+          : liveFailureSite
+            ? userFacingRadarError(liveRetrying ? "live_retrying" : "live_unavailable", liveFailureSite)
+            : siteRequestError
+              ? siteRequestError === RADAR_ENGINE_PREPARING_ERROR
+                ? userFacingRadarError("initialization")
+                : userFacingRadarError("live_unavailable", selectedSite)
+              : null;
 
   const togglePlayback = () => {
     const controller = playbackControllerRef.current;
@@ -1085,8 +1120,8 @@ export function App() {
         siteSelectionReady={siteSelectionReady}
         sites={ALPHA_SITES}
       />
-      {radarUnavailableError ? (
-        <p className="benchmark-error sr-only" role="alert">{radarUnavailableError}</p>
+      {userFacingError ? (
+        <p className="benchmark-error sr-only" role="alert">{userFacingError}</p>
       ) : null}
     </main>
   );
@@ -1335,6 +1370,24 @@ function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => globalThis.setTimeout(resolve, milliseconds));
 }
 
+function waitForMapIdle(map: MapLibreMap, timeoutMs = 30_000): Promise<void> {
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60_000) {
+    return Promise.reject(new RangeError("map idle timeout must be an integer from 1 to 60000 ms"));
+  }
+  if (!map.isMoving() && map.loaded() && map.areTilesLoaded()) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const onIdle = () => {
+      globalThis.clearTimeout(timeout);
+      resolve();
+    };
+    const timeout = globalThis.setTimeout(() => {
+      map.off("idle", onIdle);
+      reject(new Error(`map did not settle within ${timeoutMs} ms`));
+    }, timeoutMs);
+    map.once("idle", onIdle);
+  });
+}
+
 function arraysEqual(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
@@ -1464,6 +1517,7 @@ declare global {
     report(): Phase4Report;
     runScenario(transitionCount?: number): Promise<Phase4ScenarioReport>;
     prepareArchive(): Promise<RadarPaintReceipt>;
+    settleMap(timeoutMs?: number): Promise<void>;
     play(): void;
     pause(): void;
     step(): Promise<RadarPaintReceipt>;

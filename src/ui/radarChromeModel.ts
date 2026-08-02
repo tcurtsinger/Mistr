@@ -112,6 +112,26 @@ export function freshnessPresentation(
   return { kind: "stale", label: `STALE · ${formatAge(ageSeconds)}` };
 }
 
+export function liveFailureLabel(site: string, retrying: boolean): string {
+  if (!SITE_PATTERN.test(site)) throw new Error("failure label requires a supported NEXRAD site");
+  return retrying ? `RETRYING ${site}` : `${site} UNAVAILABLE`;
+}
+
+export function userFacingRadarError(
+  area: "initialization" | "map" | "renderer" | "playback" | "live_unavailable" | "live_retrying",
+  site?: string,
+): string {
+  if (area === "initialization") return "Mistr could not prepare radar. Restart Mistr to try again.";
+  if (area === "map") return "Mistr could not prepare the map. Check your connection and restart Mistr.";
+  if (area === "renderer") return "Mistr could not paint radar. Restart Mistr to restore the radar display.";
+  if (area === "playback") return "Mistr could not change scans. The last completed scan remains displayed.";
+  if (!site || !SITE_PATTERN.test(site)) throw new Error("live error copy requires a supported NEXRAD site");
+  if (area === "live_retrying") {
+    return `${site} update failed. The last completed scan remains displayed while Mistr retries.`;
+  }
+  return `${site} radar is unavailable. The last completed scan remains displayed; choose the site again to retry.`;
+}
+
 export function formatAge(totalSeconds: number): string {
   const safeSeconds = Math.max(0, Math.floor(totalSeconds));
   if (safeSeconds < 3_600) {
