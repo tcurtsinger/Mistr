@@ -6,6 +6,7 @@ import {
   paintedFrameIndex,
   playbackPresentation,
   radarProductLabel,
+  rendererFailureMessage,
 } from "./radarChromeModel";
 
 describe("radar chrome model", () => {
@@ -32,6 +33,14 @@ describe("radar chrome model", () => {
   it("labels the product that actually painted", () => {
     expect(radarProductLabel("reflectivity")).toBe("REFLECTIVITY");
     expect(radarProductLabel("storm_relative_velocity")).toBe("STORM-RELATIVE VELOCITY");
+  });
+
+  it("surfaces only an active renderer failure", () => {
+    expect(rendererFailureMessage(undefined)).toBeNull();
+    expect(rendererFailureMessage({ status: "painted", error: "old failure" })).toBeNull();
+    expect(rendererFailureMessage({ status: "error", error: "GPU completion fence failed" }))
+      .toBe("GPU completion fence failed");
+    expect(rendererFailureMessage({ status: "error" })).toBe("Radar renderer failed");
   });
 
   it("labels newest paused state from the painted frame position", () => {

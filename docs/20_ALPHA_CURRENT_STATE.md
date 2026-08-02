@@ -79,7 +79,7 @@ The automated `__MISTR_PHASE4__`, `__MISTR_PHASE5__`, and `__MISTR_PHASE6__` API
 The product-foundation change has passed:
 
 - the full `npm run verify` suite;
-- 107 frontend tests;
+- 108 frontend tests;
 - 87 Rust tests across the workspace binaries and library;
 - public-repository scanning for 182 candidate files;
 - documentation-link validation;
@@ -93,7 +93,7 @@ The Impeccable finish review found five material issues—stale dBZ after frame 
 
 Intermittent single-run Phase 4 stabilized-heap measurement failures are recorded transparently as `DRF-004` in [Deferred review findings](DEFERRED_REVIEW_FINDINGS.md). The latest occurrence retained zero long tasks, zero hot-path work, normal timing, and 20-frame residency, then passed an immediate rerun of the exact same source state. No acceptance threshold was relaxed.
 
-Pull-request review later demonstrated six defects, all corrected on the branch:
+Pull-request review later demonstrated seven defects, all corrected on the branch:
 
 - A persisted-site startup acquisition could overlap the Phase 4 or Phase 6 packaged gate after those runners observed their diagnostic APIs. The runners now cross an explicit archive-preparation barrier that supersedes and awaits startup work, restores all 20 archive observations, and only then begins measurement or recovery checks.
 - A failed startup refresh could overwrite the stored last-successful live site with the painted KTLX archive fallback. Failed acquisitions now preserve the stored live-site preference; only a successful matching live paint updates it.
@@ -101,12 +101,13 @@ Pull-request review later demonstrated six defects, all corrected on the branch:
 - Selecting a site before the resident engine became ready could leave a preparation-only error latched over the healthy archive. Site-selection controls now remain disabled until acquisition is available, and the preparation-only error is cleared at that boundary.
 - The Phase 5 packaged runner could begin its cancellation scenario before persisted startup work settled, leaving its UI evidence labeled as an error despite a valid diagnostic report. Phase 5 now crosses the same archive-preparation barrier as Phase 4 and Phase 6.
 - The Phase 6 N0S screenshot could label a painted storm-relative-velocity frame as reflectivity. The context product label now follows the product that actually painted.
+- A post-startup GPU failure could leave the chrome claiming `FRESH` or `ARCHIVE LOOP` while playback controls remained enabled. Active renderer errors now surface as `RADAR ERROR`, label playback unavailable, disable play and scrubbing, and announce the renderer failure to assistive technology.
 
 The full verification suite passed after these corrections. The final review-fix state also passed the Phase 4 gate on its immediate exact-state rerun, the Phase 5 live/cancellation gate, and both Phase 6 packaged restart passes; the final N0S evidence image labels the painted product as `STORM-RELATIVE VELOCITY`.
 
 ## Pull-request checkpoint
 
-At this checkpoint, PR #8 remains open and marked ready for review. Automated review submitted six actionable threads covering the corrections above, and the branch now fixes all six. One top-level conversation comment requested the latest automated review; no other conversation feedback had appeared. Re-read the live PR, checks, and thread state before taking action because CI and review status can change after this checkpoint.
+At this checkpoint, PR #8 remains open and marked ready for review. Automated review submitted seven actionable threads covering the corrections above, and the branch now fixes all seven. One top-level conversation comment requested the latest automated review; no other conversation feedback had appeared. Re-read the live PR, checks, and thread state before taking action because CI and review status can change after this checkpoint.
 
 ## Required review workflow
 

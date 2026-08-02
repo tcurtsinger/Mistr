@@ -19,6 +19,11 @@ export interface FreshnessPresentation {
 
 export type RadarProduct = "reflectivity" | "storm_relative_velocity";
 
+export interface RendererStatusLike {
+  status: string;
+  error?: string;
+}
+
 const SITE_PATTERN = /^K[A-Z0-9]{3}$/;
 
 export function normalizeRadarSite(value: string | null | undefined, fallback = "KTLX"): string {
@@ -28,6 +33,11 @@ export function normalizeRadarSite(value: string | null | undefined, fallback = 
 
 export function radarProductLabel(product: RadarProduct): string {
   return product === "storm_relative_velocity" ? "STORM-RELATIVE VELOCITY" : "REFLECTIVITY";
+}
+
+export function rendererFailureMessage(renderer: RendererStatusLike | undefined): string | null {
+  if (renderer?.status !== "error") return null;
+  return renderer.error ?? "Radar renderer failed";
 }
 
 export function paintedFrameIndex(

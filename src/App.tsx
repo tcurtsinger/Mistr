@@ -69,6 +69,7 @@ import {
   paintedFrameIndex,
   playbackPresentation,
   radarProductLabel,
+  rendererFailureMessage,
   type TimelineFrame,
 } from "./ui/radarChromeModel";
 
@@ -778,7 +779,12 @@ export function App() {
   const displayedAtUnixMs = playback?.playheadObservedAtUnixMs
     ?? phase5.display.lastComplete?.observedAtUnixMs;
   const playbackLabel = playbackPresentation(playback, frameIndex, timelineFrames.length);
-  const freshnessSource = phase4.kind === "error" || siteRequestError
+  const initializationError = phase4.kind === "error" ? phase4.message : null;
+  const rendererError = phase4.kind === "complete"
+    ? rendererFailureMessage(phase4.report.renderer)
+    : null;
+  const radarUnavailableError = initializationError ?? rendererError;
+  const freshnessSource = radarUnavailableError || siteRequestError
     ? "error"
     : phase5.display.kind === "acquiring"
       ? "updating"
@@ -882,16 +888,18 @@ export function App() {
         onScrub={queueScrub}
         onSelectSite={selectSite}
         onTogglePlayback={togglePlayback}
-        playbackLabel={phase4.kind === "error" ? "RADAR UNAVAILABLE" : playbackLabel}
-        playbackReady={Boolean(playbackControllerRef.current) && phase4.kind === "complete"}
+        playbackLabel={radarUnavailableError ? "RADAR UNAVAILABLE" : playbackLabel}
+        playbackReady={Boolean(playbackControllerRef.current)
+          && phase4.kind === "complete"
+          && !rendererError}
         playing={playback?.playing ?? false}
         productLabel={radarProductLabel(paintedProduct)}
         selectedSite={selectedSite}
         siteSelectionReady={siteSelectionReady}
         sites={ALPHA_SITES}
       />
-      {phase4.kind === "error" ? (
-        <p className="benchmark-error sr-only" role="alert">{phase4.message}</p>
+      {radarUnavailableError ? (
+        <p className="benchmark-error sr-only" role="alert">{radarUnavailableError}</p>
       ) : null}
     </main>
   );
