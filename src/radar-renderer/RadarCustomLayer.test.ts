@@ -115,6 +115,56 @@ describe("radar display modes", () => {
     expect(shouldSmoothRadarDisplay("native", "reflectivity")).toBe(false);
     expect(shouldSmoothRadarDisplay("smooth", "storm_relative_velocity")).toBe(false);
   });
+
+  it("retries only a recoverable Smooth draw failure when switching to Native", () => {
+    const onSnapshot = vi.fn();
+    const layer = new RadarCustomLayer(model(0), { onSnapshot });
+    const internals = layer as unknown as {
+      gl: { isContextLost(): boolean };
+      program: object;
+      vao: object;
+      uniforms: object;
+      runtimeError: string | undefined;
+      runtimeErrorRecoverableByNative: boolean;
+    };
+    internals.gl = { isContextLost: () => false };
+    internals.program = {};
+    internals.vao = {};
+    internals.uniforms = {};
+    internals.runtimeError = "Smooth draw failed";
+    internals.runtimeErrorRecoverableByNative = true;
+
+    layer.setDisplayMode("native");
+
+    expect(layer.getSnapshot()).toMatchObject({
+      displayMode: "native",
+      status: "ready",
+      error: undefined,
+    });
+    expect(onSnapshot).toHaveBeenLastCalledWith(expect.objectContaining({
+      displayMode: "native",
+      status: "ready",
+      error: undefined,
+    }));
+  });
+
+  it("does not clear a resource-wide renderer failure when switching to Native", () => {
+    const layer = new RadarCustomLayer(model(0), { onSnapshot: vi.fn() });
+    const internals = layer as unknown as {
+      runtimeError: string | undefined;
+      runtimeErrorRecoverableByNative: boolean;
+    };
+    internals.runtimeError = "GPU completion fence failed";
+    internals.runtimeErrorRecoverableByNative = false;
+
+    layer.setDisplayMode("native");
+
+    expect(layer.getSnapshot()).toMatchObject({
+      displayMode: "native",
+      status: "error",
+      error: "GPU completion fence failed",
+    });
+  });
 });
 
 describe("WebGL upload error gate", () => {

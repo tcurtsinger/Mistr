@@ -405,6 +405,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
   private textureValidation: RadarTextureValidation | undefined;
   private shaderLog: string[] = [];
   private runtimeError: string | undefined;
+  private runtimeErrorRecoverableByNative = false;
   private recoveryPhase: RadarRecoveryPhase = "ready";
   private recoveryStartedAtUnixMs: number | undefined;
   private recoveryCompletedAtUnixMs: number | undefined;
@@ -445,7 +446,27 @@ export class RadarCustomLayer implements CustomLayerInterface {
   setDisplayMode(displayMode: RadarDisplayMode): void {
     const nextMode = validateRadarDisplayMode(displayMode);
     if (nextMode === this.displayMode) return;
+    const retryInNative = Boolean(
+      nextMode === "native"
+      && this.runtimeError
+      && this.runtimeErrorRecoverableByNative
+      && this.recoveryPhase === "ready"
+      && this.program
+      && this.vao
+      && this.uniforms
+      && this.gl
+      && !this.gl.isContextLost(),
+    );
     this.displayMode = nextMode;
+    if (retryInNative) {
+      // Smooth and Native share the same resident measurements and GPU
+      // resources. A draw failure reached while Smooth was active therefore
+      // gets one bounded retry through the simpler Native shader branch. Any
+      // persistent or resource-wide failure is caught again on that repaint;
+      // context, fence, upload, and recovery errors never enter this path.
+      this.runtimeError = undefined;
+      this.runtimeErrorRecoverableByNative = false;
+    }
     this.map?.triggerRepaint();
     // The mode changes only how the already-selected observation is shaded.
     // It neither invalidates nor replaces the authoritative observation paint
@@ -522,6 +543,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
     const model = frame.model;
     const started = performance.now();
     const state = captureGlState(gl);
+    let retryInNative = false;
     try {
       gl.disable(gl.DEPTH_TEST);
       gl.disable(gl.STENCIL_TEST);
@@ -552,10 +574,8 @@ export class RadarCustomLayer implements CustomLayerInterface {
       gl.uniform1i(this.uniforms.gateCount, model.gateCount);
       gl.uniform1i(this.uniforms.radialCount, model.radialCount);
       gl.uniform1i(this.uniforms.lookupSize, model.azimuthLookup.length);
-      gl.uniform1i(
-        this.uniforms.smoothDisplay,
-        shouldSmoothRadarDisplay(this.displayMode, model.product) ? 1 : 0,
-      );
+      const smoothDisplay = shouldSmoothRadarDisplay(this.displayMode, model.product);
+      gl.uniform1i(this.uniforms.smoothDisplay, smoothDisplay ? 1 : 0);
       const alpha = RANGE_FOLDED_COLOR[3] / 255;
       gl.uniform4f(
         this.uniforms.rangeFoldedColor,
@@ -564,7 +584,12 @@ export class RadarCustomLayer implements CustomLayerInterface {
         RANGE_FOLDED_COLOR[2] / 255 * alpha,
         alpha,
       );
-      gl.drawArrays(gl.TRIANGLES, 0, 6);
+      try {
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+      } catch (error) {
+        retryInNative = smoothDisplay;
+        throw error;
+      }
       this.drawCount += 1;
       if (
         this.paintReceipt?.selectionSequence !== this.selectionSequence
@@ -587,6 +612,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
       }
     } catch (error) {
       this.runtimeError = error instanceof Error ? error.message : String(error);
+      this.runtimeErrorRecoverableByNative = retryInNative;
       this.rejectPaintWaiter(this.selectionSequence, this.runtimeError);
       this.emit("error", this.runtimeError);
       throw error;
@@ -806,6 +832,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
     this.selectedAt = performance.now();
     this.textureValidation = pendingFrames.get(this.selectedObservationId)?.textureValidation;
     this.runtimeError = undefined;
+    this.runtimeErrorRecoverableByNative = false;
     this.map?.triggerRepaint();
     this.emit("ready");
   }
@@ -913,6 +940,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
     }
     this.textureValidation = nextFrames.get(this.selectedObservationId)?.textureValidation;
     this.runtimeError = undefined;
+    this.runtimeErrorRecoverableByNative = false;
     this.emit("ready");
   }
 
@@ -971,6 +999,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
     this.switchLatencySamples = replacement.previousSwitchLatencySamples;
     this.pendingReplacement = null;
     this.runtimeError = undefined;
+    this.runtimeErrorRecoverableByNative = false;
 
     if (!this.quadBuffer) throw new RadarRendererError("renderer quad buffer is unavailable");
     const previousArrayBuffer = gl.getParameter(gl.ARRAY_BUFFER_BINDING) as WebGLBuffer | null;
@@ -1061,6 +1090,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
     }
     if (result === gl.WAIT_FAILED) {
       this.runtimeError = "GPU completion fence failed";
+      this.runtimeErrorRecoverableByNative = false;
       this.emit("error", this.runtimeError);
       gl.deleteSync(pending.sync);
       this.pendingPaint = null;
@@ -1157,6 +1187,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
     this.recoveryVisiblePainted = false;
     this.paintReceipt = undefined;
     this.runtimeError = undefined;
+    this.runtimeErrorRecoverableByNative = false;
     this.textureValidation = undefined;
     if (abandonedReplacementSequence !== undefined) {
       this.rejectPaintWaiter(
@@ -1376,6 +1407,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
 
   private failRenderer(error: unknown) {
     this.runtimeError = error instanceof Error ? error.message : String(error);
+    this.runtimeErrorRecoverableByNative = false;
     for (const sequence of [...this.paintWaiters.keys()]) {
       this.rejectPaintWaiter(sequence, this.runtimeError);
     }
