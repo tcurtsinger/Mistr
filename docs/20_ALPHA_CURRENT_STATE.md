@@ -93,11 +93,11 @@ The Impeccable finish review found five material issues—stale dBZ after frame 
 
 One isolated intermediate Phase 4 stabilized-heap measurement failure did not reproduce in two later final-build runs. It is recorded transparently as `DRF-004` in [Deferred review findings](DEFERRED_REVIEW_FINDINGS.md); no acceptance threshold was relaxed.
 
-Pull-request review later demonstrated that a persisted-site startup acquisition could overlap the Phase 4 or Phase 6 packaged gate after those runners observed their diagnostic APIs. The runners now cross an explicit archive-preparation barrier that supersedes and awaits startup work, restores all 20 archive observations, and only then begins measurement or recovery checks. The full verification suite and both affected packaged gates passed after this correction.
+Pull-request review later demonstrated two defects. First, a persisted-site startup acquisition could overlap the Phase 4 or Phase 6 packaged gate after those runners observed their diagnostic APIs. The runners now cross an explicit archive-preparation barrier that supersedes and awaits startup work, restores all 20 archive observations, and only then begins measurement or recovery checks. Second, a failed startup refresh could overwrite the stored last-successful live site with the painted KTLX archive fallback. Failed acquisitions now preserve the stored live-site preference; only a successful matching live paint updates it. The full verification suite passed after both corrections, and both affected packaged gates passed after the isolation correction.
 
 ## Pull-request checkpoint
 
-At this checkpoint, PR #8 remains open and marked ready for review. Automated review submitted one actionable thread about persisted startup acquisition overlapping the packaged Phase 4 and Phase 6 gates; the branch now isolates both runners with the archive-preparation barrier described above. No conversation comments or other review threads had appeared. Re-read the live PR, checks, and thread state before taking action because CI and review status can change after this checkpoint.
+At this checkpoint, PR #8 remains open and marked ready for review. Automated review submitted two actionable threads: packaged-gate isolation from persisted startup acquisition, and preservation of the stored live-site preference after a startup refresh failure. The branch now fixes both as described above. No conversation comments or other review threads had appeared. Re-read the live PR, checks, and thread state before taking action because CI and review status can change after this checkpoint.
 
 ## Required review workflow
 

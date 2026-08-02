@@ -719,7 +719,8 @@ export function App() {
               selectedSiteRef.current = fallbackSite;
               setSelectedSite(fallbackSite);
               setRequestedSite(null);
-              storeLastSite(fallbackSite);
+              // A failed refresh does not earn persistence. Keep the last
+              // successfully painted live-site preference for the next launch.
               setSiteRequestError(error instanceof Error ? error.message : String(error));
             }
           },
@@ -833,7 +834,8 @@ export function App() {
           selectedSiteRef.current = fallbackSite;
           setSelectedSite(fallbackSite);
           setRequestedSite(null);
-          storeLastSite(fallbackSite);
+          // Preserve the last successful live-site preference when a new
+          // request fails, even when an archive fallback is what remains painted.
           setSiteRequestError(error instanceof Error ? error.message : String(error));
         }
       },
