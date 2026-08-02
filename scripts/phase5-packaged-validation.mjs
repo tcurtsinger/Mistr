@@ -19,6 +19,7 @@ export function validatePhase5Acceptance(report, cancellation, rolling, bounds, 
   requireGate(failures, receipt?.framebufferWidth >= 3_840 && receipt?.framebufferHeight >= 2_160, "live paint did not occur at 4K");
   requireGate(failures, bounds?.width >= 3_840 && bounds?.height >= 2_160, "packaged window is smaller than 4K");
   requireGate(failures, cancellation?.oldRejected === true, "superseded site request was not rejected");
+  requireGate(failures, cancellation?.displayMode === "native", "site supersession did not run in Native");
   requireGate(
     failures,
     ["live_start_failed", "live_sweep_failed", "stale_response"].includes(cancellation?.oldCode),
@@ -33,6 +34,7 @@ export function validatePhase5Acceptance(report, cancellation, rolling, bounds, 
     ? 1
     : cancellation?.currentVolumeIndex + 1;
   requireGate(failures, rolling?.nextObservationId === evidence?.observationId, "next live observation did not own final publication");
+  requireGate(failures, rolling?.displayMode === "smooth", "rolling history did not run in Smooth");
   requireGate(failures, rolling?.nextObservationId !== cancellation?.currentObservationId, "rolling history duplicated the first observation");
   requireGate(failures, rolling?.nextVolumeIndex === expectedNextVolumeIndex, "rolling history skipped the exact next volume index");
   requireGate(

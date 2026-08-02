@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { validateContextRecovery, validatePhase6Acceptance } from "./phase6-packaged-validation.mjs";
 
-function reset(residents = 20) {
+function reset(residents = 20, displayMode = "native") {
   return {
-    before: { contextEpoch: 1, selectedObservationId: "a" },
+    before: { contextEpoch: 1, selectedObservationId: "a", displayMode },
     recovery: {
       phase: "ready",
       targetResidentCount: residents,
@@ -14,6 +14,7 @@ function reset(residents = 20) {
       status: "painted",
       contextEpoch: 2,
       selectedObservationId: "a",
+      displayMode,
       residentObservationIds: Array.from({ length: residents }, (_, index) => String(index)),
       paintReceipt: { contextEpoch: 2, observationId: "a" },
     },
@@ -34,8 +35,10 @@ describe("Phase 6 packaged acceptance", () => {
 
   it("keeps base product and N0S labeling separate", () => {
     const report = {
+      pass: 1,
       userAgent: "Mozilla Edg/140.0",
-      initial: { renderer: { capabilities: { hardwareAcceleration: true }, recovery: { targetResidentCount: 20 } } },
+      reflectivityDisplayMode: "native",
+      initial: { renderer: { displayMode: "native", capabilities: { hardwareAcceleration: true }, recovery: { targetResidentCount: 20 } } },
       reflectivityContextReset: reset(20),
       postRecoveryStep: { contextEpoch: 2 },
       minimizeRestore: { selectedObservationId: "b", receipt: { observationId: "b" } },
@@ -47,6 +50,11 @@ describe("Phase 6 packaged acceptance", () => {
         { receipt: { framebufferWidth: 2560, framebufferHeight: 1440 } },
       ],
     };
+    expect(validatePhase6Acceptance(report)).toEqual([]);
+    report.pass = 2;
+    report.reflectivityDisplayMode = "smooth";
+    report.initial.renderer.displayMode = "smooth";
+    report.reflectivityContextReset = reset(20, "smooth");
     expect(validatePhase6Acceptance(report)).toEqual([]);
     report.n0s.product = "base_velocity";
     expect(validatePhase6Acceptance(report)).toContain("n0s_product_truth");

@@ -18,6 +18,13 @@ export function validatePhase6Acceptance(report) {
   if (!report.userAgent?.includes("Edg/")) failures.push("webview2_user_agent");
   if (!report.initial?.renderer?.capabilities?.hardwareAcceleration) failures.push("hardware_renderer");
   if (report.initial?.renderer?.recovery?.targetResidentCount !== 20) failures.push("initial_loop_count");
+  const expectedDisplayMode = report.pass % 2 === 1 ? "native" : "smooth";
+  if (report.reflectivityDisplayMode !== expectedDisplayMode) failures.push("reflectivity_display_mode_plan");
+  if (report.initial?.renderer?.displayMode !== expectedDisplayMode) failures.push("reflectivity_initial_display_mode");
+  if (
+    report.reflectivityContextReset?.before?.displayMode !== expectedDisplayMode
+    || report.reflectivityContextReset?.after?.displayMode !== expectedDisplayMode
+  ) failures.push("reflectivity_recovery_display_mode");
   failures.push(...validateContextRecovery(report.reflectivityContextReset, 20)
     .map((failure) => `reflectivity_${failure}`));
   if (report.postRecoveryStep?.contextEpoch !== report.reflectivityContextReset.after.contextEpoch) {

@@ -53,6 +53,7 @@ import {
 } from "./radar-renderer/layerCoexistence";
 import {
   RadarCustomLayer,
+  type RadarDisplayMode,
   type RadarPaintReceipt,
   type RadarRendererSnapshot,
 } from "./radar-renderer/RadarCustomLayer";
@@ -79,6 +80,7 @@ import {
   freshnessPresentation,
   liveFailureLabel,
   userFacingRadarError,
+  normalizeRadarDisplayMode,
   normalizeRadarSite,
   paintedFrameIndex,
   playbackErrorAfterRendererStatus,
@@ -107,6 +109,7 @@ const DIAGNOSTIC_LAYER_IDS = {
 };
 const DEFAULT_CENTER: [number, number] = [-97.27776, 35.333363];
 const LAST_SITE_STORAGE_KEY = "mistr.lastRadarSite";
+const RADAR_DISPLAY_MODE_STORAGE_KEY = "mistr.radarDisplayMode";
 const RADAR_ENGINE_PREPARING_ERROR = "Radar engine is still preparing the resident loop";
 const LIVE_POLL_RETRY_MS = 15_000;
 
@@ -116,6 +119,7 @@ export function App() {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<MapLibreMap | null>(null);
   const playbackControllerRef = useRef<ResidentPlaybackController | null>(null);
+  const radarLayerRef = useRef<RadarCustomLayer | null>(null);
   const selectedSiteRef = useRef(restoreLastSite());
   const siteRequestTrackerRef = useRef(new SiteRequestTracker());
   const paintedSiteRef = useRef("KTLX");
@@ -143,6 +147,7 @@ export function App() {
   );
   const [timelineFrames, setTimelineFrames] = useState<TimelineFrame[]>([]);
   const [liveHistoryStatus, setLiveHistoryStatus] = useState<LiveHistoryStatus | undefined>();
+  const [displayMode, setDisplayMode] = useState<RadarDisplayMode>(restoreRadarDisplayMode);
   const [selectedSite, setSelectedSite] = useState("KTLX");
   const [requestedSite, setRequestedSite] = useState<string | null>(null);
   const [siteRequestError, setSiteRequestError] = useState<string | null>(null);
@@ -502,6 +507,7 @@ export function App() {
         coexistence: emptyLayerCoexistenceReport(),
       };
       layer = new RadarCustomLayer([diagnosticModel], {
+        displayMode,
         recoveryBeforeLayerId: ANCHOR_LAYER_ID,
         onSnapshot(renderer) {
           setPlaybackError((current) => playbackErrorAfterRendererStatus(current, renderer.status));
@@ -525,6 +531,7 @@ export function App() {
           });
         },
       });
+      radarLayerRef.current = layer;
       const beforeId = firstSymbolLayer(instance);
       installDiagnosticLayers(instance, diagnosticModel, alignment, layer, beforeId);
       publish({ coexistence: currentLayerCoexistenceReport(instance) });
@@ -604,6 +611,18 @@ export function App() {
           const selectedId = layer?.getSnapshot().selectedObservationId;
           const selectedModel = selectedId ? modelsById.get(selectedId) : undefined;
           focusRadar(instance, selectedModel ?? diagnosticModel);
+        },
+        setDisplayMode(mode) {
+          layer?.setDisplayMode(mode);
+          setDisplayMode(mode);
+        },
+        isolateRadarForEvidence() {
+          const radarLayerId = layer?.id;
+          for (const layerId of instance.getLayersOrder()) {
+            if (layerId !== radarLayerId) {
+              instance.setLayoutProperty(layerId, "visibility", "none");
+            }
+          }
         },
         prepareArchive: () => prepareArchiveForDiagnostics?.()
           ?? Promise.reject(new Error("archive diagnostic preparation is unavailable")),
@@ -1130,6 +1149,7 @@ export function App() {
       siteRequestTrackerRef.current.invalidate();
       controller?.dispose();
       if (playbackControllerRef.current === controller) playbackControllerRef.current = null;
+      if (radarLayerRef.current === layer) radarLayerRef.current = null;
       if (clickHandler) instance.off("click", clickHandler);
       if (globalThis.__MISTR_PHASE4__) delete globalThis.__MISTR_PHASE4__;
       if (globalThis.__MISTR_PHASE5__) delete globalThis.__MISTR_PHASE5__;
@@ -1307,12 +1327,22 @@ export function App() {
     if (instance && model) focusRadar(instance, model);
   };
 
+  const selectDisplayMode = (mode: RadarDisplayMode) => {
+    const layer = radarLayerRef.current;
+    if (!layer) return;
+    layer.setDisplayMode(mode);
+    setDisplayMode(mode);
+    storeRadarDisplayMode(mode);
+  };
+
   return (
     <main className="app-shell">
       <div ref={mapContainer} className="map-surface" aria-label="Mistr map" />
       <RadarChrome
         appVersion={runtime.appVersion}
         displayedAtUnixMs={displayedAtUnixMs}
+        displayMode={displayMode}
+        displayModeReady={phase4.kind === "complete" && Boolean(radarLayerRef.current)}
         dismissPanelsSignal={dismissPanelsSignal}
         frameCount={timelineFrames.length}
         frameIndex={frameIndex}
@@ -1325,6 +1355,7 @@ export function App() {
         inspectionSelected={inspectionSelected}
         mapStatus={mapState}
         onRecenter={recenterRadar}
+        onSelectDisplayMode={selectDisplayMode}
         onScrub={queueScrub}
         onSelectSite={selectSite}
         onTogglePlayback={togglePlayback}
@@ -1386,6 +1417,24 @@ function storeLastSite(site: string): void {
     globalThis.localStorage?.setItem(LAST_SITE_STORAGE_KEY, site);
   } catch {
     // Storage failure must not block radar selection.
+  }
+}
+
+function restoreRadarDisplayMode(): RadarDisplayMode {
+  try {
+    return normalizeRadarDisplayMode(
+      globalThis.localStorage?.getItem(RADAR_DISPLAY_MODE_STORAGE_KEY),
+    );
+  } catch {
+    return "smooth";
+  }
+}
+
+function storeRadarDisplayMode(mode: RadarDisplayMode): void {
+  try {
+    globalThis.localStorage?.setItem(RADAR_DISPLAY_MODE_STORAGE_KEY, mode);
+  } catch {
+    // Storage failure must not block changing the radar view.
   }
 }
 
@@ -1748,6 +1797,8 @@ declare global {
     scrub(index: number): Promise<RadarPaintReceipt>;
     setCamera(longitude: number, latitude: number, zoom: number): void;
     recenter(): void;
+    setDisplayMode(mode: RadarDisplayMode): void;
+    isolateRadarForEvidence(): void;
     layerOrder(): string[];
   };
   var __MISTR_PHASE5__: undefined | {

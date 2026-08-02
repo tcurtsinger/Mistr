@@ -39,6 +39,7 @@ The product earns additional capabilities only when they improve live storm insp
 - One selected operational WSR-88D site at a time, chosen from the provider-qualified 155-site catalog with a searchable workflow. Test, decommissioned, TDWR, and provider-absent identifiers are excluded.
 - Live high-resolution base reflectivity.
 - Smooth map pan and zoom.
+- Two explicit spatial presentation modes for that same measured observation: `Smooth` by default and `Native` on demand. `Smooth` may soften gate edges within one scan; it never synthesizes time, changes decoded values, or changes the native dBZ returned by inspection. `Native` exposes the exact nearest sampled polar gate.
 - A bounded recent-observation loop with play, pause, and direct timeline scrubbing. Focused timeline arrow-key movement may be supported without adding dedicated previous/next buttons.
 - Clear measured time, freshness, loading, stale, recovery, and failure state.
 - The visible timeline follows a completed GPU paint, not merely a request or selected frame.
@@ -70,6 +71,7 @@ The product earns additional capabilities only when they improve live storm insp
 - Mistr must feel like a deliberate product rather than expose prototype phases, benchmarks, fixture controls, or engineering acceptance terminology in its normal interface.
 - The interface must be clean, focused, and trustworthy. GustAVO's accumulated feature set and incumbent interface are not requirements or default visual authority for Mistr.
 - The Alpha radar surface keeps the map full-screen beneath a compact top-center radar-context bar, one small left menu trigger, and one stable bottom-center playback bar. A future right-side alert trigger is reserved but does not ship before alerts exist.
+- The radar-context bar names its real spatial presentation choice with the compact visible labels `Smooth` and `Native`. These labels describe rendering only; they do not imply a different radar product, elevation, or measured observation.
 - Temporary menu and alert panels overlay the map without resizing or recentering it. Only one panel may be open, panels stop above the playback bar, and no control or panel is draggable or user-positionable.
 - Technical detail may remain available for reproducible diagnostics, but it must not dominate the storm-inspection workflow.
 

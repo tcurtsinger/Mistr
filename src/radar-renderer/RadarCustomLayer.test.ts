@@ -5,6 +5,7 @@ import {
   hasVerifiedHardwareAcceleration,
   RadarCustomLayer,
   radarShaderSources,
+  shouldSmoothRadarDisplay,
   validateReplacementGeneration,
   validateResidentModels,
 } from "./RadarCustomLayer";
@@ -32,6 +33,87 @@ describe("Radar custom-layer shader contract", () => {
     expect(fragment).toContain("slantRangeM - u_first_gate_center_m");
     expect(fragment).toContain("status == uint(1)");
     expect(fragment).toContain("status == uint(2)");
+  });
+
+  it("smooths only valid reflectivity neighbors without bridging masks or radial gaps", () => {
+    const fragment = radarShaderSources.fragment;
+    expect(fragment).toContain("uniform int u_smooth_display");
+    expect(fragment).toContain("vec4 validGateColor");
+    expect(fragment).toContain("status != uint(0)");
+    expect(fragment).toContain("centerSeparation <= coverage * 1.5 + 0.000001");
+    expect(fragment).toContain("if (!safelyAdjacent && bearingDifference > radialMetadata.g) discard");
+    expect(fragment).toContain("float totalWeight = weight00 + weight01 + weight10 + weight11");
+    expect(fragment.indexOf("if (u_smooth_display == 0 && bearingDifference"))
+      .toBeLessThan(fragment.indexOf("if (status == uint(1)) discard"));
+    expect(fragment.indexOf("if (status == uint(2))"))
+      .toBeLessThan(fragment.indexOf("if (u_smooth_display == 1)"));
+  });
+});
+
+describe("radar display modes", () => {
+  it("defaults to Smooth and accepts an explicit Native constructor mode", () => {
+    const smooth = new RadarCustomLayer(model(0), { onSnapshot: vi.fn() });
+    const native = new RadarCustomLayer(model(0), {
+      displayMode: "native",
+      onSnapshot: vi.fn(),
+    });
+
+    expect(smooth.getDisplayMode()).toBe("smooth");
+    expect(smooth.getSnapshot().displayMode).toBe("smooth");
+    expect(native.getDisplayMode()).toBe("native");
+    expect(native.getSnapshot().displayMode).toBe("native");
+  });
+
+  it("changes presentation without replacing resident data or disturbing selection truth", () => {
+    const onSnapshot = vi.fn();
+    const layer = new RadarCustomLayer([model(0), model(1)], { onSnapshot });
+    const before = layer.getSnapshot();
+
+    layer.setDisplayMode("native");
+    const after = layer.getSnapshot();
+
+    expect(after).toMatchObject({
+      displayMode: "native",
+      selectedObservationId: before.selectedObservationId,
+      residentObservationIds: before.residentObservationIds,
+      selectionSequence: before.selectionSequence,
+      lastPaintedObservationId: before.lastPaintedObservationId,
+    });
+    expect(layer.getDisplayMode()).toBe("native");
+    expect(onSnapshot).toHaveBeenLastCalledWith(expect.objectContaining({
+      displayMode: "native",
+      status: "initializing",
+    }));
+
+    layer.setDisplayMode("native");
+    expect(layer.getSnapshot().selectionSequence).toBe(after.selectionSequence);
+    expect(() => layer.setDisplayMode("blurred" as never)).toThrow("Smooth or Native");
+  });
+
+  it("retains the selected display mode through context-loss state", () => {
+    const layer = new RadarCustomLayer(model(0), {
+      displayMode: "native",
+      onSnapshot: vi.fn(),
+    });
+    const internals = layer as unknown as { beginContextRecovery(): void };
+
+    internals.beginContextRecovery();
+
+    expect(layer.getSnapshot()).toMatchObject({
+      displayMode: "native",
+      recovery: { phase: "context_lost" },
+    });
+    expect(() => layer.setDisplayMode("smooth")).not.toThrow();
+    expect(layer.getSnapshot()).toMatchObject({
+      displayMode: "smooth",
+      recovery: { phase: "context_lost" },
+    });
+  });
+
+  it("keeps categorical velocity native even when Smooth is selected", () => {
+    expect(shouldSmoothRadarDisplay("smooth", "reflectivity")).toBe(true);
+    expect(shouldSmoothRadarDisplay("native", "reflectivity")).toBe(false);
+    expect(shouldSmoothRadarDisplay("smooth", "storm_relative_velocity")).toBe(false);
   });
 });
 

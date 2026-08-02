@@ -35,6 +35,7 @@ class FakeLayer {
       lastPaintedObservationId: this.painted,
       generation: this.generation,
       selectionSequence: this.sequence,
+      displayMode: "smooth",
       residentObservationIds: this.residentObservationIds,
       contextEpoch: 3,
       recovery: {

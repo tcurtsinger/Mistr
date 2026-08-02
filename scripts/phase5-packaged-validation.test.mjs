@@ -46,6 +46,7 @@ function passingCancellation() {
     currentVolumeIndex: 7,
     currentVolumeStartedAtUnixMs: 100,
     currentFrameUploadCount: 1,
+    displayMode: "native",
   };
 }
 
@@ -58,6 +59,7 @@ function passingRolling() {
     renderer: passingReport().renderer,
     oldestScrubObservationId: "0".repeat(32),
     newestScrubObservationId: "a".repeat(32),
+    displayMode: "smooth",
   };
 }
 

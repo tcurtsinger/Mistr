@@ -2,11 +2,11 @@
 
 **Checkpoint:** 2026-08-02
 
-**Merged release baseline:** [PR #10 — Qualify Mistr Alpha release readiness](https://github.com/tcurtsinger/Mistr/pull/10), merge commit `61e6692`
+**Merged baseline:** [PR #11 — Harden radar site selection and product chrome](https://github.com/tcurtsinger/Mistr/pull/11), merge commit `ccb4a02`
 
-**Active change:** [PR #11 — Harden radar site selection and product chrome](https://github.com/tcurtsinger/Mistr/pull/11)
+**Active change:** Radar rendering quality with top-context `Smooth` and `Native` display modes; ready-for-review pull request pending publication
 
-**Branch:** `codex/mistr-ui-hardening`
+**Branch:** `codex/mistr-radar-rendering-quality`
 
 This document is the durable starting point for the next Mistr development session. Verify the active pull request, checks, and thread state on GitHub before acting because review status can change after this checkpoint.
 
@@ -20,10 +20,12 @@ Windows is the Alpha release platform. Shared Tauri, Rust, React, TypeScript, Ma
 
 - The radar map fills the window beneath the approved compact floating controls.
 - The content-sized top context contains one canonical searchable site picker; fixed Alpha product/tilt facts live in About and the menu does not duplicate site selection.
+- The top context also exposes the real spatial display choice as `Smooth` by default and `Native` on demand. It does not present fixed product or elevation facts as controls.
 - The top context names the site that actually painted, never merely the requested site.
 - The bottom bar keeps displayed scan time, freshness, playback state/position, and active dBZ visible.
 - Direct timeline dragging scrubs resident observations; there are no dedicated previous/next buttons.
 - A map click leaves a reticle, and its dBZ value is recomputed whenever another observation paints.
+- `Smooth` filters only the spatial appearance of the current measured observation; `Native` shows exact nearest-sampled polar gates. Both modes preserve native gate/status interrogation, measured time, freshness, and painted-frame truth.
 - Initial load, successful site change, and recenter fit measured radar coverage; user pan and zoom remain free afterward.
 - Active recent-history loading adds `LOADING RECENT n/20` beside the visible playback position. A settled partial set says `RECENT n/20`, and a one-frame set explains `WAITING FOR NEXT SCAN` instead of pretending playback is paused.
 - No prototype phases, fixture selectors, benchmark buttons, or engineering counters appear in the normal product surface.
@@ -48,6 +50,14 @@ Initial volume discovery first requests the bounded list of populated provider r
 The existing resident archive/live loop remains playable and scrubbable while another site's network and decode work is staged. The controller pauses only for its bounded atomic replacement and authoritative GPU paint. A compact visible notice names both the radar still displayed and the live site being loaded; failure copy explains that the last completed scan remains visible.
 
 The complete catalog, discovery, UI, evidence, and rollback contract is [Alpha UI and Live-Site Hardening](23_ALPHA_UI_AND_SITE_HARDENING.md).
+
+### Radar rendering quality
+
+The reflectivity palette uses the exact unrounded `(rawCode - offset) / scale` conversion. Below-threshold remains transparent and range-folded remains explicit, while every valid reflectivity code retains nonzero opacity. Weak clear-air returns begin restrained and gain opacity gradually rather than crossing a hard display cutoff.
+
+The product exposes two bounded spatial display modes for the same observation. `Smooth` is the default presentation and may filter spatial gate edges without synthesizing time or changing data. `Native` is the exact nearest-gate view. Point interrogation remains native in both modes, so a visually smoothed pixel is never mislabeled as a measured intermediate dBZ value. The complete truth, ownership, rollback, and acceptance contract is [Radar Rendering Quality](25_RADAR_RENDERING_QUALITY.md).
+
+The real Windows/WebView2 release runtime compiled and exercised both shader paths at 3840x2160. Two 1,000-transition resident-playback scenarios passed with zero long tasks and zero hot-path acquisition or frame uploads. Switching `Native` to `Smooth` preserved the observation, paint receipt, 53,099,312-byte resident GPU set, and zero-upload delta. Compact 1100x700 and 1024x640 checks passed with keyboard selection, accessible mode naming, one-panel behavior, and focus restoration. Live acquisition/site supersession and two-pass context-recovery validation also passed on the same release build.
 
 ### Rolling live history
 
@@ -95,9 +105,11 @@ The merged rolling-history change passed:
 - both packaged Phase 6 N0S, context-recovery, minimize/restore, and cold-restart passes; and
 - compact 1100x700 layout inspection with no document overflow and both floating instruments inside the viewport.
 
-The release-readiness branch now passes `npm run verify`: the public-repository scan, documentation links, 154 frontend tests, the production frontend build, Rust formatting, clippy with warnings denied, 89 Rust tests, and Rust check. Generated fixtures, provider responses, installed-product reports, screenshots, and installers remain ignored and uncommitted.
+The merged release-readiness change passed `npm run verify`: the public-repository scan, documentation links, 154 frontend tests, the production frontend build, Rust formatting, clippy with warnings denied, 89 Rust tests, and Rust check. Generated fixtures, provider responses, installed-product reports, screenshots, and installers remain ignored and uncommitted.
 
-The current UI/live-site hardening branch passes the full source-level `npm run verify` contract plus packaged Windows validation. The packaged Phase 4 run completed both 1,000-transition scenarios at 3840x2160 with zero long tasks and zero hot-path acquisition/uploads. Packaged Phase 5 cancelled a superseded site request and painted chronological KTLX volumes 666 and 667 with direct oldest/newest scrub. Both Phase 6 passes succeeded. The readiness matrix passed at 3840x2160, 1100x700, and 1024x640 with correct keyboard focus/return, a stable playback bar, no unnamed controls, forced-colors focus, reduced motion, and 5.09:1 inactive-instruction contrast.
+The merged UI/live-site hardening change passed the full source-level `npm run verify` contract plus packaged Windows validation. The packaged Phase 4 run completed both 1,000-transition scenarios at 3840x2160 with zero long tasks and zero hot-path acquisition/uploads. Packaged Phase 5 cancelled a superseded site request and painted chronological KTLX volumes 666 and 667 with direct oldest/newest scrub. Both Phase 6 passes succeeded. The readiness matrix passed at 3840x2160, 1100x700, and 1024x640 with correct keyboard focus/return, a stable playback bar, no unnamed controls, forced-colors focus, reduced motion, and 5.09:1 inactive-instruction contrast.
+
+The current rendering-quality change passes `npm run verify`: the public scan, documentation links, 188 frontend tests, production frontend build, Rust formatting and clippy with warnings denied, 98 Rust tests, and Rust check. The exact release binary passed separate 1,000-transition `Native` and `Smooth` Phase 4 scenarios at 3840x2160, automated nonblank/distinct/background-retaining pixel evidence, both modes at 3840x2160, 1100x700, and 1024x640, Native live site supersession, Smooth exact-next live history and direct scrubbing, and one Native plus one Smooth Phase 6 context-recovery pass. Independent final audits found no demonstrated renderer, UI, accessibility, persistence, ownership, evidence, or public-delivery defect after the documented checkpoint was corrected.
 
 The final release executable and bundles also pass:
 
@@ -117,7 +129,7 @@ Release readiness also corrects a demonstrated installer defect: prior bundles d
 
 ## Pull-request checkpoint
 
-PR #8, rolling-history [PR #9](https://github.com/tcurtsinger/Mistr/pull/9), and release-readiness [PR #10](https://github.com/tcurtsinger/Mistr/pull/10) are merged. UI/live-site hardening [PR #11](https://github.com/tcurtsinger/Mistr/pull/11) is **ready for review**, not a draft. Local and packaged validation passed; GitHub CI was in progress at this checkpoint. Only the repository owner merges.
+PR #8, rolling-history [PR #9](https://github.com/tcurtsinger/Mistr/pull/9), release-readiness [PR #10](https://github.com/tcurtsinger/Mistr/pull/10), and UI/live-site hardening [PR #11](https://github.com/tcurtsinger/Mistr/pull/11) are merged. The rendering-quality branch is prepared for publication as a **ready-for-review** pull request, never a draft. Local and packaged validation passed. Only the repository owner merges.
 
 Review workflow:
 

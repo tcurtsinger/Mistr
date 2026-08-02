@@ -43,6 +43,8 @@ export function validatePhase4Acceptance(
   bounds,
   expectedTransitions,
   expectedStabilityRuns,
+  displayModeEvidence,
+  pixelEvidence,
 ) {
   const failures = [];
   const metrics = report.renderer?.metrics;
@@ -58,8 +60,19 @@ export function validatePhase4Acceptance(
   if (!report.renderer?.capabilities?.hardwareAcceleration) failures.push("hardware_renderer");
   if ((metrics?.gpuResourceBytes ?? Infinity) > 200 * 1024 * 1024) failures.push("gpu_target");
   if ((metrics?.peakGpuResourceBytes ?? Infinity) > 256 * 1024 * 1024) failures.push("gpu_ceiling");
+  if (!displayModeEvidence?.passed) failures.push("display_modes");
+  if (
+    !pixelEvidence?.passed
+    || !(pixelEvidence.nativeSignalRatio > 0.01)
+    || !(pixelEvidence.smoothSignalRatio > 0.01)
+    || !(pixelEvidence.changedRatio > 0.01)
+    || !(pixelEvidence.commonBackgroundRatio > 0.001)
+    || !(pixelEvidence.smoothSignalPixels > pixelEvidence.nativeSignalPixels)
+  ) failures.push("display_pixels");
   for (const [index, scenario] of scenarios.entries()) {
     const prefix = `run_${index + 1}`;
+    const expectedDisplayMode = index % 2 === 0 ? "native" : "smooth";
+    if (scenario.displayMode !== expectedDisplayMode) failures.push(`${prefix}_display_mode`);
     if (
       scenario.requestedTransitions !== expectedTransitions
       || scenario.completedTransitions !== expectedTransitions

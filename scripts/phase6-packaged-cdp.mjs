@@ -26,6 +26,8 @@ try {
   await waitForPhase6Api();
   await evaluate("window.__MISTR_PHASE4__.prepareArchive()", true, 30_000);
   await evaluate("window.__MISTR_PHASE4__.pause()");
+  const reflectivityDisplayMode = pass % 2 === 1 ? "native" : "smooth";
+  await evaluate(`window.__MISTR_PHASE4__.setDisplayMode('${reflectivityDisplayMode}')`);
   const windowInfo = await call("Browser.getWindowForTarget", { targetId: target.id });
   assertProtocolResult(windowInfo, "Browser.getWindowForTarget");
   const windowId = windowInfo.result.windowId;
@@ -38,6 +40,7 @@ try {
     pass,
     capturedAt: new Date().toISOString(),
     userAgent: await evaluate("navigator.userAgent"),
+    reflectivityDisplayMode,
     initial: await evaluate("window.__MISTR_PHASE6__.report()"),
   };
   report.reflectivityContextReset = await evaluate(
