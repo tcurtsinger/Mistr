@@ -36,6 +36,14 @@ function Run([string]$file, [string[]]$arguments, [string]$label) {
     $process = Start-Process -FilePath $file -ArgumentList $arguments -WindowStyle Hidden -PassThru -Wait
     if ($process.ExitCode -notin @(0, 3010)) { throw "$label exited with $($process.ExitCode)" }
 }
+function Get-MistrInstallations {
+    $roots = @(
+        "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*",
+        "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*",
+        "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
+    )
+    return @(Get-ItemProperty $roots -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -eq "Mistr" })
+}
 function Smoke([string]$executable, [string]$workingDirectory) {
     if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) { throw "Missing installed executable $executable" }
     $process = Start-Process -FilePath $executable -WorkingDirectory $workingDirectory -WindowStyle Hidden -PassThru
@@ -60,7 +68,7 @@ try {
     $report.nsis = "PASS"
 
     Run "msiexec.exe" @("/i", "`"$msi`"", "/qn", "/norestart", "ALLUSERS=2", "MSIINSTALLPERUSER=1") "MSI install"
-    $installed = @(Get-ItemProperty "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -eq "Mistr" })
+    $installed = @(Get-MistrInstallations)
     if ($installed.Count -ne 1) { throw "MSI registration was not found" }
     if ($installed[0].DisplayVersion -ne "__VERSION__") { throw "MSI registered the wrong version $($installed[0].DisplayVersion)" }
     $msiRoot = $installed[0].InstallLocation
