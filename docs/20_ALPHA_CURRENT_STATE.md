@@ -1,146 +1,117 @@
 # Alpha Current State
 
-**Checkpoint:** 2026-08-01
+**Checkpoint:** 2026-08-02
 
-**Active change:** [PR #8 — Establish the Mistr Alpha radar surface](https://github.com/tcurtsinger/Mistr/pull/8)
+**Merged foundation:** [PR #8 — Establish the Mistr Alpha radar surface](https://github.com/tcurtsinger/Mistr/pull/8), merge commit `6a9df18`
 
-**Branch:** `codex/mistr-product-foundation`
+**Active change:** [PR #9 — Add bounded rolling live radar history](https://github.com/tcurtsinger/Mistr/pull/9)
 
-This document is the durable starting point for the next Mistr development session. Verify the pull-request state on GitHub before acting because review and merge status can change after this checkpoint.
+**Branch:** `codex/mistr-rolling-live-history`
+
+This document is the durable starting point for the next Mistr development session. Verify the active pull request, checks, and thread state on GitHub before acting because review status can change after this checkpoint.
 
 ## Product decision
 
-Mistr is the product. Building the Alpha directly on Mistr is the accepted direction; integrating the engine into GustAVO is not the default plan.
+Mistr is the product. Alpha remains deliberately narrow: one selected NEXRAD site, live high-resolution base reflectivity, smooth pan and zoom, and a truthful recent-observation timeline. National mosaic, velocity UI, alerts, cameras, video, notifications, broad settings, and the wider GustAVO feature set remain outside Alpha v1.
 
-The first product goal remains deliberately narrow: one selected NEXRAD site, live high-resolution base reflectivity, smooth pan and zoom, and a truthful recent-observation timeline. National mosaic, velocity, alerts, cameras, video, and the broader GustAVO feature set remain outside Alpha v1.
-
-Windows is the Alpha release platform. The shared Tauri architecture must avoid unnecessary Windows-only assumptions so a later macOS build remains practical, but macOS validation and distribution are not current release gates.
+Windows is the Alpha release platform. Shared Tauri, Rust, React, TypeScript, MapLibre, and WebGL code must continue to avoid unnecessary Windows-only assumptions so later macOS work remains practical.
 
 ## Current user experience
 
-The approved radar surface is implemented:
-
-- the radar map fills the window;
-- a compact top-center bar shows the **painted** site, product, and elevation;
-- one left-edge trigger opens a compact overlay menu without resizing or recentering the map;
-- one bottom-center playback bar remains fixed while panels open;
-- there is no permanent left rail, full-width top or bottom bar, right-side alert control, or dedicated previous/next buttons;
-- timeline dragging performs direct scrubbing;
-- a deliberate map click places a reticle, while the dBZ result appears only in the playback bar; and
-- initial load, successful site changes, and recenter fit the radar's measured coverage to the available map surface.
-
-The normal interface contains no prototype phase controls, benchmark buttons, fixture selectors, or engineering counters. The application and installer identity is `Mistr`, not `Mistr Radar Prototype`.
+- The radar map fills the window beneath the approved compact floating controls.
+- The top context names the site that actually painted, never merely the requested site.
+- The bottom bar keeps displayed scan time, freshness, playback state/position, and active dBZ visible.
+- Direct timeline dragging scrubs resident observations; there are no dedicated previous/next buttons.
+- A map click leaves a reticle, and its dBZ value is recomputed whenever another observation paints.
+- Initial load, successful site change, and recenter fit measured radar coverage; user pan and zoom remain free afterward.
+- A partial live loop adds `BUILDING n/20` beside the visible playback position without hiding freshness or disabling resident interaction.
+- No prototype phases, fixture selectors, benchmark buttons, or engineering counters appear in the normal product surface.
 
 ## Current runtime behavior
 
 ### First launch
 
-When no last-used site is stored, Mistr opens the pinned 20-observation KTLX base-reflectivity archive loop. It paints the newest observation and remains paused. The playback bar explicitly says `ARCHIVE LOOP`.
+Without a stored site, Mistr opens the pinned 20-observation KTLX reflectivity archive loop, paints its newest observation, remains paused, and explicitly says `ARCHIVE LOOP`.
 
-### Reopen and site selection
+### Stored site and site selection
 
-- The last successfully painted live site is persisted.
-- On a later launch, the archive loop establishes a safe initial display and Mistr then requests the stored live site.
-- During acquisition, the top context continues to name the site that is actually painted; the freshness area names the pending site.
-- A site label changes only after the replacement observation has decoded and received a matching GPU paint receipt.
-- Failed or superseded requests preserve the last trustworthy painted radar and cannot relabel it as the failed site.
+The archive establishes a safe initial display. Mistr then acquires the selected site's current safe Level II reflectivity observation. The site label changes and persistence occurs only after matching GPU paint truth. Failed or superseded requests preserve the last trustworthy painted radar.
 
-The current Alpha site list is KTLX, KOUN, KINX, KVNX, and KFDR.
+The Alpha site list remains KTLX, KOUN, KINX, KVNX, and KFDR.
 
-### Playback and interrogation
+### Rolling live history
 
-- The 20-frame archive loop supports play, pause, and direct scrubbing.
-- Displayed scan time and playback position follow the most recent completed GPU paint.
-- If a reticle is active, its dBZ value is recomputed at the same geographic point whenever a different observation paints; a previous scan's value is never carried forward as current.
-- Compact desktop layouts retain displayed time, freshness, playback, and the active interrogation result.
+- The first successful live observation establishes a selected-site history and a committed provider-volume cursor.
+- Background polling requests the exact next ring slot after that cursor and requires a newer measured start time.
+- The cursor advances only after the observation joins the resident renderer transaction and authoritative paint truth is accepted. Retry therefore does not silently skip the failed publication.
+- Observations remain chronological and are capped at 20. A duplicate is ignored; an out-of-order or cross-site/render-key response is rejected.
+- Retained GPU textures are reused. Each normal poll uploads one new frame and evicts at most the oldest frame after commit.
+- If paused at newest, Mistr follows the new scan and remains paused. If inspecting an older retained scan, that scan remains displayed. If it ages out, the oldest remaining scan paints.
+- Active playback resumes after the brief incremental mutation. Playback and scrubbing remain available while the next volume is pending.
+- Recoverable acquisition failure retains the last painted observation, reports degraded/error truth, keeps the committed cursor, and retries after a bounded delay.
+- Site changes and diagnostics supersede polling through the existing monotonically increasing generation. Exactly two global IPC transfer credits remain the hard ownership bound.
 
-### Important current boundary
+The complete design and rollback contract is [Bounded Rolling Live History](21_BOUNDED_ROLLING_LIVE_HISTORY.md).
 
-The live acquisition path currently publishes one completed current observation and replaces the resident set with that one frame. It does **not** yet accumulate a rolling history of successive live observations. Play and scrub are therefore disabled for a one-frame live set.
+### Context recovery
 
-Building the bounded rolling **live** observation loop is the next radar-engine milestone. The interface must continue to distinguish archive and live truth until that milestone is complete.
+Visible-first WebGL recovery remains in force. Context loss during an uncommitted resident mutation restores the prior CPU history before rehydration. The recovered radar layer is returned to its established position below diagnostic successors and map symbol labels.
 
 ## Architecture retained
 
 - Tauri 2 desktop shell
-- Rust acquisition, bounded decoding, cancellation, and packed-sweep IPC
+- Rust fixed-host anonymous acquisition, bounded decoding, exact-next live cursor, cancellation, and packed-sweep IPC
 - React 19, TypeScript, and Vite
 - MapLibre GL basemap
-- custom WebGL radar layer with GPU-resident observations
-- two-credit cross-IPC ownership bound
-- painted-frame receipts as UI truth
+- custom WebGL radar layer with bounded resident observations
+- exactly two cross-IPC transfer credits
+- generation-based site and request cancellation
+- painted-frame receipts as display truth
 - visible-first WebGL context recovery
-- fixed-host anonymous public-data adapters
 
-The automated `__MISTR_PHASE4__`, `__MISTR_PHASE5__`, and `__MISTR_PHASE6__` APIs remain available for packaged evidence runners. They are not normal product controls and must not be removed casually.
+The `window.__MISTR_PHASE4__`, `window.__MISTR_PHASE5__`, and `window.__MISTR_PHASE6__` diagnostic APIs remain required by packaged evidence runners. They are not normal product controls.
 
 ## Validation state
 
-The product-foundation change has passed:
+The rolling-history change has passed:
 
-- the full `npm run verify` suite;
-- 111 frontend tests;
-- 87 Rust tests across the workspace binaries and library;
-- public-repository scanning for 182 candidate files;
-- documentation-link validation;
-- production frontend and release Tauri builds;
-- packaged Windows/WebView2 Phase 4 at 3840x2160 with two 1,000-transition scenarios, zero long tasks, and zero hot-path acquisition/upload activity;
-- packaged Phase 5 live acquisition, supersession/cancellation, and GPU paint;
-- packaged Phase 6 N0S, context recovery, and restart twice; and
-- compact 1100x700 browser QA.
+- 126 frontend tests;
+- 89 Rust tests across the library and workspace binaries;
+- TypeScript compilation and the production Vite build;
+- Rust formatting, clippy with warnings denied, tests, and check;
+- packaged Phase 4 at 3840x2160 with two 1,000-transition scenarios, 19 incremental history updates per scenario, forced bounded eviction, direct oldest/newest scrub, real context loss/restoration, zero long tasks, and zero hot-path acquisition/uploads;
+- packaged Phase 5 at 3840x2160 with site supersession, real KTLX volumes 560 then exact-next 561, two chronological GPU-resident observations, one incremental upload, and direct oldest/newest scrub;
+- both packaged Phase 6 N0S, context-recovery, minimize/restore, and cold-restart passes; and
+- compact 1100x700 layout inspection with no document overflow and both floating instruments inside the viewport.
 
-The Impeccable finish review found five material issues—stale dBZ after frame changes, premature site relabeling, hidden compact dBZ, repeated screen-reader freshness announcements, and over-wide 4K framing. All five were fixed and the targeted re-review confirmed them resolved.
+The final `npm run verify` passed on this branch, including documentation links, the repository-publication scan, all frontend and Rust tests, the production frontend build, Rust formatting, clippy, and check. The release Tauri executable used by the packaged Phase 4, Phase 5, Phase 6, and compact-layout checks also passed. Generated fixtures, provider responses, packaged reports, and screenshots remain ignored and uncommitted.
 
-Intermittent single-run Phase 4 stabilized-heap measurement failures are recorded transparently as `DRF-004` in [Deferred review findings](DEFERRED_REVIEW_FINDINGS.md). The latest occurrence retained zero long tasks, zero hot-path work, normal timing, and 20-frame residency, then passed an immediate rerun of the exact same source state. No acceptance threshold was relaxed.
-
-Pull-request review later demonstrated thirteen defects, all corrected on the branch:
-
-- A persisted-site startup acquisition could overlap the Phase 4 or Phase 6 packaged gate after those runners observed their diagnostic APIs. The runners now cross an explicit archive-preparation barrier that supersedes and awaits startup work, restores all 20 archive observations, and only then begins measurement or recovery checks.
-- A failed startup refresh could overwrite the stored last-successful live site with the painted KTLX archive fallback. Failed acquisitions now preserve the stored live-site preference; only a successful matching live paint updates it.
-- A superseded request for the same site could still pass a site-string callback guard and overwrite the result of the newer request. Startup and interactive callbacks now require a unique current request sequence.
-- Selecting a site before the resident engine became ready could leave a preparation-only error latched over the healthy archive. Site-selection controls now remain disabled until acquisition is available, and the preparation-only error is cleared at that boundary.
-- The Phase 5 packaged runner could begin its cancellation scenario before persisted startup work settled, leaving its UI evidence labeled as an error despite a valid diagnostic report. Phase 5 now crosses the same archive-preparation barrier as Phase 4 and Phase 6.
-- The Phase 6 N0S screenshot could label a painted storm-relative-velocity frame as reflectivity. The context product label now follows the product that actually painted.
-- A post-startup GPU failure could leave the chrome claiming `FRESH` or `ARCHIVE LOOP` while playback controls remained enabled. Active renderer errors now surface as `RADAR ERROR`, label playback unavailable, disable play and scrubbing, and announce the renderer failure to assistive technology.
-- The Phase 6 N0S diagnostic could replace the resident GPU set with one frame while leaving the UI timeline at the prior 20-frame archive. The diagnostic replacement now publishes the single painted N0S frame to the timeline, keeping the displayed count and disabled one-frame controls truthful.
-- A scrub timeout could remain latched as a site-request error after successful graphics recovery. Playback failures now have separate state that a later authoritative GPU paint clears, while genuine site-acquisition failures remain visible until their own resolution.
-- An initial style/basemap failure could leave radar initialization idle while freshness claimed only `WAITING FOR RADAR`. Initial basemap unavailability now participates in the explicit radar-error truth and clears if the style later loads successfully.
-- The single measured N0S diagnostic frame could still be labeled `ARCHIVE LOOP`. Painted source truth now distinguishes the one-frame Level III evidence as `ARCHIVE FRAME` without changing the normal 20-frame archive label.
-- The archive-preparation barrier could restore KTLX radar pixels after a persisted non-KTLX acquisition without restoring the range and anchor guides. It now rebuilds those diagnostic sources from the same authoritative painted archive model before packaged gates continue.
-- Playback controls could remain active while a live request replaced the controller's 20-frame archive with one resident frame, allowing a stale slider index to latch an error after the new paint. Playback interaction is now disabled for the acquisition/replacement window and returns only after success or recoverable failure settles.
-
-The full verification suite passed after these corrections. The final review-fix state also passed the Phase 4 gate, the Phase 5 live/cancellation gate, and both Phase 6 packaged restart passes; the final N0S evidence image labels the painted product as `STORM-RELATIVE VELOCITY`, reports `ARCHIVE FRAME`, and shows the truthful `1 / 1` timeline.
+The Phase 4 stabilized-heap gate initially repeated the previously documented measurement edge after the heavier rolling/context lifecycle. The runner now performs a second explicit DevTools garbage collection and settling interval before taking each stabilized sample; no threshold changed. The unchanged release executable then passed with final samples of 85,095,638 and 87,938,245 bytes. `DRF-004` remains open if same-state growth repeats under the strengthened measurement.
 
 ## Pull-request checkpoint
 
-At this checkpoint, PR #8 remains open and marked ready for review. Automated review submitted thirteen actionable threads covering the corrections above, and the branch now fixes all thirteen. Two top-level conversation comments requested automated reviews; no other conversation feedback had appeared. Re-read the live PR, checks, and thread state before taking action because CI and review status can change after this checkpoint.
+PR #8 is merged. Rolling-history [PR #9](https://github.com/tcurtsinger/Mistr/pull/9) is **ready for review**, not a draft. Only the repository owner merges.
 
-## Required review workflow
+Review workflow:
 
-1. Inspect PR #8 with thread-aware review data, not only the flat comment list.
-2. Treat demonstrated wrong behavior, unsafe ownership, performance regressions, or broken acceptance gates as defects and fix them.
-3. Treat genuinely low-probability, non-blocking edge cases according to [Deferred review findings](DEFERRED_REVIEW_FINDINGS.md) instead of starting an endless review loop.
-4. Reply to every closed review comment with its disposition and evidence, then resolve the thread so the owner is never left guessing.
-5. Re-run the relevant local and packaged checks after code changes.
-6. Commit and push review fixes to the same branch and keep PR #8 ready for review.
-7. Only the repository owner merges.
+1. Read live checks, reviews, conversation comments, and thread-aware `reviewThreads`.
+2. Independently verify every comment against current code.
+3. Fix demonstrated wrong behavior, unsafe ownership, performance regression, broken UI truth, or failed acceptance gates.
+4. Record only genuinely non-blocking edge cases in [Deferred review findings](DEFERRED_REVIEW_FINDINGS.md).
+5. Reply with disposition and evidence, then resolve every thread that is closed.
+6. Re-run affected local and packaged checks, commit, and push to the same branch.
+7. Never merge; only the user merges.
 
-## Next product phase after PR #8
+## Next decision after this change merges
 
-Do not begin the next engine phase until PR #8 is merged and the local checkout is synchronized safely with `main`.
+Do not begin national radar work. The next step is an Alpha release-readiness review, including:
 
-The recommended next phase is the bounded rolling live reflectivity loop for one selected site:
-
-1. acquire successive safe, completed live observations for the active site;
-2. retain a bounded chronological history suitable for playback;
-3. append/replace resident GPU resources without reintroducing tile readiness, unbounded memory, or main-thread stalls;
-4. keep newest-scan, paused, freshness, partial-history, failure, and painted-frame semantics truthful;
-5. preserve generation cancellation and the two-credit IPC ownership bound across site switches;
-6. validate long-session polling, site supersession, context recovery, direct scrubbing, and packaged 4K performance; and
-7. deliver the phase through a new ready-for-review PR with CI and packaged evidence.
-
-National radar remains later work. A national mosaic is a separate multi-radar product and should not be faked by simply displaying one Level II site at national scale.
+1. the deferred controlled Windows sleep/wake lifecycle pass (`DRF-003`);
+2. an extended real selected-site operational soak using the committed exact-next cursor;
+3. clean-machine Windows install, launch, update/uninstall, and unsigned-build messaging checks;
+4. final accessibility, compact/4K visual, failure-copy, and public-repository audit; and
+5. an explicit owner decision on the remaining release blockers before any new product surface is added.
 
 ## Public-repository safety
 
-This is a public repository. Never commit credentials, environment files, signing material, downloaded raw radar archives, arbitrary provider responses, local diagnostic bundles, or packaged screenshots. Keep provenance and hashes in reviewed manifests, keep fixture bytes in ignored cache directories, and run `npm run public:check` before every commit.
+Never commit credentials, environment files, signing material, downloaded radar archives, arbitrary provider responses, local diagnostic bundles, or packaged screenshots. Keep fixture provenance and hashes in reviewed manifests, keep downloaded bytes in ignored cache directories, and run `npm run public:check` before every commit.

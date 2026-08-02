@@ -96,6 +96,8 @@ pub enum LivePipelineError {
     DecodeTask(String),
     #[error("latest real-time volume listing contains no valid chunks")]
     EmptyLatestVolume,
+    #[error("live history cursor requires a volume index from 1 to 999 and a positive start time")]
+    InvalidHistoryCursor,
 }
 
 impl From<AcquisitionError> for LivePipelineError {
@@ -196,17 +198,60 @@ impl LiveSweepSession {
         } else {
             latest_index
         };
+        Self::from_target(
+            client,
+            token,
+            site,
+            target_volume_index,
+            if fresh_only {
+                latest_started
+            } else {
+                latest_started.saturating_sub(1)
+            },
+            (!fresh_only).then_some(latest_started),
+            counters_at_start,
+        )
+    }
+
+    pub async fn start_after(
+        client: PublicRadarClient,
+        token: GenerationToken,
+        site: &str,
+        volume_index: u16,
+        volume_started_at_unix_ms: i64,
+    ) -> Result<Self, LivePipelineError> {
+        token.ensure_current()?;
+        if !(1..=999).contains(&volume_index) || volume_started_at_unix_ms <= 0 {
+            return Err(LivePipelineError::InvalidHistoryCursor);
+        }
+        let counters_at_start = client.counters();
+        Self::from_target(
+            client,
+            token,
+            site,
+            next_volume_index(volume_index),
+            volume_started_at_unix_ms,
+            None,
+            counters_at_start,
+        )
+    }
+
+    fn from_target(
+        client: PublicRadarClient,
+        token: GenerationToken,
+        site: &str,
+        target_volume_index: u16,
+        minimum_started_exclusive: i64,
+        selected_started_at: Option<i64>,
+        counters_at_start: AcquisitionCounters,
+    ) -> Result<Self, LivePipelineError> {
         Ok(Self {
             client,
             token: token.clone(),
             site: site.into(),
             target_volume_index,
-            minimum_started_exclusive: if fresh_only {
-                latest_started
-            } else {
-                latest_started.saturating_sub(1)
-            },
-            selected_started_at: (!fresh_only).then_some(latest_started),
+            minimum_started_exclusive,
+            selected_started_at,
             assembler: ChunkAssembler::new(token.generation(), site)?,
             downloaded_keys: BTreeSet::new(),
             poll_interval: DEFAULT_POLL_INTERVAL,
@@ -553,6 +598,37 @@ mod tests {
     fn volume_index_wrap_is_explicit() {
         assert_eq!(next_volume_index(998), 999);
         assert_eq!(next_volume_index(999), 1);
+    }
+
+    #[tokio::test]
+    async fn history_cursor_targets_the_exact_next_volume_without_latest_discovery() {
+        let clock = GenerationClock::default();
+        let token = clock.begin(7).unwrap();
+        let session = LiveSweepSession::start_after(
+            PublicRadarClient::new().unwrap(),
+            token.clone(),
+            "KTLX",
+            999,
+            1_800_000_000_000,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(session.target_volume_index, 1);
+        assert_eq!(session.minimum_started_exclusive, 1_800_000_000_000);
+        assert!(session.selected_started_at.is_none());
+        assert_eq!(
+            LiveSweepSession::start_after(
+                PublicRadarClient::new().unwrap(),
+                token,
+                "KTLX",
+                0,
+                1_800_000_000_000,
+            )
+            .await
+            .unwrap_err(),
+            LivePipelineError::InvalidHistoryCursor,
+        );
     }
 
     #[test]

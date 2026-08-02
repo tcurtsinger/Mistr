@@ -49,6 +49,8 @@ try {
     );
     await call("HeapProfiler.collectGarbage");
     await delay(500);
+    await call("HeapProfiler.collectGarbage");
+    await delay(500);
     scenario.stabilizedHeapBytes = await evaluate(
       "performance.memory?.usedJSHeapSize ?? null",
     );
@@ -95,6 +97,7 @@ try {
       longTaskCount: scenario.frameTiming.longTaskCount,
       longTaskObserverAvailable: scenario.frameTiming.longTaskObserverAvailable,
       hotPathActivityZero: scenario.hotPathActivityZero,
+      rollingHistoryPassed: scenario.rollingHistory?.passed,
       heapBeforeBytes: scenario.heapBeforeBytes,
       heapAfterBytes: scenario.heapAfterBytes,
       stabilizedHeapBytes: scenario.stabilizedHeapBytes,

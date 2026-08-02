@@ -45,6 +45,14 @@ describe("Phase 4 packaged acceptance validation", () => {
     expect(validatePhase4Acceptance(passingReport(), scenarios, passingBounds(), 1_000, 2))
       .toContain("run_1_switch_p95");
   });
+
+  it("requires the bounded rolling-history lifecycle to pass in every run", () => {
+    const scenarios = passingScenarios();
+    scenarios[1].rollingHistory.passed = false;
+
+    expect(validatePhase4Acceptance(passingReport(), scenarios, passingBounds(), 1_000, 2))
+      .toContain("run_2_rolling_history");
+  });
 });
 
 function passingReport() {
@@ -72,6 +80,7 @@ function passingScenarios() {
     receiptTruthPassed: true,
     hotPathActivityZero: true,
     replacementStable: true,
+    rollingHistory: { passed: true },
     frameTiming: {
       p95Ms: 6.2,
       longTaskObserverAvailable: true,

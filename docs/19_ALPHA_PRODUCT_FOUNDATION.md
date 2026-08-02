@@ -21,15 +21,19 @@ Prototype phase names, benchmark buttons, fixture controls, and diagnostic count
 
 - A first launch opens the pinned 20-observation KTLX reflectivity loop on its newest painted scan, paused and explicitly marked `ARCHIVE LOOP`.
 - Selecting a site starts the qualified bounded live Level II path, cancels superseded work, and replaces the displayed radar only after a current observation is decoded and painted.
+- After that first live paint, Mistr requests the exact next provider volume, appends successive observations into a chronological GPU-resident history, and evicts only the oldest frame at the 20-observation bound.
+- Resident playback remains usable while the next live volume is pending. Partial history is labeled `BUILDING n/20`, and failure preserves the last painted observation plus the last committed acquisition cursor.
 - The selected site is persisted and reopened on the next launch.
 - Clicking the map places an inspection reticle; any available dBZ value is reported in the playback bar rather than a floating map tooltip.
 - The radar renderer, binary transfer protocol, two-credit ownership bound, cancellation rules, and visible-first WebGL recovery remain unchanged.
 
-## Remaining Alpha engine milestone
+## Completed Alpha engine milestone
 
-The live site path currently publishes one completed current observation at a time. Building a product-grade rolling loop of recent **live** observations is the next engine milestone. It must accumulate completed observations without weakening cancellation, painted-frame truth, bounded IPC ownership, GPU residency, or context recovery.
+The bounded rolling **live** reflectivity loop is implemented. It retains at most 20 observations for one site, uploads only the appended GPU frame, rolls back failed mutations, preserves direct scrubbing and painted-frame truth, and carries an exact-next provider-volume cursor across retry without weakening site-generation cancellation or the two-credit IPC bound.
 
-Until that milestone lands, the interface distinguishes the pinned archive loop from a live site observation and must not imply that a one-frame live resident set is an animated history.
+A one-frame live set remains honestly non-playable until a second observation arrives. Archive and live source truth remain distinct. The detailed ownership and validation record is [Bounded Rolling Live History](21_BOUNDED_ROLLING_LIVE_HISTORY.md).
+
+The next decision after this phase merges is an Alpha release-readiness review, not national mosaic work or automatic feature expansion.
 
 ## Release posture
 

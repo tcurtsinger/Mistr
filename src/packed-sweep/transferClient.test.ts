@@ -53,8 +53,28 @@ describe("PackedSweepTransferClient", () => {
       timeoutSeconds: 120,
     }]);
     await lease.release();
+    const nextLease = await client.requestPhase5Live("KTLX", true, 900, {
+      volumeIndex: 999,
+      volumeStartedAtUnixMs: 1_800_000_000_000,
+    });
+    expect(requests[1]).toEqual({
+      session: 1,
+      generation: 7,
+      site: "KTLX",
+      freshOnly: true,
+      timeoutSeconds: 900,
+      historyCursor: {
+        volumeIndex: 999,
+        volumeStartedAtUnixMs: 1_800_000_000_000,
+      },
+    });
+    await nextLease.release();
     await expect(client.requestPhase5Live("ktlx")).rejects.toThrow("four uppercase");
     await expect(client.requestPhase5Live("KTLX", false, 901)).rejects.toThrow("10 and 900");
+    await expect(client.requestPhase5Live("KTLX", false, 120, {
+      volumeIndex: 7,
+      volumeStartedAtUnixMs: 1,
+    })).rejects.toThrow("fresh-only mode");
   });
 
   it("requests the Phase 3 fixture through the same leased binary path", async () => {

@@ -144,6 +144,13 @@ pub struct Phase5LiveTransferEvidence {
     pub safe: SafeSweepEvidence,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LiveHistoryCursorArgs {
+    pub volume_index: u16,
+    pub volume_started_at_unix_ms: i64,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct TransferBroker {
     inner: Arc<Mutex<TransferState>>,
@@ -777,6 +784,7 @@ pub async fn request_phase5_live_sweep(
     site: String,
     fresh_only: bool,
     timeout_seconds: u64,
+    history_cursor: Option<LiveHistoryCursorArgs>,
 ) -> Result<Response, TransferError> {
     if !(10..=900).contains(&timeout_seconds) {
         return Err(TransferError::new(
@@ -784,6 +792,7 @@ pub async fn request_phase5_live_sweep(
             "live timeout must be between 10 and 900 seconds",
         ));
     }
+    let history_cursor = validate_live_history_cursor(fresh_only, history_cursor)?;
     let broker = state.inner().clone();
     broker.acquire(session, generation)?;
 
@@ -794,9 +803,12 @@ pub async fn request_phase5_live_sweep(
         let token = worker_broker.live_generation_token(session, generation)?;
         let client = PublicRadarClient::new()
             .map_err(|error| TransferError::new("live_client_failed", error.to_string()))?;
-        let mut live = LiveSweepSession::start(client, token, &site, fresh_only)
-            .await
-            .map_err(|error| TransferError::new("live_start_failed", error.to_string()))?;
+        let mut live = if let Some((volume_index, started_at)) = history_cursor {
+            LiveSweepSession::start_after(client, token, &site, volume_index, started_at).await
+        } else {
+            LiveSweepSession::start(client, token, &site, fresh_only).await
+        }
+        .map_err(|error| TransferError::new("live_start_failed", error.to_string()))?;
         let safe = live
             .wait_for_safe_sweep(timeout)
             .await
@@ -843,6 +855,29 @@ pub async fn request_phase5_live_sweep(
         .credit
         .complete_phase5_for_publish(generation, charged.evidence)?;
     Ok(Response::new(charged.bytes))
+}
+
+fn validate_live_history_cursor(
+    fresh_only: bool,
+    history_cursor: Option<LiveHistoryCursorArgs>,
+) -> Result<Option<(u16, i64)>, TransferError> {
+    let validated = match history_cursor {
+        None => None,
+        Some(cursor)
+            if fresh_only
+                && (1..=999).contains(&cursor.volume_index)
+                && cursor.volume_started_at_unix_ms > 0 =>
+        {
+            Some((cursor.volume_index, cursor.volume_started_at_unix_ms))
+        }
+        Some(_) => {
+            return Err(TransferError::new(
+                "invalid_live_cursor",
+                "live history cursor requires fresh-only mode, a volume index from 1 to 999, and its start time",
+            ));
+        }
+    };
+    Ok(validated)
 }
 
 async fn enforce_live_request_timeout<F, T>(
@@ -1330,6 +1365,36 @@ mod tests {
                 },
             },
         }
+    }
+
+    #[test]
+    fn live_history_cursor_is_bounded_and_requires_fresh_mode() {
+        let cursor = LiveHistoryCursorArgs {
+            volume_index: 999,
+            volume_started_at_unix_ms: 1_800_000_000_000,
+        };
+        assert_eq!(
+            validate_live_history_cursor(true, Some(cursor)).unwrap(),
+            Some((999, 1_800_000_000_000)),
+        );
+        assert_eq!(
+            validate_live_history_cursor(false, Some(cursor))
+                .unwrap_err()
+                .code,
+            "invalid_live_cursor",
+        );
+        assert_eq!(
+            validate_live_history_cursor(
+                true,
+                Some(LiveHistoryCursorArgs {
+                    volume_index: 0,
+                    volume_started_at_unix_ms: 1,
+                }),
+            )
+            .unwrap_err()
+            .code,
+            "invalid_live_cursor",
+        );
     }
 
     #[test]

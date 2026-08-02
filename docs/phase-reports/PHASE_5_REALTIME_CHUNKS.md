@@ -137,3 +137,9 @@ The Phase 4 packaged regression was repeated against the transactional replaceme
 - [x] No raw radar/provider payload, credential, machine path, or generated artifact is committed.
 
 **Decision:** Phase 5 passes for the bounded reflectivity prototype. Proceed to Phase 6 after this pull request's demonstrated-defect review is resolved. Do not claim nationwide provider SLA, velocity parity, context recovery, or production GustAVO readiness from this phase.
+
+## 2026-08-02 rolling-history qualification addendum
+
+The packaged 3840x2160 gate now acquires a current KTLX observation and then uses the committed volume identity to request the exact next provider ring slot. The final run acquired volume 560 and exact-next volume 561, retained both observations chronologically, uploaded exactly one additional GPU frame, and directly scrubbed oldest then newest. Site supersession still rejected the prior KAMX generation, and the final KTLX decode-to-paint path remained authoritative.
+
+The cursor advances only after resident mutation and GPU paint acceptance; retry keeps the prior cursor. See [Bounded Rolling Live History](../21_BOUNDED_ROLLING_LIVE_HISTORY.md).

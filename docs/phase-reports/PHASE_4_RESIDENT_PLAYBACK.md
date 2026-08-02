@@ -197,3 +197,9 @@ No raw archive, generated executable, screenshot, process detail, local path, or
 - [x] The evidence is reproducible through a committed packaged runner.
 
 **Decision:** Phase 4 passes on the primary workstation. Proceed to Phase 5 only after this pull request's demonstrated-defect review is resolved. Phase 5 remains responsible for live real-time chunks, incomplete-volume handling, and latency comparison. Phase 6 remains responsible for WebGL context-loss restoration and broader fault recovery.
+
+## 2026-08-02 rolling-history qualification addendum
+
+The packaged 3840x2160 runner now performs 19 incremental resident-history updates per stability run, caps the diagnostic loop at five to force oldest-frame eviction, directly scrubs oldest and newest, and loses/restores the real WebGL context before returning to the 20-frame hot-path workload. Both final 1,000-transition runs passed with zero long tasks, zero hot-path acquisition/uploads, rolling-history truth passing, frame P95 of 6.2 ms, and stabilized heap samples of 85,095,638 and 87,938,245 bytes. The recovery test also demonstrated and corrected radar layer re-insertion order so radar remains below its diagnostic successor and map symbols.
+
+The selected-site product contract and exact incremental ownership rules are recorded in [Bounded Rolling Live History](../21_BOUNDED_ROLLING_LIVE_HISTORY.md).

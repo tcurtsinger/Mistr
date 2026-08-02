@@ -105,6 +105,26 @@ class FakeLayer {
     this.sequence += 1;
   }
 
+  updateResidentHistory(
+    models: readonly RadarSweepCpuModel[],
+    selectedObservationId: string,
+  ): void {
+    this.replacement = {
+      selected: this.selected,
+      painted: this.painted,
+      sequence: this.sequence,
+      paintedSequence: this.paintedSequence,
+      generation: this.generation,
+      paintedGeneration: this.paintedGeneration,
+      residentObservationIds: this.residentObservationIds,
+    };
+    this.residentObservationIds = models.map((model) => model.observationId);
+    if (selectedObservationId !== this.selected) {
+      this.selected = selectedObservationId;
+      this.sequence += 1;
+    }
+  }
+
   commitResidentFrameReplacement(selectionSequence: number): void {
     if (!this.replacement || selectionSequence !== this.sequence) {
       throw new Error("replacement is not ready to commit");
@@ -242,6 +262,97 @@ describe("resident playback truth", () => {
       lastPaintedObservationId: "replacement-b",
       playheadObservedAtUnixMs: 500,
     });
+  });
+
+  it("appends a live frame and follows it when paused on newest", async () => {
+    const layer = new FakeLayer();
+    const controller = new ResidentPlaybackController(layer, frames());
+    const newest = controller.scrub(2);
+    await Promise.resolve();
+    layer.completePaint();
+    await newest;
+
+    const update = controller.updateResidentHistory([
+      ...frames(),
+      frame("frame-d", 400),
+    ]);
+    await vi.waitFor(() => {
+      expect(controller.snapshot()).toMatchObject({
+        residentCount: 4,
+        selectedObservationId: "frame-d",
+        lastPaintedObservationId: "frame-c",
+        holdReason: "AWAITING_GPU_PAINT",
+      });
+    });
+    layer.completePaint();
+
+    await expect(update).resolves.toMatchObject({ observationId: "frame-d" });
+    expect(controller.snapshot()).toMatchObject({
+      residentCount: 4,
+      selectedObservationId: "frame-d",
+      lastPaintedObservationId: "frame-d",
+      playheadObservedAtUnixMs: 400,
+    });
+  });
+
+  it("preserves an older paused frame while newer live history arrives", async () => {
+    const layer = new FakeLayer();
+    const controller = new ResidentPlaybackController(layer, frames());
+    const older = controller.scrub(1);
+    await Promise.resolve();
+    layer.completePaint();
+    await older;
+
+    await expect(controller.updateResidentHistory([
+      ...frames(),
+      frame("frame-d", 400),
+    ])).resolves.toMatchObject({ observationId: "frame-b" });
+    expect(controller.snapshot()).toMatchObject({
+      residentCount: 4,
+      selectedObservationId: "frame-b",
+      lastPaintedObservationId: "frame-b",
+      playheadObservedAtUnixMs: 200,
+    });
+  });
+
+  it("moves to the oldest retained frame when the paused selection ages out", async () => {
+    const layer = new FakeLayer();
+    const controller = new ResidentPlaybackController(layer, frames());
+    await controller.establishInitialPaint();
+
+    const update = controller.updateResidentHistory([
+      frame("frame-b", 200),
+      frame("frame-c", 300),
+      frame("frame-d", 400),
+    ]);
+    await vi.waitFor(() => {
+      expect(controller.snapshot()).toMatchObject({
+        selectedObservationId: "frame-b",
+        lastPaintedObservationId: "frame-a",
+      });
+    });
+    layer.completePaint();
+
+    await expect(update).resolves.toMatchObject({ observationId: "frame-b" });
+  });
+
+  it("resumes active playback after an incremental history commit", async () => {
+    const layer = new FakeLayer();
+    const controller = new ResidentPlaybackController(layer, frames(), {
+      dwellMs: 60_000,
+      latestDwellMs: 60_000,
+    });
+    await controller.establishInitialPaint();
+    controller.play();
+
+    await controller.updateResidentHistory([...frames(), frame("frame-d", 400)]);
+
+    expect(controller.snapshot()).toMatchObject({
+      playing: true,
+      residentCount: 4,
+      selectedObservationId: "frame-a",
+    });
+    controller.pause();
   });
 
   it("rechecks publication ownership after waiting for an in-progress paint", async () => {

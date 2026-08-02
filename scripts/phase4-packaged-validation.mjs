@@ -69,6 +69,7 @@ export function validatePhase4Acceptance(
     if (!scenario.receiptTruthPassed) failures.push(`${prefix}_paint_truth`);
     if (!scenario.hotPathActivityZero) failures.push(`${prefix}_hot_path_activity`);
     if (!scenario.replacementStable) failures.push(`${prefix}_replacement_growth`);
+    if (!scenario.rollingHistory?.passed) failures.push(`${prefix}_rolling_history`);
     if (scenario.frameTiming.p95Ms >= 16.7) failures.push(`${prefix}_frame_p95`);
     if (scenario.switchTiming?.sampleCount !== expectedTransitions) {
       failures.push(`${prefix}_switch_sample_count`);
