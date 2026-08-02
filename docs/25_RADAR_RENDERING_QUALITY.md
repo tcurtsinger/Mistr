@@ -101,7 +101,7 @@ The same release build passed both modes at 3840x2160, 1100x700, and 1024x640, i
 
 ## 9. Rollback
 
-If `Smooth` causes incorrect boundaries, truth drift, performance regression, or a Smooth draw failure, Mistr falls back to `Native`. A mode-specific draw error receives one bounded retry through Native while context-loss, fence, upload, and resource-wide failures remain explicit errors handled by the existing recovery path. Because the modes do not change acquisition, decoding, normalized data, resident history, or timeline truth, rollback does not discard or reinterpret an observation.
+If `Smooth` causes incorrect boundaries, truth drift, performance regression, or a Smooth draw failure, Mistr falls back to `Native`. A mode-specific draw error receives one bounded retry through Native while context-loss, fence, upload, and resource-wide failures remain explicit errors handled by the existing recovery path. The playback controller owns this retry from the first startup paint through later play and scrub selections, accepts the matching Native paint receipt, and keeps the visible frame, timeline, and published playback state synchronized. Because the modes do not change acquisition, decoding, normalized data, resident history, or timeline truth, rollback does not discard or reinterpret an observation.
 
 ## 10. Related decisions
 

@@ -446,27 +446,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
   setDisplayMode(displayMode: RadarDisplayMode): void {
     const nextMode = validateRadarDisplayMode(displayMode);
     if (nextMode === this.displayMode) return;
-    const retryInNative = Boolean(
-      nextMode === "native"
-      && this.runtimeError
-      && this.runtimeErrorRecoverableByNative
-      && this.recoveryPhase === "ready"
-      && this.program
-      && this.vao
-      && this.uniforms
-      && this.gl
-      && !this.gl.isContextLost(),
-    );
     this.displayMode = nextMode;
-    if (retryInNative) {
-      // Smooth and Native share the same resident measurements and GPU
-      // resources. A draw failure reached while Smooth was active therefore
-      // gets one bounded retry through the simpler Native shader branch. Any
-      // persistent or resource-wide failure is caught again on that repaint;
-      // context, fence, upload, and recovery errors never enter this path.
-      this.runtimeError = undefined;
-      this.runtimeErrorRecoverableByNative = false;
-    }
     this.map?.triggerRepaint();
     // The mode changes only how the already-selected observation is shaded.
     // It neither invalidates nor replaces the authoritative observation paint
@@ -485,6 +465,46 @@ export class RadarCustomLayer implements CustomLayerInterface {
               : "initializing",
       this.runtimeError,
     );
+  }
+
+  retryFailedSmoothDrawInNative(): RadarSelectionRequest | null {
+    if (
+      this.displayMode !== "smooth"
+      || !this.runtimeError
+      || !this.runtimeErrorRecoverableByNative
+      || this.recoveryPhase !== "ready"
+      || !this.program
+      || !this.vao
+      || !this.uniforms
+      || !this.gl
+      || this.gl.isContextLost()
+      || this.pendingPaint
+    ) {
+      return null;
+    }
+
+    // Smooth and Native share the same resident measurements and GPU
+    // resources. The playback controller owns the retry so it can accept the
+    // resulting paint receipt and keep timeline truth synchronized. Any
+    // persistent failure is caught again; context, fence, upload, and recovery
+    // errors never enter this path.
+    this.displayMode = "native";
+    this.runtimeError = undefined;
+    this.runtimeErrorRecoverableByNative = false;
+    this.map?.triggerRepaint();
+    this.emit(
+      this.paintReceipt
+        ? "painted"
+        : this.program
+          ? "ready"
+          : "initializing",
+    );
+    return {
+      generation: generationNumber(this.model),
+      observationId: this.selectedObservationId,
+      selectionSequence: this.selectionSequence,
+      requestedAtUnixMs: Date.now(),
+    };
   }
 
   onAdd(map: MapLibreMap, gl: WebGL2RenderingContext): void {

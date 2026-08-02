@@ -148,6 +148,7 @@ export function App() {
   const [timelineFrames, setTimelineFrames] = useState<TimelineFrame[]>([]);
   const [liveHistoryStatus, setLiveHistoryStatus] = useState<LiveHistoryStatus | undefined>();
   const [displayMode, setDisplayMode] = useState<RadarDisplayMode>(restoreRadarDisplayMode);
+  const displayModeRef = useRef(displayMode);
   const [selectedSite, setSelectedSite] = useState("KTLX");
   const [requestedSite, setRequestedSite] = useState<string | null>(null);
   const [siteRequestError, setSiteRequestError] = useState<string | null>(null);
@@ -510,6 +511,11 @@ export function App() {
         displayMode,
         recoveryBeforeLayerId: ANCHOR_LAYER_ID,
         onSnapshot(renderer) {
+          if (renderer.displayMode !== displayModeRef.current) {
+            displayModeRef.current = renderer.displayMode;
+            setDisplayMode(renderer.displayMode);
+            storeRadarDisplayMode(renderer.displayMode);
+          }
           setPlaybackError((current) => playbackErrorAfterRendererStatus(current, renderer.status));
           synchronizePaintedDisplay(renderer);
           const receipt = renderer.paintReceipt;
@@ -1330,6 +1336,7 @@ export function App() {
   const selectDisplayMode = (mode: RadarDisplayMode) => {
     const layer = radarLayerRef.current;
     if (!layer) return;
+    displayModeRef.current = mode;
     layer.setDisplayMode(mode);
     setDisplayMode(mode);
     storeRadarDisplayMode(mode);

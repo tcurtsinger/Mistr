@@ -116,7 +116,7 @@ describe("radar display modes", () => {
     expect(shouldSmoothRadarDisplay("smooth", "storm_relative_velocity")).toBe(false);
   });
 
-  it("retries only a recoverable Smooth draw failure when switching to Native", () => {
+  it("offers only a recoverable Smooth draw failure for a controller-owned Native retry", () => {
     const onSnapshot = vi.fn();
     const layer = new RadarCustomLayer(model(0), { onSnapshot });
     const internals = layer as unknown as {
@@ -134,8 +134,12 @@ describe("radar display modes", () => {
     internals.runtimeError = "Smooth draw failed";
     internals.runtimeErrorRecoverableByNative = true;
 
-    layer.setDisplayMode("native");
+    const retry = layer.retryFailedSmoothDrawInNative();
 
+    expect(retry).toMatchObject({
+      observationId: layer.getSnapshot().selectedObservationId,
+      selectionSequence: layer.getSnapshot().selectionSequence,
+    });
     expect(layer.getSnapshot()).toMatchObject({
       displayMode: "native",
       status: "ready",
@@ -148,7 +152,7 @@ describe("radar display modes", () => {
     }));
   });
 
-  it("does not clear a resource-wide renderer failure when switching to Native", () => {
+  it("does not offer a resource-wide renderer failure for a Native retry", () => {
     const layer = new RadarCustomLayer(model(0), { onSnapshot: vi.fn() });
     const internals = layer as unknown as {
       runtimeError: string | undefined;
@@ -157,10 +161,11 @@ describe("radar display modes", () => {
     internals.runtimeError = "GPU completion fence failed";
     internals.runtimeErrorRecoverableByNative = false;
 
-    layer.setDisplayMode("native");
+    const retry = layer.retryFailedSmoothDrawInNative();
 
+    expect(retry).toBeNull();
     expect(layer.getSnapshot()).toMatchObject({
-      displayMode: "native",
+      displayMode: "smooth",
       status: "error",
       error: "GPU completion fence failed",
     });
