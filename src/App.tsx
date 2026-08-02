@@ -643,6 +643,7 @@ export function App() {
           modelsById.set(model.observationId, model);
           radarModelRef.current = model;
           setPaintedProduct(model.product);
+          setTimelineFrames([timelineFrame(model)]);
           updateDiagnosticSources(instance, model, alignment);
           const firstValid = model.statuses.findIndex((status) => status === 0);
           if (firstValid >= 0) {
