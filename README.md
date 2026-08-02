@@ -12,7 +12,7 @@ The underlying engine has passed the historical Phase 0 through 6 feasibility ga
 
 The current product foundation opens a clearly labeled pinned archive loop and can replace it with one freshly acquired live observation for a selected site. Accumulating the bounded rolling history from successive live observations is the next Alpha engine milestone; see [Alpha Product Foundation](docs/19_ALPHA_PRODUCT_FOUNDATION.md) for the exact boundary.
 
-Start with the [product definition](PRODUCT.md), [design system](DESIGN.md), and [documentation index](docs/README.md).
+Start with the [product definition](PRODUCT.md), [design system](DESIGN.md), [current Alpha state](docs/20_ALPHA_CURRENT_STATE.md), and [documentation index](docs/README.md).
 
 ## Local development
 

@@ -48,6 +48,7 @@ The numbered documents and phase reports below are historical architecture and a
 | [17_REALTIME_FRESHNESS_AND_FALLBACK_DECISION.md](17_REALTIME_FRESHNESS_AND_FALLBACK_DECISION.md) | Phase 5 safe-sweep publication, source freshness, cancellation, and fallback ADR |
 | [18_LEVEL3_N0S_AND_CONTEXT_RECOVERY_DECISION.md](18_LEVEL3_N0S_AND_CONTEXT_RECOVERY_DECISION.md) | Phase 6 N0S decoder, product-label, categorical normalization, and visible-first recovery ADR |
 | [19_ALPHA_PRODUCT_FOUNDATION.md](19_ALPHA_PRODUCT_FOUNDATION.md) | Productization decision, normal radar interface, current runtime truth, and remaining Alpha engine milestone |
+| [20_ALPHA_CURRENT_STATE.md](20_ALPHA_CURRENT_STATE.md) | Current product/runtime state, validation evidence, review workflow, and the exact next development milestone |
 | [phase-reports/PHASE_2_PACKED_WIRE_AND_IPC.md](phase-reports/PHASE_2_PACKED_WIRE_AND_IPC.md) | Phase 2 cross-language, packaged IPC, timing, and memory evidence |
 | [phase-reports/PHASE_3_STATIC_GPU_RENDERER.md](phase-reports/PHASE_3_STATIC_GPU_RENDERER.md) | Phase 3 packaged GPU, alignment, palette, coexistence, and performance evidence |
 | [phase-reports/PHASE_4_RESIDENT_PLAYBACK.md](phase-reports/PHASE_4_RESIDENT_PLAYBACK.md) | Phase 4 real 20-observation residency, 4K playback, paint truth, and resource evidence |
