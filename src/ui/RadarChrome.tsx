@@ -23,6 +23,7 @@ export interface RadarChromeProps {
   playbackLabel: string;
   playbackReady: boolean;
   playing: boolean;
+  productLabel: string;
   selectedSite: string;
   siteSelectionReady: boolean;
   sites: readonly RadarSiteOption[];
@@ -46,6 +47,7 @@ export function RadarChrome({
   playbackLabel,
   playbackReady,
   playing,
+  productLabel,
   selectedSite,
   siteSelectionReady,
   sites,
@@ -100,9 +102,9 @@ export function RadarChrome({
           <ChevronIcon />
         </button>
         <span aria-hidden="true" className="instrument-divider" />
-        <span aria-label="Radar product: base reflectivity" className="context-readout">
+        <span aria-label={`Radar product: ${productLabel.toLowerCase()}`} className="context-readout">
           <span>PRODUCT</span>
-          <strong>REFLECTIVITY</strong>
+          <strong>{productLabel}</strong>
         </span>
         <span aria-hidden="true" className="instrument-divider" />
         <span aria-label="Elevation angle: 0.5 degrees" className="context-readout context-readout--elevation">

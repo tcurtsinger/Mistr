@@ -17,11 +17,17 @@ export interface FreshnessPresentation {
   label: string;
 }
 
+export type RadarProduct = "reflectivity" | "storm_relative_velocity";
+
 const SITE_PATTERN = /^K[A-Z0-9]{3}$/;
 
 export function normalizeRadarSite(value: string | null | undefined, fallback = "KTLX"): string {
   const normalized = value?.trim().toUpperCase() ?? "";
   return SITE_PATTERN.test(normalized) ? normalized : fallback;
+}
+
+export function radarProductLabel(product: RadarProduct): string {
+  return product === "storm_relative_velocity" ? "STORM-RELATIVE VELOCITY" : "REFLECTIVITY";
 }
 
 export function paintedFrameIndex(

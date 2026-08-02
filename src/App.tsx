@@ -68,6 +68,7 @@ import {
   normalizeRadarSite,
   paintedFrameIndex,
   playbackPresentation,
+  radarProductLabel,
   type TimelineFrame,
 } from "./ui/radarChromeModel";
 
@@ -122,6 +123,7 @@ export function App() {
     display: initialLiveDisplay(),
   });
   const [interrogation, setInterrogation] = useState<GateInterrogation | null>(null);
+  const [paintedProduct, setPaintedProduct] = useState<RadarSweepCpuModel["product"]>("reflectivity");
   const [timelineFrames, setTimelineFrames] = useState<TimelineFrame[]>([]);
   const [selectedSite, setSelectedSite] = useState("KTLX");
   const [requestedSite, setRequestedSite] = useState<string | null>(null);
@@ -418,6 +420,7 @@ export function App() {
       if (!initialModel) throw new Error("newest painted archive frame is unknown");
       paintedSiteRef.current = initialModel.siteIcao;
       radarModelRef.current = initialModel;
+      setPaintedProduct(initialModel.product);
       liveDisplay = initialLiveDisplay(frameTruth(initialModel, newestReceipt));
       publishPhase5({ display: liveDisplay });
       const activityAtResidency = await client.phase4ActivitySnapshot();
@@ -531,6 +534,7 @@ export function App() {
           modelsById.set(model.observationId, model);
           paintedSiteRef.current = model.siteIcao;
           radarModelRef.current = model;
+          setPaintedProduct(model.product);
           setTimelineFrames([timelineFrame(model)]);
           inspectionMarkerRef.current?.remove();
           inspectionMarkerRef.current = null;
@@ -637,6 +641,7 @@ export function App() {
           modelsById.clear();
           modelsById.set(model.observationId, model);
           radarModelRef.current = model;
+          setPaintedProduct(model.product);
           updateDiagnosticSources(instance, model, alignment);
           const firstValid = model.statuses.findIndex((status) => status === 0);
           if (firstValid >= 0) {
@@ -697,6 +702,7 @@ export function App() {
         paintedSiteRef.current = paintedModel.siteIcao;
         selectedSiteRef.current = paintedModel.siteIcao;
         radarModelRef.current = paintedModel;
+        setPaintedProduct(paintedModel.product);
         setSelectedSite(paintedModel.siteIcao);
         setRequestedSite(null);
         setSiteRequestError(null);
@@ -879,6 +885,7 @@ export function App() {
         playbackLabel={phase4.kind === "error" ? "RADAR UNAVAILABLE" : playbackLabel}
         playbackReady={Boolean(playbackControllerRef.current) && phase4.kind === "complete"}
         playing={playback?.playing ?? false}
+        productLabel={radarProductLabel(paintedProduct)}
         selectedSite={selectedSite}
         siteSelectionReady={siteSelectionReady}
         sites={ALPHA_SITES}

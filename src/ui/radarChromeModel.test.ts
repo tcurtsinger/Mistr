@@ -5,6 +5,7 @@ import {
   normalizeRadarSite,
   paintedFrameIndex,
   playbackPresentation,
+  radarProductLabel,
 } from "./radarChromeModel";
 
 describe("radar chrome model", () => {
@@ -26,6 +27,11 @@ describe("radar chrome model", () => {
       selectedObservationId: "requested",
       lastPaintedObservationId: "painted",
     })).toBe(1);
+  });
+
+  it("labels the product that actually painted", () => {
+    expect(radarProductLabel("reflectivity")).toBe("REFLECTIVITY");
+    expect(radarProductLabel("storm_relative_velocity")).toBe("STORM-RELATIVE VELOCITY");
   });
 
   it("labels newest paused state from the painted frame position", () => {
