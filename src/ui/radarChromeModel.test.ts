@@ -4,6 +4,7 @@ import {
   freshnessPresentation,
   normalizeRadarSite,
   paintedFrameIndex,
+  playbackErrorAfterRendererStatus,
   playbackPresentation,
   radarProductLabel,
   rendererFailureMessage,
@@ -41,6 +42,14 @@ describe("radar chrome model", () => {
     expect(rendererFailureMessage({ status: "error", error: "GPU completion fence failed" }))
       .toBe("GPU completion fence failed");
     expect(rendererFailureMessage({ status: "error" })).toBe("Radar renderer failed");
+  });
+
+  it("clears a playback failure only after a later authoritative paint", () => {
+    expect(playbackErrorAfterRendererStatus("scrub timed out", "recovering"))
+      .toBe("scrub timed out");
+    expect(playbackErrorAfterRendererStatus("scrub timed out", "error"))
+      .toBe("scrub timed out");
+    expect(playbackErrorAfterRendererStatus("scrub timed out", "painted")).toBeNull();
   });
 
   it("labels newest paused state from the painted frame position", () => {

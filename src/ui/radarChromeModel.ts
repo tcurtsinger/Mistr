@@ -40,6 +40,13 @@ export function rendererFailureMessage(renderer: RendererStatusLike | undefined)
   return renderer.error ?? "Radar renderer failed";
 }
 
+export function playbackErrorAfterRendererStatus(
+  current: string | null,
+  status: RendererStatusLike["status"],
+): string | null {
+  return status === "painted" ? null : current;
+}
+
 export function paintedFrameIndex(
   frames: readonly TimelineFrame[],
   playback: PlaybackLike | undefined,

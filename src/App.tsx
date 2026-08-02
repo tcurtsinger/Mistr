@@ -67,6 +67,7 @@ import {
   freshnessPresentation,
   normalizeRadarSite,
   paintedFrameIndex,
+  playbackErrorAfterRendererStatus,
   playbackPresentation,
   radarProductLabel,
   rendererFailureMessage,
@@ -129,6 +130,7 @@ export function App() {
   const [selectedSite, setSelectedSite] = useState("KTLX");
   const [requestedSite, setRequestedSite] = useState<string | null>(null);
   const [siteRequestError, setSiteRequestError] = useState<string | null>(null);
+  const [playbackError, setPlaybackError] = useState<string | null>(null);
   const [siteSelectionReady, setSiteSelectionReady] = useState(false);
   const [dismissPanelsSignal, setDismissPanelsSignal] = useState(0);
   const [nowUnixMs, setNowUnixMs] = useState(Date.now());
@@ -384,6 +386,7 @@ export function App() {
       };
       layer = new RadarCustomLayer(models, {
         onSnapshot(renderer) {
+          setPlaybackError((current) => playbackErrorAfterRendererStatus(current, renderer.status));
           synchronizeArchiveFallback(renderer);
           const receipt = renderer.paintReceipt;
           const point = inspectionPointRef.current;
@@ -785,7 +788,7 @@ export function App() {
     ? rendererFailureMessage(phase4.report.renderer)
     : null;
   const radarUnavailableError = initializationError ?? rendererError;
-  const freshnessSource = radarUnavailableError || siteRequestError
+  const freshnessSource = radarUnavailableError || siteRequestError || playbackError
     ? "error"
     : phase5.display.kind === "acquiring"
       ? "updating"
@@ -820,7 +823,7 @@ export function App() {
           await playbackControllerRef.current?.scrub(nextIndex);
         }
       } catch (error) {
-        setSiteRequestError(error instanceof Error ? error.message : String(error));
+        setPlaybackError(error instanceof Error ? error.message : String(error));
       } finally {
         scrubRunningRef.current = false;
         if (queuedScrubRef.current !== null) queueScrub(queuedScrubRef.current);
