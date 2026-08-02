@@ -4,7 +4,7 @@
 
 **Merged product engine:** [PR #9 — Add bounded rolling live radar history](https://github.com/tcurtsinger/Mistr/pull/9), merge commit `444d500`
 
-**Active change:** Alpha release readiness
+**Active change:** [PR #10 — Qualify Mistr Alpha release readiness](https://github.com/tcurtsinger/Mistr/pull/10)
 
 **Branch:** `codex/mistr-alpha-release-readiness`
 
@@ -102,7 +102,7 @@ Release readiness also corrects a demonstrated installer defect: prior bundles d
 
 ## Pull-request checkpoint
 
-PR #8 and rolling-history [PR #9](https://github.com/tcurtsinger/Mistr/pull/9) are merged. The release-readiness branch will be committed, pushed, and opened as a new **ready-for-review** pull request only after the automated gates finish and every remaining manual release blocker is stated plainly. Only the repository owner merges.
+PR #8 and rolling-history [PR #9](https://github.com/tcurtsinger/Mistr/pull/9) are merged. Release-readiness [PR #10](https://github.com/tcurtsinger/Mistr/pull/10) is **ready for review**, not a draft. Every automated gate is complete, and the remaining unsigned-installer owner decision is stated plainly. Only the repository owner merges.
 
 Review workflow:
 
