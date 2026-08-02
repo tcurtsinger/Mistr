@@ -1,19 +1,18 @@
 # Mistr
 
-Mistr is a feasibility prototype for a fast, native-data NEXRAD radar renderer. It tests a specific architecture before any production adoption:
+Mistr is an installable desktop radar application for inspecting live storms without tile-bound playback or ambiguous data state. It acquires public NEXRAD data, decodes and normalizes radar sweeps in Rust, transfers a compact binary representation across Tauri IPC, and renders GPU-resident observations in a custom MapLibre WebGL layer.
 
-1. acquire public NEXRAD Level II and selected Level III products;
-2. decode and normalize radar sweeps in Rust;
-3. transfer a compact binary representation across Tauri IPC; and
-4. render resident sweeps in a custom MapLibre WebGL layer.
-
-The target is a Windows desktop storm command center with game-loop-style playback, while MapLibre continues to own the basemap and ordinary overlays.
+The map remains fully interactive while playback behaves like a bounded game loop: recent observations already resident on the GPU can advance without requesting or repainting hundreds of radar tiles.
 
 ## Status
 
-**Prototype only.** Phases 0 through 6 are complete on the primary Windows workstation. The build retains the Phase 4 proof of 20 GPU-resident observations, the Phase 5 bounded real-time Level II path, and now adds strict Level III `N0S` storm-relative velocity plus visible-first WebGL context recovery. Independent decoder and IEM comparisons pass. A real Windows sleep/wake check, multi-machine evidence, and GustAVO integration remain later gates.
+**Alpha product foundation.** The normal interface is now radar-first: choose a NEXRAD site, inspect reflectivity, play or scrub the resident observation loop, and see the time and freshness of the frame that actually painted. Windows is the Alpha release platform; the shared Tauri application remains compatible with a later macOS build.
 
-Start with [the documentation index](docs/README.md) and [prototype charter](docs/00_PROTOTYPE_CHARTER.md).
+The underlying engine has passed the historical Phase 0 through 6 feasibility gates on the primary Windows workstation, including 20-frame GPU-resident playback, bounded live Level II acquisition, strict Level III `N0S` decoding, and visible-first WebGL context recovery. Those phase records remain as engineering evidence rather than product UI.
+
+The current product foundation opens a clearly labeled pinned archive loop and can replace it with one freshly acquired live observation for a selected site. Accumulating the bounded rolling history from successive live observations is the next Alpha engine milestone; see [Alpha Product Foundation](docs/19_ALPHA_PRODUCT_FOUNDATION.md) for the exact boundary.
+
+Start with the [product definition](PRODUCT.md), [design system](DESIGN.md), [current Alpha state](docs/20_ALPHA_CURRENT_STATE.md), and [documentation index](docs/README.md).
 
 ## Local development
 
@@ -37,11 +36,15 @@ Build local Windows installers with:
 npm run tauri:build
 ```
 
-The unsigned NSIS and MSI outputs are local prototype artifacts under `src-tauri/target/release/bundle/`; they are not committed to the public repository.
+The unsigned NSIS and MSI outputs are local build artifacts under `src-tauri/target/release/bundle/`; they are not committed to the public repository.
 
 Downloaded radar data and generated diagnostics are intentionally ignored by Git. No AWS credentials are used: the fixtures are fetched from a public Unidata NEXRAD bucket.
 
-## Phase 1 decoder check
+## Engineering validation
+
+The numbered phase checks below preserve the reproducible evidence used to qualify the radar engine. They are not user-facing product modes.
+
+### Phase 1 decoder check
 
 After `npm run fixture:download`, produce the Mistr diagnostic with:
 
@@ -51,7 +54,7 @@ cargo run --locked --manifest-path src-tauri\Cargo.toml --bin mistr-decode -- fi
 
 The independent Py-ART procedure is documented in [scripts/oracle/README.md](scripts/oracle/README.md). Reviewed, public-data-only reference reports are committed under `fixtures/expected/phase-1/`; arbitrary local diagnostics remain ignored.
 
-## Phase 2 wire checks
+### Phase 2 wire checks
 
 Generate the committed cross-language golden vector:
 
@@ -67,7 +70,7 @@ cargo run --release --locked --manifest-path src-tauri\Cargo.toml --bin mistr-wi
 
 The accepted byte layout is documented in [PackedSweep v1](docs/14_PACKED_SWEEP_V1.md), and the packaged-runtime evidence is in the [Phase 2 report](docs/phase-reports/PHASE_2_PACKED_WIRE_AND_IPC.md).
 
-## Phase 4 packaged playback gate
+### Phase 4 packaged playback gate
 
 After downloading the 20 public fixtures, run the real release/WebView2 4K gate:
 
@@ -77,7 +80,7 @@ npm run test:phase4:packaged
 
 The runner performs two 1,000-transition interaction scenarios and five atomic loop replacements per scenario. Its ignored evidence is written under `artifacts/phase-4/`. The contract and results are documented in the [resident playback decision](docs/16_RESIDENT_PLAYBACK_DECISION.md) and [Phase 4 report](docs/phase-reports/PHASE_4_RESIDENT_PLAYBACK.md).
 
-## Phase 5 live gate
+### Phase 5 live gate
 
 Run the release/WebView2 live acquisition, site-supersession, and 4K GPU-paint gate with:
 
@@ -93,7 +96,7 @@ cargo run --release --locked --manifest-path src-tauri\Cargo.toml --bin mistr-li
 
 The probe uses anonymous fixed-host HTTPS only. Raw chunks, executables, provider responses, and packaged screenshots remain ignored; the reviewed latency dataset contains only bounded public metadata and hashes. See the [real-time decision](docs/17_REALTIME_FRESHNESS_AND_FALLBACK_DECISION.md) and [Phase 5 report](docs/phase-reports/PHASE_5_REALTIME_CHUNKS.md).
 
-## Phase 6 N0S and recovery gate
+### Phase 6 N0S and recovery gate
 
 Download/verify the fixed public Level III and IEM references, then run two packaged WebView2 cold-start passes:
 

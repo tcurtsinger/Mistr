@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Mistr Radar Prototype",
+        "title": "Mistr",
         "width": 1440,
         "height": 900,
         "minWidth": 1024,
@@ -29,7 +29,7 @@
     "active": true,
     "targets": ["nsis", "msi"],
     "icon": ["icons/icon.ico"],
-    "shortDescription": "Native-data NEXRAD rendering prototype",
-    "longDescription": "Feasibility prototype for decoded NEXRAD Level II and Level III playback in a custom MapLibre WebGL layer."
+    "shortDescription": "High-resolution NEXRAD radar for desktop",
+    "longDescription": "A focused desktop radar instrument with decoded NEXRAD data, GPU-resident playback, and an interactive MapLibre map."
   }
 }

@@ -17,6 +17,7 @@ try {
   await call("Runtime.enable");
   await call("Page.enable");
   await waitForPhase5Api();
+  await evaluate("window.__MISTR_PHASE4__.prepareArchive()", true, 30_000);
   await evaluate("window.__MISTR_PHASE4__.pause()");
   const windowInfo = await call("Browser.getWindowForTarget", { targetId: target.id });
   assertProtocolResult(windowInfo, "Browser.getWindowForTarget");

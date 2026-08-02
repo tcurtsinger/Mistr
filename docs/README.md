@@ -1,29 +1,30 @@
 # Mistr
 
-**Status:** Phases 0 through 6 are complete on the primary Windows workstation. Phase 7 GustAVO integration rehearsal requires separate authorization; real Windows sleep/wake remains a recorded manual adoption check.
+**Status:** Mistr is now the product. The Windows-first Alpha foundation is underway; the earlier Phase 0 through 6 prototype work is retained below as reproducible engine evidence, not as the product identity or normal interface.
 
-Mistr is the bounded raw-radar feasibility prototype for GustAVO. Its purpose is to determine whether selected-site NEXRAD playback can move from provider-rendered map tiles to decoded, GPU-resident radar data without rewriting the full GustAVO desktop application.
+Mistr is a focused desktop radar instrument for selected-site storm inspection. Its Alpha product contract lives in [PRODUCT.md](../PRODUCT.md), and its implemented interface rules live in [DESIGN.md](../DESIGN.md).
 
-The prototype keeps the existing product shell and proves only the risky radar path:
+Its qualified radar path is:
 
 ```text
 AWS radar data -> decode and normalize -> packed binary IPC -> WebGL2 GPU resources -> MapLibre custom layer
 ```
 
-If Mistr succeeds, GustAVO can adopt the new radar engine behind a feature flag. If it fails, GustAVO keeps its current tiled renderer with no forced platform migration.
+The historical phase documents record how this architecture was selected, bounded, tested, and reviewed. They remain useful to future maintainers, but forward product work is planned directly in Mistr rather than as a GustAVO integration rehearsal.
 
-## Executive decision
+## Alpha direction
 
-Mistr will test a targeted retrofit before any Electron, Qt, game-engine, or full native rewrite is considered.
-
-- Keep Tauri, Rust, React, TypeScript, and MapLibre for the prototype.
-- Use Level II for selected-site base reflectivity.
-- Preserve current storm-relative velocity semantics by evaluating raw Level III `N0S`; do not mislabel Level II base velocity as storm-relative velocity.
-- Keep the national mosaic separate. Level II is per-site and does not replace a proper national multi-radar mosaic.
-- Use a GPU texture-oriented representation, not a naïve triangle mesh per radar gate.
-- Keep the existing tiled selected-site radar available as a fallback until every adoption gate passes.
+- Keep Tauri, Rust, React, TypeScript, MapLibre, and the qualified custom WebGL renderer.
+- Ship Windows first while preserving a reasonable path to macOS validation.
+- Make one selected-site live base-reflectivity workflow dependable before adding national mosaic, velocity, alerts, cameras, or other weather surfaces.
+- Keep the measured, painted observation as the source of truth for time, freshness, and playback state.
+- Preserve the fixture, packaged-runtime, performance, and recovery gates as part of product engineering.
+- Keep prototype phase labels, benchmark controls, and diagnostic internals out of the normal interface.
 
 ## Documentation map
+
+The numbered documents and phase reports below are historical architecture and acceptance evidence. New product and interface decisions must remain consistent with [PRODUCT.md](../PRODUCT.md) and [DESIGN.md](../DESIGN.md).
+
 
 | Document | Purpose |
 |---|---|
@@ -46,6 +47,8 @@ Mistr will test a targeted retrofit before any Electron, Qt, game-engine, or ful
 | [16_RESIDENT_PLAYBACK_DECISION.md](16_RESIDENT_PLAYBACK_DECISION.md) | Phase 4 resource-set, hard-cut, atomic replacement, and paint-truth ADR |
 | [17_REALTIME_FRESHNESS_AND_FALLBACK_DECISION.md](17_REALTIME_FRESHNESS_AND_FALLBACK_DECISION.md) | Phase 5 safe-sweep publication, source freshness, cancellation, and fallback ADR |
 | [18_LEVEL3_N0S_AND_CONTEXT_RECOVERY_DECISION.md](18_LEVEL3_N0S_AND_CONTEXT_RECOVERY_DECISION.md) | Phase 6 N0S decoder, product-label, categorical normalization, and visible-first recovery ADR |
+| [19_ALPHA_PRODUCT_FOUNDATION.md](19_ALPHA_PRODUCT_FOUNDATION.md) | Productization decision, normal radar interface, current runtime truth, and remaining Alpha engine milestone |
+| [20_ALPHA_CURRENT_STATE.md](20_ALPHA_CURRENT_STATE.md) | Current product/runtime state, validation evidence, review workflow, and the exact next development milestone |
 | [phase-reports/PHASE_2_PACKED_WIRE_AND_IPC.md](phase-reports/PHASE_2_PACKED_WIRE_AND_IPC.md) | Phase 2 cross-language, packaged IPC, timing, and memory evidence |
 | [phase-reports/PHASE_3_STATIC_GPU_RENDERER.md](phase-reports/PHASE_3_STATIC_GPU_RENDERER.md) | Phase 3 packaged GPU, alignment, palette, coexistence, and performance evidence |
 | [phase-reports/PHASE_4_RESIDENT_PLAYBACK.md](phase-reports/PHASE_4_RESIDENT_PLAYBACK.md) | Phase 4 real 20-observation residency, 4K playback, paint truth, and resource evidence |
@@ -56,12 +59,12 @@ Mistr will test a targeted retrofit before any Electron, Qt, game-engine, or ful
 
 ## Required reading order
 
-1. Prototype charter
-2. Architecture
-3. Data sources and decoding
-4. GPU renderer
-5. Test and validation plan
-6. Implementation phases
+1. Product definition
+2. Design system
+3. Architecture
+4. Data sources and decoding
+5. GPU renderer
+6. Test and validation plan
 7. Risk register
 8. Engineering contract
 
