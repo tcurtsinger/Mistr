@@ -170,6 +170,43 @@ describe("radar display modes", () => {
       error: "GPU completion fence failed",
     });
   });
+
+  it("automatically rolls a mode-only Smooth draw failure back to Native", () => {
+    const onSnapshot = vi.fn();
+    const triggerRepaint = vi.fn();
+    const layer = new RadarCustomLayer(model(0), { onSnapshot });
+    const internals = layer as unknown as {
+      gl: { isContextLost(): boolean };
+      map: { triggerRepaint(): void };
+      program: object;
+      vao: object;
+      uniforms: object;
+      paintReceipt: RadarPaintReceipt;
+      handleDrawFailure(error: unknown, retryInNative: boolean): boolean;
+    };
+    internals.gl = { isContextLost: () => false };
+    internals.map = { triggerRepaint };
+    internals.program = {};
+    internals.vao = {};
+    internals.uniforms = {};
+    internals.paintReceipt = receiptFor("observation-0", 1);
+
+    const recovered = internals.handleDrawFailure(new Error("Smooth draw failed"), true);
+
+    expect(recovered).toBe(true);
+    expect(triggerRepaint).toHaveBeenCalledOnce();
+    expect(layer.getSnapshot()).toMatchObject({
+      displayMode: "native",
+      status: "painted",
+      error: undefined,
+      lastPaintedObservationId: "observation-0",
+    });
+    expect(onSnapshot).toHaveBeenLastCalledWith(expect.objectContaining({
+      displayMode: "native",
+      status: "painted",
+      error: undefined,
+    }));
+  });
 });
 
 describe("WebGL upload error gate", () => {

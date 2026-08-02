@@ -507,6 +507,27 @@ export class RadarCustomLayer implements CustomLayerInterface {
     };
   }
 
+  private handleDrawFailure(error: unknown, retryInNative: boolean): boolean {
+    this.runtimeError = error instanceof Error ? error.message : String(error);
+    this.runtimeErrorRecoverableByNative = retryInNative;
+    const controllerOwnsRetry = this.paintWaiters.has(this.selectionSequence);
+    if (
+      retryInNative
+      && !controllerOwnsRetry
+      && this.retryFailedSmoothDrawInNative()
+    ) {
+      // A mode-only repaint keeps the same selection sequence, so there is
+      // no playback promise to own rollback. Preserve the already-painted
+      // Native pixels and schedule one bounded Native redraw here instead.
+      // Startup, play, and scrub paints retain controller ownership so their
+      // matching receipt remains the only authority for timeline changes.
+      return true;
+    }
+    this.rejectPaintWaiter(this.selectionSequence, this.runtimeError);
+    this.emit("error", this.runtimeError);
+    return false;
+  }
+
   onAdd(map: MapLibreMap, gl: WebGL2RenderingContext): void {
     this.map = map;
     this.gl = gl;
@@ -631,10 +652,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
         this.map?.triggerRepaint();
       }
     } catch (error) {
-      this.runtimeError = error instanceof Error ? error.message : String(error);
-      this.runtimeErrorRecoverableByNative = retryInNative;
-      this.rejectPaintWaiter(this.selectionSequence, this.runtimeError);
-      this.emit("error", this.runtimeError);
+      if (this.handleDrawFailure(error, retryInNative)) return;
       throw error;
     } finally {
       restoreGlState(gl, state);
