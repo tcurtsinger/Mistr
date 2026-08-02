@@ -93,17 +93,11 @@ The Impeccable finish review found five material issues—stale dBZ after frame 
 
 One isolated intermediate Phase 4 stabilized-heap measurement failure did not reproduce in two later final-build runs. It is recorded transparently as `DRF-004` in [Deferred review findings](DEFERRED_REVIEW_FINDINGS.md); no acceptance threshold was relaxed.
 
+Pull-request review later demonstrated that a persisted-site startup acquisition could overlap the Phase 4 or Phase 6 packaged gate after those runners observed their diagnostic APIs. The runners now cross an explicit archive-preparation barrier that supersedes and awaits startup work, restores all 20 archive observations, and only then begins measurement or recovery checks. The full verification suite and both affected packaged gates passed after this correction.
+
 ## Pull-request checkpoint
 
-At this checkpoint:
-
-- PR #8 is open and marked ready for review;
-- the code-bearing product-foundation commit passed GitHub CI;
-- the documentation-only handoff update triggered a fresh CI run, which was queued at the checkpoint;
-- GitHub may report an unstable merge state while that new check is incomplete; and
-- no conversation comments, submitted reviews, or review threads have appeared yet.
-
-The automated code review is expected to be running. Re-read the live PR before taking action rather than assuming this checkpoint is still current.
+At this checkpoint, PR #8 remains open and marked ready for review. Automated review submitted one actionable thread about persisted startup acquisition overlapping the packaged Phase 4 and Phase 6 gates; the branch now isolates both runners with the archive-preparation barrier described above. No conversation comments or other review threads had appeared. Re-read the live PR, checks, and thread state before taking action because CI and review status can change after this checkpoint.
 
 ## Required review workflow
 

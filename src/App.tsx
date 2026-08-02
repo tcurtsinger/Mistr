@@ -184,6 +184,8 @@ export function App() {
     let clickHandler: ((event: MapMouseEvent) => void) | null = null;
     let latestReport: Phase4Report | null = null;
     let activeScenario: Promise<Phase4ScenarioReport> | null = null;
+    let startupAcquisition: Promise<void> | null = null;
+    let prepareArchiveForDiagnostics: (() => Promise<RadarPaintReceipt>) | null = null;
     let transferGeneration = 1;
     let liveDisplay = initialLiveDisplay();
     let latestPhase5: Phase5Report = { display: liveDisplay };
@@ -473,6 +475,8 @@ export function App() {
           const selectedModel = selectedId ? modelsById.get(selectedId) : undefined;
           focusRadar(instance, selectedModel ?? diagnosticModel);
         },
+        prepareArchive: () => prepareArchiveForDiagnostics?.()
+          ?? Promise.reject(new Error("archive diagnostic preparation is unavailable")),
         layerOrder: () => currentLayerCoexistenceReport(instance).actualDiagnosticOrder,
       };
       const acquireLive = async (
@@ -654,10 +658,53 @@ export function App() {
           return layer?.getSnapshot() ?? null;
         },
       };
+      prepareArchiveForDiagnostics = async () => {
+        if (!layer || !controller || !client) {
+          throw new Error("archive diagnostic preparation is unavailable");
+        }
+        // Packaged gates reuse the normal WebView profile. Supersede and await
+        // any persisted-site startup request before restoring the measured
+        // archive loop, so live publication cannot overlap gate measurements.
+        const generation = Math.max(
+          transferGeneration + 1,
+          layer.getSnapshot().generation + 1,
+        );
+        transferGeneration = generation;
+        await client.begin(generation);
+        await startupAcquisition?.catch(() => {});
+
+        const archiveModels = models.map((model) => ({
+          ...model,
+          generation: BigInt(generation),
+        }));
+        const receipt = await controller.replaceResidentFrames(archiveModels);
+        const paintedModel = archiveModels.find(
+          (model) => model.observationId === receipt.observationId,
+        );
+        if (!paintedModel) throw new Error("prepared archive paint receipt is unknown");
+
+        modelsById.clear();
+        archiveModels.forEach((model) => modelsById.set(model.observationId, model));
+        paintedSiteRef.current = paintedModel.siteIcao;
+        selectedSiteRef.current = paintedModel.siteIcao;
+        radarModelRef.current = paintedModel;
+        setSelectedSite(paintedModel.siteIcao);
+        setRequestedSite(null);
+        setSiteRequestError(null);
+        setTimelineFrames(archiveModels.map(timelineFrame));
+        liveDisplay = initialLiveDisplay(frameTruth(paintedModel, receipt));
+        publishPhase5({ display: liveDisplay });
+        publish({
+          renderer: layer.getSnapshot(),
+          playback: controller.snapshot(),
+          activityAtResidency: await client.phase4ActivitySnapshot(),
+        });
+        return receipt;
+      };
       if (hasStoredSite()) {
         const startupSite = selectedSiteRef.current;
         setRequestedSite(startupSite);
-        void acquireLive(startupSite, false).then(
+        startupAcquisition = acquireLive(startupSite, false).then(
           () => {
             if (selectedSiteRef.current === startupSite) {
               setSelectedSite(startupSite);
@@ -1155,6 +1202,7 @@ declare global {
   var __MISTR_PHASE4__: undefined | {
     report(): Phase4Report;
     runScenario(transitionCount?: number): Promise<Phase4ScenarioReport>;
+    prepareArchive(): Promise<RadarPaintReceipt>;
     play(): void;
     pause(): void;
     step(): Promise<RadarPaintReceipt>;
