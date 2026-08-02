@@ -66,15 +66,42 @@ describe("PackedSweepTransferClient", () => {
       historyCursor: {
         volumeIndex: 999,
         volumeStartedAtUnixMs: 1_800_000_000_000,
+        direction: "after",
       },
     });
     await nextLease.release();
+    const previousLease = await client.requestPhase5Live("KTLX", true, 120, {
+      volumeIndex: 1,
+      volumeStartedAtUnixMs: 1_799_999_000_000,
+    }, "before");
+    expect(requests[2]).toEqual({
+      session: 1,
+      generation: 7,
+      site: "KTLX",
+      freshOnly: true,
+      timeoutSeconds: 120,
+      historyCursor: {
+        volumeIndex: 1,
+        volumeStartedAtUnixMs: 1_799_999_000_000,
+        direction: "before",
+      },
+    });
+    await previousLease.release();
     await expect(client.requestPhase5Live("ktlx")).rejects.toThrow("four uppercase");
     await expect(client.requestPhase5Live("KTLX", false, 901)).rejects.toThrow("10 and 900");
     await expect(client.requestPhase5Live("KTLX", false, 120, {
       volumeIndex: 7,
       volumeStartedAtUnixMs: 1,
     })).rejects.toThrow("fresh-only mode");
+    await expect(client.requestPhase5Live("KTLX", true, 120, undefined, "before"))
+      .rejects.toThrow("requires a live history cursor");
+    await expect(client.requestPhase5Live(
+      "KTLX",
+      true,
+      120,
+      { volumeIndex: 7, volumeStartedAtUnixMs: 1 },
+      "sideways" as never,
+    )).rejects.toThrow("either after or before");
   });
 
   it("requests the Phase 3 fixture through the same leased binary path", async () => {

@@ -13,20 +13,22 @@ Passing an individual automated gate is not a release approval. Public Alpha rem
 The packaged WebView2 product session must:
 
 - supersede a real site request without naming that site in the top context before it paints;
-- acquire at least four successive KTLX observations through the product's background polling loop;
-- retain every observation chronologically with exact-next provider-volume progression;
+- paint current KTLX radar first, then acquire safe preceding observations through the product's background backfill loop;
+- retain every observation chronologically with strict older-time predecessor validation;
 - upload exactly one GPU frame per accepted live observation;
-- preserve bounded GPU residency and truthful `BUILDING n/20` UI;
+- preserve bounded GPU residency and truthful `LOADING RECENT n/20` / `RECENT n/20` UI;
 - directly scrub oldest and newest resident observations; and
 - survive a real WebGL context reset with the same live history and a matching visible paint receipt.
 
 The ignored evidence is written by `npm run test:alpha:soak`. Provider payloads and screenshots are never committed.
 
-**Result:** Passed in the packaged product with exact-next KTLX volumes 569, 570, 571, and 572. All four observations became chronological residents with four incremental uploads, 10,620,720 GPU bytes, working oldest/newest scrubs, and preserved membership plus visible newest paint after a real context reset. The evidence validator uses chronological history truth for scrub order because context rehydration may reorder the renderer's internal resource map without changing playback order.
+**Historical result:** The earlier future-only gate passed with exact-next KTLX volumes 569 through 572. PR #11 supersedes that behavior with current-first predecessor backfill; the current gate validates the ready-on-selection loop without waiting for multiple future weather scans.
+
+**Current result:** Passed in the final packaged release/WebView2 runtime with current KTLX volume 676 followed by predecessors through 657. The safe bundled observation painted in 1.27 seconds after only one archive disk read. All 20 live observations then became strictly chronological residents in 0.6 minutes, with exactly 20 incremental uploads, 53,099,312 GPU bytes, correct oldest/newest scrubs, no degraded samples, deterministic in-flight request supersession, and preserved membership plus visible newest paint after a real context reset.
 
 ## Installed-product gate
 
-Both local Windows bundle formats must build and pass install, first-launch, GPU-paint, and uninstall checks. The installed application must establish the pinned 20-frame KTLX archive loop without depending on the repository working directory or the developer's ignored fixture cache.
+Both local Windows bundle formats must build and pass install, first-launch, GPU-paint, and uninstall checks. The installed application must paint the newest pinned KTLX archive observation without depending on the repository working directory or the developer's ignored fixture cache, and packaged diagnostics must still be able to hydrate the complete 20-frame loop.
 
 The public Alpha package version is `0.1.0`. Local upgrade evidence installs the prior `0.0.1` bundle, applies the `0.1.0` bundle, proves the new installed radar, and then uninstalls it for both NSIS and MSI.
 

@@ -34,6 +34,14 @@ Initial discovery now performs one bounded delimiter listing for the selected si
 
 The corrected KINX check completed in 3.14 seconds with 12 total requests, including the downloaded safe-sweep chunks. It decoded 720 radials by 1,832 gates. Unsupported KOUN now fails catalog validation in about 0.05 seconds without starting provider discovery.
 
+### Slow first paint and future-only history
+
+Hands-on KEWX testing demonstrated two separate waits. Normal startup decoded all 20 raw archive fixtures before painting any of them, and radar initialization was gated on MapLibre's full remote basemap `load` event. After live radar finally painted, `BUILDING 1/20` waited only for future provider volumes, so a 20-frame loop could take roughly 88 minutes at KEWX's measured scan cadence.
+
+The frontend now bundles the OpenFreeMap style graph, begins radar work at local `style.load`, and treats remote basemap readiness separately. It decodes and paints only the newest bundled safe observation before starting current live acquisition; the other 19 fixtures are lazy diagnostic inputs. Current live radar then paints before sequential predecessor backfill. Each predecessor must occupy the prior ring slot and carry a strictly older measured time before it can be prepended. Exact-next polling begins after backfill completes or safely settles partial.
+
+On this workstation the debug runtime painted its bundled safe frame about seven seconds after process start and painted current live radar about five seconds later. A live KEWX session then reached three usable chronological frames within roughly eight additional seconds and the full 20-frame resident loop in about one minute. Release decoding is materially faster than the debug runtime; packaged timing remains the release gate.
+
 ### Misleading startup and hidden recovery copy
 
 Before the first paint, the normal playback bar previously showed `0 / 0`, `PAUSED`, `WAITING FOR RADAR`, an active-looking timeline, and `CLICK TO INSPECT`. Real archive-decode progress existed internally but was not visible. Recovery guidance was available only to screen readers.
@@ -65,6 +73,8 @@ The S3 directory parser also requires the complete `ListBucketResult` and `Commo
 - Fixed Alpha scope—base reflectivity at the lowest usable tilt—is explained in About rather than occupying inert control-like header segments.
 - The left menu contains only recenter and About.
 - Preparation, retained-display loading, recovery, and failure use visible product-language status.
+- A current live frame is immediately usable as radar; predecessor progress says `LOADING RECENT n/20`, settled partial history says `RECENT n/20`, and one-frame partial history says `WAITING FOR NEXT SCAN`.
+- A selected inspection point outside the measured sweep says `OUTSIDE RADAR COVERAGE` rather than reverting to `CLICK TO INSPECT` while leaving a reticle behind.
 - The intentionally tiny inspection reticle is separate from hidden alignment diagnostics.
 
 ## Live qualification sample
@@ -87,6 +97,7 @@ These live observations demonstrate representative identifier, source, and decod
 - full `npm run verify`, including the public-repository scan, documentation links, frontend tests, production build, Rust formatting, clippy with warnings denied, Rust tests, and Rust check;
 - packaged Phase 4 at 3840x2160: two 1,000-transition scenarios, zero long tasks, zero hot-path acquisition/uploads, resident-history mutation/recovery, and hidden-diagnostic layer coexistence;
 - packaged Phase 5 at 3840x2160: superseded-site cancellation, KTLX volumes 666 then exact-next 667, two chronological GPU-resident observations, matching paint receipts, and direct oldest/newest scrub;
+- packaged current-first backfill soak: a 1.27-second safe first paint with one archive read, KTLX volume 676 plus predecessors through 657, 20 chronological GPU-resident observations in 0.6 minutes, deterministic in-flight site supersession, direct oldest/newest scrub, 53,099,312 GPU bytes, and real context recovery;
 - both packaged Phase 6 passes for N0S, real WebGL context recovery, minimize/restore, and cold restart; and
 - packaged readiness at 3840x2160, 1100x700, and 1024x640 with no overflow, stable playback position, correct menu/search focus and return, keyboard scrub truth, no unnamed interactive controls, forced-colors focus, reduced motion, and 5.09:1 inactive-instruction contrast.
 

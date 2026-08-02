@@ -149,6 +149,26 @@ pub struct Phase5LiveTransferEvidence {
 pub struct LiveHistoryCursorArgs {
     pub volume_index: u16,
     pub volume_started_at_unix_ms: i64,
+    pub direction: LiveHistoryDirectionArgs,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LiveHistoryDirectionArgs {
+    After,
+    Before,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ValidatedLiveHistoryRequest {
+    After {
+        volume_index: u16,
+        volume_started_at_unix_ms: i64,
+    },
+    Before {
+        volume_index: u16,
+        volume_started_at_unix_ms: i64,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -805,7 +825,7 @@ pub async fn request_phase5_live_sweep(
             "live timeout must be between 10 and 900 seconds",
         ));
     }
-    let history_cursor = validate_live_history_cursor(fresh_only, history_cursor)?;
+    let history_request = validate_live_history_request(fresh_only, history_cursor)?;
     let broker = state.inner().clone();
     broker.acquire(session, generation)?;
 
@@ -816,10 +836,34 @@ pub async fn request_phase5_live_sweep(
         let token = worker_broker.live_generation_token(session, generation)?;
         let client = PublicRadarClient::new()
             .map_err(|error| TransferError::new("live_client_failed", error.to_string()))?;
-        let mut live = if let Some((volume_index, started_at)) = history_cursor {
-            LiveSweepSession::start_after(client, token, &site, volume_index, started_at).await
-        } else {
-            LiveSweepSession::start(client, token, &site, fresh_only).await
+        let mut live = match history_request {
+            Some(ValidatedLiveHistoryRequest::After {
+                volume_index,
+                volume_started_at_unix_ms,
+            }) => {
+                LiveSweepSession::start_after(
+                    client,
+                    token,
+                    &site,
+                    volume_index,
+                    volume_started_at_unix_ms,
+                )
+                .await
+            }
+            Some(ValidatedLiveHistoryRequest::Before {
+                volume_index,
+                volume_started_at_unix_ms,
+            }) => {
+                LiveSweepSession::start_before(
+                    client,
+                    token,
+                    &site,
+                    volume_index,
+                    volume_started_at_unix_ms,
+                )
+                .await
+            }
+            None => LiveSweepSession::start(client, token, &site, fresh_only).await,
         }
         .map_err(|error| TransferError::new("live_start_failed", error.to_string()))?;
         let safe = live
@@ -870,10 +914,10 @@ pub async fn request_phase5_live_sweep(
     Ok(Response::new(charged.bytes))
 }
 
-fn validate_live_history_cursor(
+fn validate_live_history_request(
     fresh_only: bool,
     history_cursor: Option<LiveHistoryCursorArgs>,
-) -> Result<Option<(u16, i64)>, TransferError> {
+) -> Result<Option<ValidatedLiveHistoryRequest>, TransferError> {
     let validated = match history_cursor {
         None => None,
         Some(cursor)
@@ -881,12 +925,21 @@ fn validate_live_history_cursor(
                 && (1..=999).contains(&cursor.volume_index)
                 && cursor.volume_started_at_unix_ms > 0 =>
         {
-            Some((cursor.volume_index, cursor.volume_started_at_unix_ms))
+            Some(match cursor.direction {
+                LiveHistoryDirectionArgs::After => ValidatedLiveHistoryRequest::After {
+                    volume_index: cursor.volume_index,
+                    volume_started_at_unix_ms: cursor.volume_started_at_unix_ms,
+                },
+                LiveHistoryDirectionArgs::Before => ValidatedLiveHistoryRequest::Before {
+                    volume_index: cursor.volume_index,
+                    volume_started_at_unix_ms: cursor.volume_started_at_unix_ms,
+                },
+            })
         }
-        Some(_) => {
+        _ => {
             return Err(TransferError::new(
                 "invalid_live_cursor",
-                "live history cursor requires fresh-only mode, a volume index from 1 to 999, and its start time",
+                "live history requires fresh-only mode, a cursor with a volume index from 1 to 999 and positive start time, and an explicit after/before direction",
             ));
         }
     };
@@ -1388,33 +1441,66 @@ mod tests {
     }
 
     #[test]
-    fn live_history_cursor_is_bounded_and_requires_fresh_mode() {
+    fn live_history_request_is_bounded_and_requires_an_explicit_direction() {
         let cursor = LiveHistoryCursorArgs {
             volume_index: 999,
             volume_started_at_unix_ms: 1_800_000_000_000,
+            direction: LiveHistoryDirectionArgs::After,
         };
         assert_eq!(
-            validate_live_history_cursor(true, Some(cursor)).unwrap(),
-            Some((999, 1_800_000_000_000)),
+            validate_live_history_request(true, Some(cursor)).unwrap(),
+            Some(ValidatedLiveHistoryRequest::After {
+                volume_index: 999,
+                volume_started_at_unix_ms: 1_800_000_000_000,
+            }),
+        );
+        let cursor = LiveHistoryCursorArgs {
+            direction: LiveHistoryDirectionArgs::Before,
+            ..cursor
+        };
+        assert_eq!(
+            validate_live_history_request(true, Some(cursor)).unwrap(),
+            Some(ValidatedLiveHistoryRequest::Before {
+                volume_index: 999,
+                volume_started_at_unix_ms: 1_800_000_000_000,
+            }),
         );
         assert_eq!(
-            validate_live_history_cursor(false, Some(cursor))
+            validate_live_history_request(false, Some(cursor))
                 .unwrap_err()
                 .code,
             "invalid_live_cursor",
         );
         assert_eq!(
-            validate_live_history_cursor(
+            validate_live_history_request(
                 true,
                 Some(LiveHistoryCursorArgs {
                     volume_index: 0,
                     volume_started_at_unix_ms: 1,
+                    direction: LiveHistoryDirectionArgs::Before,
                 }),
             )
             .unwrap_err()
             .code,
             "invalid_live_cursor",
         );
+        assert_eq!(validate_live_history_request(false, None).unwrap(), None,);
+    }
+
+    #[test]
+    fn live_history_cursor_schema_rejects_missing_or_unknown_directions() {
+        let missing = serde_json::json!({
+            "volumeIndex": 7,
+            "volumeStartedAtUnixMs": 1_800_000_000_000_i64,
+        });
+        assert!(serde_json::from_value::<LiveHistoryCursorArgs>(missing).is_err());
+
+        let unknown = serde_json::json!({
+            "volumeIndex": 7,
+            "volumeStartedAtUnixMs": 1_800_000_000_000_i64,
+            "direction": "sideways",
+        });
+        assert!(serde_json::from_value::<LiveHistoryCursorArgs>(unknown).is_err());
     }
 
     #[test]

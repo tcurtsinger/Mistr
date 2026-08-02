@@ -19,17 +19,17 @@ Prototype phase names, benchmark buttons, fixture controls, and diagnostic count
 
 ## Current runtime truth
 
-- A first launch opens the pinned 20-observation KTLX reflectivity loop on its newest painted scan, paused and explicitly marked `ARCHIVE LOOP`.
+- A first launch decodes and paints the newest pinned KTLX archive observation as a safe bridge; the remaining archive fixtures are loaded only when packaged diagnostics request the full loop.
 - Selecting a site starts the qualified bounded live Level II path, cancels superseded work, and replaces the displayed radar only after a current observation is decoded and painted.
-- After that first live paint, Mistr requests the exact next provider volume, appends successive observations into a chronological GPU-resident history, and evicts only the oldest frame at the 20-observation bound.
-- Resident playback remains usable while the next live volume is pending. Partial history is labeled `BUILDING n/20`, and failure preserves the last painted observation plus the last committed acquisition cursor.
+- After that first live paint, Mistr prepends strictly older safe provider volumes until the recent history reaches 20 or no safe predecessor is available, then requests the exact next future volume.
+- Resident playback becomes usable as soon as a second frame joins. Active backfill says `LOADING RECENT n/20`; a settled partial set says `RECENT n/20`, and a one-frame partial set says `WAITING FOR NEXT SCAN`.
 - The selected site is persisted and reopened on the next launch.
 - Clicking the map places an inspection reticle; any available dBZ value is reported in the playback bar rather than a floating map tooltip.
 - The radar renderer, binary transfer protocol, two-credit ownership bound, cancellation rules, and visible-first WebGL recovery remain unchanged.
 
 ## Completed Alpha engine milestone
 
-The bounded rolling **live** reflectivity loop is implemented. It retains at most 20 observations for one site, uploads only the appended GPU frame, rolls back failed mutations, preserves direct scrubbing and painted-frame truth, and carries an exact-next provider-volume cursor across retry without weakening site-generation cancellation or the two-credit IPC bound.
+The bounded rolling **live** reflectivity loop is implemented. It retains at most 20 observations for one site, uploads only the added GPU frame, rolls back failed mutations, preserves direct scrubbing and painted-frame truth, carries separate committed oldest/newest cursors for predecessor backfill and exact-next polling, and does not weaken site-generation cancellation or the two-credit IPC bound.
 
 A one-frame live set remains honestly non-playable until a second observation arrives. Archive and live source truth remain distinct. The detailed ownership and validation record is [Bounded Rolling Live History](21_BOUNDED_ROLLING_LIVE_HISTORY.md).
 

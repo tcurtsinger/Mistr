@@ -1,6 +1,6 @@
 param(
     [switch]$SkipBuild,
-    [ValidateRange(4, 20)][int]$Frames = 4,
+    [ValidateRange(4, 20)][int]$Frames = 20,
     [ValidateRange(900, 7200)][int]$TimeoutSeconds = 2700,
     [int]$Port = 9341
 )

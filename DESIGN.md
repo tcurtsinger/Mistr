@@ -202,7 +202,7 @@ Chrome is content-sized rather than viewport-filling. The context and playback b
 - Contains play/pause and a directly clickable/draggable scan timeline; no dedicated visible previous/next buttons.
 - Always exposes displayed scan time, freshness in words and elapsed time, and playback position/state.
 - A focused timeline may respond to arrow keys one observation at a time.
-- While a selected site's live history contains fewer than 20 observations, playback position remains visible and the timeline metadata adds `BUILDING n/20`. Background polling does not replace freshness age or disable already-resident playback.
+- While safe preceding observations are loading, playback position remains visible and the timeline metadata adds `LOADING RECENT n/20`. If the provider cannot supply another predecessor, the settled partial set says `RECENT n/20`; a one-frame set says `WAITING FOR NEXT SCAN`. Background history work does not replace freshness age or disable already-resident playback.
 
 ### Inspection Reticle
 - Appears after a deliberate map click.

@@ -24,6 +24,8 @@ export interface RendererStatusLike {
   error?: string;
 }
 
+export type LiveHistoryStatus = "loading" | "partial" | "full";
+
 export function normalizeRadarSite(value: string | null | undefined, fallback = "KTLX"): string {
   const normalized = value?.trim().toUpperCase() ?? "";
   return isSupportedRadarSite(normalized) ? normalized : fallback;
@@ -57,15 +59,19 @@ export function playbackPresentation(
   playback: PlaybackLike | undefined,
   frameIndex: number,
   frameCount: number,
+  liveHistoryStatus?: LiveHistoryStatus,
 ): string {
   if (playback?.holdReason?.startsWith("GPU_RECOVERY")) return "RECOVERING";
   if (playback?.playing) return "PLAYING";
   if (playback?.holdReason === "AWAITING_GPU_PAINT") return "LOADING SCAN";
+  if (frameCount === 1 && liveHistoryStatus === "loading") return "LOADING RECENT";
+  if (frameCount === 1 && liveHistoryStatus) return "WAITING FOR NEXT SCAN";
   if (frameCount > 0 && frameIndex === frameCount - 1) return "PAUSED · NEWEST";
   return "PAUSED";
 }
 
 export function radarInitializationLabel(stage: string | undefined): string {
+  if (stage === "LOADING NEWEST SAFE SCAN") return "LOADING SAFE RADAR";
   const progress = stage?.match(/^DECODING OBSERVATION (\d+)\/(\d+)$/);
   if (progress) return `LOADING HISTORY ${progress[1]}/${progress[2]}`;
   if (stage === "OPENING RESIDENT LOOP") return "OPENING RADAR HISTORY";
@@ -76,14 +82,18 @@ export function timelinePosition(
   frameIndex: number,
   frameCount: number,
   historyCapacity?: number,
+  liveHistoryStatus?: LiveHistoryStatus,
 ): string {
   const position = frameCount > 0 ? `${Math.min(frameIndex + 1, frameCount)} / ${frameCount}` : "0 / 0";
   if (
     historyCapacity === undefined
     || frameCount < 1
     || frameCount >= historyCapacity
+    || liveHistoryStatus === undefined
+    || liveHistoryStatus === "full"
   ) return position;
-  return `${position} · BUILDING ${frameCount}/${historyCapacity}`;
+  const historyLabel = liveHistoryStatus === "loading" ? "LOADING RECENT" : "RECENT";
+  return `${position} · ${historyLabel} ${frameCount}/${historyCapacity}`;
 }
 
 export function freshnessPresentation(

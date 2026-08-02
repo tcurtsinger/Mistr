@@ -45,6 +45,8 @@ export interface LiveSweepCursor {
   volumeStartedAtUnixMs: number;
 }
 
+export type LiveHistoryDirection = "after" | "before";
+
 export interface Phase5LiveTransferEvidence {
   observationId: string;
   sourceKind: "nexrad_level2_chunks";
@@ -230,7 +232,8 @@ export class PackedSweepTransferClient {
     site: string,
     freshOnly = false,
     timeoutSeconds = 180,
-    after?: LiveSweepCursor,
+    historyCursor?: LiveSweepCursor,
+    historyDirection: LiveHistoryDirection = "after",
   ): Promise<PackedSweepLease> {
     if (!/^[A-Z0-9]{4}$/.test(site)) {
       throw new TypeError("site must be exactly four uppercase ASCII letters/digits");
@@ -238,18 +241,24 @@ export class PackedSweepTransferClient {
     if (!Number.isInteger(timeoutSeconds) || timeoutSeconds < 10 || timeoutSeconds > 900) {
       throw new RangeError("timeoutSeconds must be an integer between 10 and 900");
     }
+    if (historyDirection !== "after" && historyDirection !== "before") {
+      throw new TypeError("historyDirection must be either after or before");
+    }
     if (
-      after
+      historyCursor
       && (
         !freshOnly
-        || !Number.isInteger(after.volumeIndex)
-        || after.volumeIndex < 1
-        || after.volumeIndex > 999
-        || !Number.isSafeInteger(after.volumeStartedAtUnixMs)
-        || after.volumeStartedAtUnixMs <= 0
+        || !Number.isInteger(historyCursor.volumeIndex)
+        || historyCursor.volumeIndex < 1
+        || historyCursor.volumeIndex > 999
+        || !Number.isSafeInteger(historyCursor.volumeStartedAtUnixMs)
+        || historyCursor.volumeStartedAtUnixMs <= 0
       )
     ) {
       throw new RangeError("live history cursor requires fresh-only mode and a valid volume identity");
+    }
+    if (!historyCursor && historyDirection === "before") {
+      throw new RangeError("before history direction requires a live history cursor");
     }
     return this.requestFromCommand(
       "request_phase5_live_sweep",
@@ -260,9 +269,12 @@ export class PackedSweepTransferClient {
         site,
         freshOnly,
         timeoutSeconds,
-        ...(after
+        ...(historyCursor
           ? {
-              historyCursor: after,
+              historyCursor: {
+                ...historyCursor,
+                direction: historyDirection,
+              },
             }
           : {}),
       },

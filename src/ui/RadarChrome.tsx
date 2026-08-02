@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { filterRadarSites, type RadarSiteOption } from "../data/radarSites";
 import type { GateInterrogation } from "../radar-renderer/cpuModel";
-import { timelinePosition, type FreshnessPresentation } from "./radarChromeModel";
+import {
+  timelinePosition,
+  type FreshnessPresentation,
+  type LiveHistoryStatus,
+} from "./radarChromeModel";
 
 export interface RadarChromeProps {
   appVersion: string;
@@ -10,8 +14,10 @@ export interface RadarChromeProps {
   frameCount: number;
   frameIndex: number;
   historyCapacity?: number;
+  liveHistoryStatus?: LiveHistoryStatus;
   freshness: FreshnessPresentation;
   interrogation: GateInterrogation | null;
+  inspectionSelected: boolean;
   mapStatus: string;
   onRecenter(): void;
   onScrub(index: number): void;
@@ -37,8 +43,10 @@ export function RadarChrome({
   frameCount,
   frameIndex,
   historyCapacity,
+  liveHistoryStatus,
   freshness,
   interrogation,
+  inspectionSelected,
   mapStatus,
   onRecenter,
   onScrub,
@@ -103,6 +111,10 @@ export function RadarChrome({
   };
   const timestamp = formatScanTimestamp(displayedAtUnixMs);
   const sample = formatSample(interrogation);
+  const sampleDisplay = sample
+    ?? (inspectionSelected ? "OUTSIDE RADAR COVERAGE" : "CLICK TO INSPECT");
+  const sampleAnnouncement = sample
+    ?? (inspectionSelected ? "Outside radar coverage." : "No radar point selected.");
   const menuPanelOpen = openPanel === "menu" || openPanel === "about";
 
   return (
@@ -238,7 +250,12 @@ export function RadarChrome({
           />
           <div aria-hidden="true" className="timeline-ticks" />
           <div className="timeline-meta">
-            <span>{timelinePosition(frameIndex, frameCount, historyCapacity)}</span>
+            <span>{timelinePosition(
+              frameIndex,
+              frameCount,
+              historyCapacity,
+              liveHistoryStatus,
+            )}</span>
             <strong>{playbackLabel}</strong>
           </div>
         </div>
@@ -247,7 +264,7 @@ export function RadarChrome({
           {freshness.label}
         </output>
         <output className={`sample-readout${sample ? " sample-readout--active" : ""}`}>
-          {sample ?? "CLICK TO INSPECT"}
+          {sampleDisplay}
         </output>
         </section>
       )}
@@ -266,7 +283,7 @@ export function RadarChrome({
           ? ""
           : preparingLabel
           ? `Preparing radar. ${preparingLabel}.`
-          : `${playbackLabel}. Radar ${freshness.kind}. ${sample ?? "No radar point selected."}`}
+          : `${playbackLabel}. Radar ${freshness.kind}. ${sampleAnnouncement}`}
       </p>
     </div>
   );

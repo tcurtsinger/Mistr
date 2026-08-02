@@ -57,6 +57,24 @@ describe("radar chrome model", () => {
     expect(playbackPresentation({ playing: true }, 4, 20)).toBe("PLAYING");
   });
 
+  it("distinguishes a usable live scan from recent-history loading", () => {
+    expect(playbackPresentation({ playing: false }, 0, 1, "loading"))
+      .toBe("LOADING RECENT");
+    expect(playbackPresentation({ playing: false }, 0, 1, "partial"))
+      .toBe("WAITING FOR NEXT SCAN");
+    expect(playbackPresentation({ playing: false }, 0, 1, "full"))
+      .toBe("WAITING FOR NEXT SCAN");
+    expect(playbackPresentation({ playing: false }, 0, 1))
+      .toBe("PAUSED · NEWEST");
+  });
+
+  it("preserves two-or-more-frame playback labels while live history fills", () => {
+    expect(playbackPresentation({ playing: false }, 1, 2, "loading"))
+      .toBe("PAUSED · NEWEST");
+    expect(playbackPresentation({ playing: false }, 0, 2, "partial")).toBe("PAUSED");
+    expect(playbackPresentation({ playing: true }, 0, 2, "loading")).toBe("PLAYING");
+  });
+
   it("keeps active playback stable through routine GPU paint waits", () => {
     expect(playbackPresentation({
       playing: true,
@@ -74,6 +92,7 @@ describe("radar chrome model", () => {
 
   it("turns internal startup stages into visible product-language progress", () => {
     expect(radarInitializationLabel("OPENING RESIDENT LOOP")).toBe("OPENING RADAR HISTORY");
+    expect(radarInitializationLabel("LOADING NEWEST SAFE SCAN")).toBe("LOADING SAFE RADAR");
     expect(radarInitializationLabel("DECODING OBSERVATION 12/20"))
       .toBe("LOADING HISTORY 12/20");
     expect(radarInitializationLabel(undefined)).toBe("READYING DISPLAY");
@@ -106,10 +125,19 @@ describe("radar chrome model", () => {
     expect(() => userFacingRadarError("live_unavailable", "bad")).toThrow("supported NEXRAD site");
   });
 
-  it("makes a partial rolling live loop explicit without hiding playback position", () => {
-    expect(timelinePosition(0, 1, 20)).toBe("1 / 1 · BUILDING 1/20");
-    expect(timelinePosition(4, 20, 20)).toBe("5 / 20");
-    expect(timelinePosition(4, 20)).toBe("5 / 20");
+  it("makes live history loading and partial availability explicit", () => {
+    expect(timelinePosition(0, 1, 20, "loading"))
+      .toBe("1 / 1 · LOADING RECENT 1/20");
+    expect(timelinePosition(4, 5, 20, "partial"))
+      .toBe("5 / 5 · RECENT 5/20");
+    expect(timelinePosition(4, 20, 20, "full")).toBe("5 / 20");
+    expect(timelinePosition(4, 20, 20, "loading")).toBe("5 / 20");
+  });
+
+  it("does not attach live-history language to archive or empty timelines", () => {
+    expect(timelinePosition(0, 1, 20)).toBe("1 / 1");
+    expect(timelinePosition(0, 1)).toBe("1 / 1");
+    expect(timelinePosition(0, 0, 20, "loading")).toBe("0 / 0");
   });
 
   it("formats longer ages without pretending they are minute-second values", () => {
