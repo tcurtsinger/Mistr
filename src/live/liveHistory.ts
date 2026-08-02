@@ -1,4 +1,5 @@
 import type { RadarSweepCpuModel } from "../radar-renderer/cpuModel";
+import { isSupportedRadarSite } from "../data/radarSites";
 
 export const MAX_LIVE_HISTORY_FRAMES = 20;
 
@@ -6,6 +7,11 @@ export interface LiveHistoryUpdate {
   frames: readonly RadarSweepCpuModel[];
   appended: boolean;
   evictedObservationIds: readonly string[];
+}
+
+export interface LiveHistoryPrependUpdate {
+  frames: readonly RadarSweepCpuModel[];
+  prepended: boolean;
 }
 
 export function beginLiveHistory(
@@ -61,6 +67,49 @@ export function appendLiveHistory(
   };
 }
 
+export function prependLiveHistory(
+  current: readonly RadarSweepCpuModel[],
+  incoming: RadarSweepCpuModel,
+  limit = MAX_LIVE_HISTORY_FRAMES,
+): LiveHistoryPrependUpdate {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_LIVE_HISTORY_FRAMES) {
+    throw new RangeError(`live history limit must be between 1 and ${MAX_LIVE_HISTORY_FRAMES}`);
+  }
+  if (current.length < 1 || current.length > limit) {
+    throw new Error("live history must contain at least one frame and remain within its limit");
+  }
+
+  const rendererGeneration = generationNumber(current[0]);
+  for (let index = 0; index < current.length; index += 1) {
+    const frame = current[index];
+    assertLiveReflectivity(frame);
+    if (generationNumber(frame) !== rendererGeneration) {
+      throw new Error("live history frames must share one renderer generation");
+    }
+    if (index > 0 && frame.observedAtUnixMs <= current[index - 1].observedAtUnixMs) {
+      throw new Error("live history must be strictly chronological");
+    }
+  }
+  assertLiveReflectivity(incoming);
+  assertSameRenderKey(current[0], incoming);
+
+  if (current.some((frame) => frame.observationId === incoming.observationId)) {
+    return { frames: current, prepended: false };
+  }
+  if (current.length >= limit) {
+    throw new Error("live history is already at capacity");
+  }
+  const oldest = current[0];
+  if (incoming.observedAtUnixMs >= oldest.observedAtUnixMs) {
+    throw new Error("incoming backfill observation is not older than resident history");
+  }
+
+  return {
+    frames: [withRendererGeneration(incoming, rendererGeneration), ...current],
+    prepended: true,
+  };
+}
+
 function withRendererGeneration(
   model: RadarSweepCpuModel,
   rendererGeneration: number,
@@ -75,7 +124,7 @@ function assertLiveReflectivity(model: RadarSweepCpuModel): void {
     model.sourceKind !== "nexrad_level2_chunks"
     || model.product !== "reflectivity"
     || model.units !== "dBZ"
-    || !/^K[A-Z0-9]{3}$/.test(model.siteIcao)
+    || !isSupportedRadarSite(model.siteIcao)
   ) {
     throw new Error("live history accepts selected-site Level II reflectivity only");
   }

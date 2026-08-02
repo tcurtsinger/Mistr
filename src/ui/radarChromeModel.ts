@@ -1,3 +1,5 @@
+import { isSupportedRadarSite } from "../data/radarSites";
+
 export interface TimelineFrame {
   observationId: string;
   observedAtUnixMs: number;
@@ -17,24 +19,16 @@ export interface FreshnessPresentation {
   label: string;
 }
 
-export type RadarProduct = "reflectivity" | "storm_relative_velocity";
-
 export interface RendererStatusLike {
   status: string;
   error?: string;
 }
 
-export type LiveDisplayKind = "idle" | "acquiring" | "refreshing" | "painted" | "degraded";
-
-const SITE_PATTERN = /^K[A-Z0-9]{3}$/;
+export type LiveHistoryStatus = "loading" | "partial" | "full";
 
 export function normalizeRadarSite(value: string | null | undefined, fallback = "KTLX"): string {
   const normalized = value?.trim().toUpperCase() ?? "";
-  return SITE_PATTERN.test(normalized) ? normalized : fallback;
-}
-
-export function radarProductLabel(product: RadarProduct): string {
-  return product === "storm_relative_velocity" ? "STORM-RELATIVE VELOCITY" : "REFLECTIVITY";
+  return isSupportedRadarSite(normalized) ? normalized : fallback;
 }
 
 export function rendererFailureMessage(renderer: RendererStatusLike | undefined): string | null {
@@ -47,10 +41,6 @@ export function playbackErrorAfterRendererStatus(
   status: RendererStatusLike["status"],
 ): string | null {
   return status === "painted" ? null : current;
-}
-
-export function playbackInteractionReady(displayKind: LiveDisplayKind): boolean {
-  return displayKind !== "acquiring";
 }
 
 export function paintedFrameIndex(
@@ -69,26 +59,41 @@ export function playbackPresentation(
   playback: PlaybackLike | undefined,
   frameIndex: number,
   frameCount: number,
+  liveHistoryStatus?: LiveHistoryStatus,
 ): string {
   if (playback?.holdReason?.startsWith("GPU_RECOVERY")) return "RECOVERING";
-  if (playback?.holdReason === "AWAITING_GPU_PAINT") return "PAINTING";
   if (playback?.playing) return "PLAYING";
+  if (playback?.holdReason === "AWAITING_GPU_PAINT") return "LOADING SCAN";
+  if (frameCount === 1 && liveHistoryStatus === "loading") return "LOADING RECENT";
+  if (frameCount === 1 && liveHistoryStatus) return "WAITING FOR NEXT SCAN";
   if (frameCount > 0 && frameIndex === frameCount - 1) return "PAUSED · NEWEST";
   return "PAUSED";
+}
+
+export function radarInitializationLabel(stage: string | undefined): string {
+  if (stage === "LOADING NEWEST SAFE SCAN") return "LOADING SAFE RADAR";
+  const progress = stage?.match(/^DECODING OBSERVATION (\d+)\/(\d+)$/);
+  if (progress) return `LOADING HISTORY ${progress[1]}/${progress[2]}`;
+  if (stage === "OPENING RESIDENT LOOP") return "OPENING RADAR HISTORY";
+  return "READYING DISPLAY";
 }
 
 export function timelinePosition(
   frameIndex: number,
   frameCount: number,
   historyCapacity?: number,
+  liveHistoryStatus?: LiveHistoryStatus,
 ): string {
   const position = frameCount > 0 ? `${Math.min(frameIndex + 1, frameCount)} / ${frameCount}` : "0 / 0";
   if (
     historyCapacity === undefined
     || frameCount < 1
     || frameCount >= historyCapacity
+    || liveHistoryStatus === undefined
+    || liveHistoryStatus === "full"
   ) return position;
-  return `${position} · BUILDING ${frameCount}/${historyCapacity}`;
+  const historyLabel = liveHistoryStatus === "loading" ? "LOADING RECENT" : "RECENT";
+  return `${position} · ${historyLabel} ${frameCount}/${historyCapacity}`;
 }
 
 export function freshnessPresentation(
@@ -113,7 +118,9 @@ export function freshnessPresentation(
 }
 
 export function liveFailureLabel(site: string, retrying: boolean): string {
-  if (!SITE_PATTERN.test(site)) throw new Error("failure label requires a supported NEXRAD site");
+  if (!isSupportedRadarSite(site)) {
+    throw new Error("failure label requires a supported NEXRAD site");
+  }
   return retrying ? `RETRYING ${site}` : `${site} UNAVAILABLE`;
 }
 
@@ -125,7 +132,9 @@ export function userFacingRadarError(
   if (area === "map") return "Mistr could not prepare the map. Check your connection and restart Mistr.";
   if (area === "renderer") return "Mistr could not paint radar. Restart Mistr to restore the radar display.";
   if (area === "playback") return "Mistr could not change scans. The last completed scan remains displayed.";
-  if (!site || !SITE_PATTERN.test(site)) throw new Error("live error copy requires a supported NEXRAD site");
+  if (!site || !isSupportedRadarSite(site)) {
+    throw new Error("live error copy requires a supported NEXRAD site");
+  }
   if (area === "live_retrying") {
     return `${site} update failed. The last completed scan remains displayed while Mistr retries.`;
   }

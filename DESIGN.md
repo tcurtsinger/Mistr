@@ -12,13 +12,14 @@ colors:
   day-white: "#F4F7FA"
   quiet-text: "#8F96A8"
   fresh: "#73E6B2"
+  scan-cyan: "#4BDCFF"
 typography:
   display:
-    fontFamily: "Saira Stencil One, Arial Narrow, sans-serif"
-    fontSize: "1.25rem"
-    fontWeight: 400
+    fontFamily: "Barlow Semi Condensed, Segoe UI, sans-serif"
+    fontSize: "1rem"
+    fontWeight: 600
     lineHeight: 1
-    letterSpacing: "0.12em"
+    letterSpacing: "0.06em"
   title:
     fontFamily: "Barlow Semi Condensed, Segoe UI, sans-serif"
     fontSize: "1rem"
@@ -44,9 +45,11 @@ typography:
     lineHeight: 1
     letterSpacing: "0.02em"
 rounded:
+  fine: "2px"
+  small: "6px"
   control: "8px"
-  instrument: "16px"
-  playback: "18px"
+  instrument: "12px"
+  playback: "14px"
 spacing:
   hairline: "4px"
   compact: "8px"
@@ -58,19 +61,19 @@ components:
     backgroundColor: "{colors.instrument-black}"
     textColor: "{colors.day-white}"
     rounded: "{rounded.instrument}"
-    height: "50px"
-    padding: "6px 10px"
+    height: "40px"
+    padding: "4px 6px"
   edge-trigger:
     backgroundColor: "{colors.instrument-black}"
     textColor: "{colors.day-white}"
     rounded: "{rounded.instrument}"
-    size: "48px"
+    size: "40px"
   playback-bar:
     backgroundColor: "{colors.instrument-black}"
     textColor: "{colors.day-white}"
     rounded: "{rounded.playback}"
-    height: "62px"
-    padding: "8px 14px"
+    height: "44px"
+    padding: "4px 9px"
   button-primary:
     backgroundColor: "{colors.cobalt-horizon}"
     textColor: "{colors.day-white}"
@@ -84,7 +87,7 @@ components:
 
 **Creative North Star: "Stormlight Cyclorama"**
 
-Mistr treats the radar as the stage and its small control instruments as a disciplined lighting rig. Matte night surfaces, measured cobalt-to-rose-to-dawn edge light, cue lettering, and precise timecode create atmosphere without turning the application into a science-fiction dashboard. The map remains full-screen and weather remains visually sovereign.
+Mistr treats the radar as the stage and its small control instruments as a disciplined lighting rig. Matte night surfaces, measured cobalt-to-rose-to-dawn edge light, quiet condensed typography, and precise timecode create atmosphere without turning the application into a science-fiction dashboard. The map remains full-screen and weather remains visually sovereign.
 
 The interface uses four stable spatial zones: radar context at the top center, global tools at the left edge, future alerts at the right edge, and time at the bottom center. These zones remain intentionally sparse. A temporary panel may grow from a side trigger, but panels never become movable windows or a collection of independent bubbles.
 
@@ -106,6 +109,7 @@ The palette passes from black night through cobalt and rose into pale dawn, but 
 - **Rose Gather** (`#D24BFF`): the center of the signature light field, used in continuous bounded gradients rather than scattered decoration.
 - **Rose Light** (`#FF7BAE`): brief active emphasis and the transition toward dawn.
 - **Dawn Wash** (`#FFD7E6`): the pale endpoint of the spectrum and a high-luminance edge, never a reading surface.
+- **Scan Cyan** (`#4BDCFF`): transport position, displayed time, and updating state; it identifies instrument activity rather than weather severity.
 
 ### Neutral
 - **Night** (`#050506`): deepest background and empty map surround.
@@ -123,11 +127,11 @@ The palette passes from black night through cobalt and rose into pale dawn, but 
 
 ## Typography
 
-**Display Font:** Saira Stencil One with narrow sans-serif fallbacks
+**Display Font:** Barlow Semi Condensed with Segoe UI fallback
 **Body Font:** Barlow Semi Condensed with Segoe UI fallback
 **Numeric Font:** Recursive with Cascadia Mono and Consolas fallbacks
 
-**Character:** Sparse stencil lettering recalls physical lighting cues and equipment labels. Operational copy and time values remain calm, compact, and immediately readable during long sessions.
+**Character:** A single condensed sans-serif family keeps identity and equipment labels precise without ornamental letterforms. Operational copy and time values remain calm, compact, and immediately readable during long sessions.
 
 ### Hierarchy
 - **Display:** Mistr identity and rare surface identifiers only.
@@ -138,11 +142,11 @@ The palette passes from black night through cobalt and rose into pale dawn, but 
 
 ### Named Rules
 
-**The Cue, Not Costume Rule.** Stencil type marks identity and sequence. Ordinary controls do not inherit it merely to look thematic.
+**The Instrument Type Rule.** Typography earns character through proportion, weight, and spacing rather than novelty letterforms. Identity may be distinctive, but operational copy always reads first.
 
 ## Layout
 
-The map fills the window. The top-center context bar contains only controls that change the radar being viewed: site, product, elevation, and a bounded display selector when needed. It is compact rather than full width.
+The map fills the window. In Alpha, the top-center context bar contains Mistr identity and the one active control that changes the radar being viewed: site. Base reflectivity at the lowest usable tilt is fixed Alpha scope, so it is explained in About rather than presented as inert control-like chrome. Future product, elevation, or bounded display selectors appear only when those choices actually exist.
 
 The site shown in radar context follows the observation that actually painted. While a different site is being acquired, the freshness region names that pending site; the top context does not claim the switch before GPU publication succeeds.
 
@@ -153,7 +157,7 @@ The bottom-center playback bar remains stable regardless of panel state. It cont
 On compact desktop windows, labels collapse before controls. The context bar may reduce its visible labels, while the playback timeline retains the largest flexible share. Displayed time, freshness, and an active dBZ sample remain visible. The map is never converted into a dashboard grid.
 
 ### Spatial Rules
-- **Top changes what:** site, product, elevation, and display context.
+- **Top changes what:** the selected radar site in Alpha; future radar choices only after they become real capabilities.
 - **Left changes the application:** infrequent global tools and settings.
 - **Right explains alerts:** absent until alerts are a real product capability.
 - **Bottom controls when:** playback, measured time, freshness, and inspection value.
@@ -168,17 +172,23 @@ The map is the base plane. Persistent controls use bounded optical glass, a subt
 
 Persistent instruments use one continuous rounded silhouette apiece. Internal groups are separated by spacing and hairlines rather than nested capsules. Side panels use restrained corners only where they detach from the window edge. Avoid bubble chains, circular button stacks, exaggerated pills, and decorative hardware geometry.
 
+Chrome is content-sized rather than viewport-filling. The context and playback bars remain only as long and thick as their operational contents require. Temporary panels use a plain structural border without a decorative vertical accent rail.
+
 ## Components
 
 ### Radar Context Bar
 - Compact and centered near the top edge.
-- Contains Mistr identity plus site, product, elevation, and bounded display controls.
+- Wraps its contents closely rather than claiming unnecessary horizontal or vertical space.
+- Contains Mistr identity plus the single canonical site selector in Alpha.
+- Opens a searchable list of all provider-qualified operational WSR-88D sites, including Alaska, Hawaii, Guam, and Puerto Rico. Test, decommissioned, TDWR, and provider-absent sites are omitted.
 - Uses text, chevrons, and conventional segmented states rather than an icon toolbar.
 
 ### Menu Trigger and Panel
 - One small left-edge trigger with a clear accessible name.
 - Opens a compact, grouped menu over the map without resizing it.
-- Alpha content remains short: site browser, map appearance, application settings, and help/about.
+- When open, close is a conventional small control in the panel's upper-right corner rather than an attached exterior tab.
+- The panel uses a quiet border and no decorative vertical accent rail.
+- Alpha content remains short: recenter and help/about. The site browser is not duplicated here.
 - The panel stops above the playback bar and scrolls internally if future content exceeds its bound.
 
 ### Alert Trigger and Panel
@@ -188,14 +198,15 @@ Persistent instruments use one continuous rounded silhouette apiece. Internal gr
 
 ### Playback Bar
 - One continuous glass instrument centered near the bottom.
+- Bounded to the width needed by time, transport, timeline, freshness, and inspection truth rather than spanning most of a wide viewport.
 - Contains play/pause and a directly clickable/draggable scan timeline; no dedicated visible previous/next buttons.
 - Always exposes displayed scan time, freshness in words and elapsed time, and playback position/state.
 - A focused timeline may respond to arrow keys one observation at a time.
-- While a selected site's live history contains fewer than 20 observations, playback position remains visible and the timeline metadata adds `BUILDING n/20`. Background polling does not replace freshness age or disable already-resident playback.
+- While safe preceding observations are loading, playback position remains visible and the timeline metadata adds `LOADING RECENT n/20`. If the provider cannot supply another predecessor, the settled partial set says `RECENT n/20`; a one-frame set says `WAITING FOR NEXT SCAN`. Background history work does not replace freshness age or disable already-resident playback.
 
 ### Inspection Reticle
 - Appears after a deliberate map click.
-- Uses a precise crosshair/ring on the map while the dBZ value appears in the playback bar.
+- Uses a deliberately tiny crosshair/ring that marks the sampled point without obscuring nearby radar structure; the dBZ value appears in the playback bar.
 - Recomputes the value at the same geographic point whenever a different observation paints; a prior scan's value is never carried forward as current.
 - Dismisses without leaving a persistent tooltip island.
 
@@ -206,6 +217,8 @@ Persistent instruments use one continuous rounded silhouette apiece. Internal gr
 
 ### Status and Recovery
 - Loading, partial history, stale/retrying, graphics recovery, and failure states use established regions in the context or playback bar.
+- Before the first painted scan, the playback area becomes a dedicated preparation state with plain-language progress. It does not show `0 / 0`, `PAUSED`, an active-looking timeline, or an inspection prompt.
+- While a new site loads, a compact notice names both the radar that remains displayed and the pending live site; existing resident playback remains available until the atomic replacement begins.
 - The last trustworthy painted observation remains visible whenever safe.
 - A failed first live acquisition names the unavailable site; a recoverable background failure says `RETRYING SITE` rather than implying that valid painted radar disappeared.
 - Opening a temporary panel moves keyboard focus into its first action. Escape, selection, or explicit close returns focus to the trigger that opened it.

@@ -6,20 +6,25 @@
 
 Mistr retains up to 20 successive safe Level II base-reflectivity observations for one selected NEXRAD site. The history is chronological, GPU resident, directly scrubbable, and owned by one site session. It is not a national mosaic and never combines sites.
 
-## Acquisition cursor
+## Acquisition cursors
 
-The first live request acquires the current qualified observation. After that observation commits to the renderer, its provider volume index and measured start time become the history cursor. Each background request targets the exact next volume-ring slot and requires a newer start time.
+The first live request acquires and paints the current qualified observation. Its provider volume index and measured start time initialize two independent committed cursors:
 
-The cursor advances only after the decoded observation has joined the resident set and the controller has accepted authoritative GPU paint truth. A timeout, decode failure, rejected GPU mutation, site switch, or superseded generation leaves the cursor unchanged, so retry cannot silently skip the observation it failed to publish.
+- the **oldest cursor** drives recent-history backfill by targeting the preceding ring slot and accepting only a strictly older measured start; and
+- the **newest cursor** drives normal live polling by targeting the exact next ring slot and accepting only a strictly newer measured start.
+
+Backfill runs sequentially before future polling so generation cancellation remains unambiguous. Each accepted predecessor is prepended to chronological residency without changing the visible newest observation. Ring index `1` wraps to `999`, but index arithmetic is never treated as time truth: a replaced or wrapped slot must still carry an older measured start.
+
+Each cursor advances only after the decoded observation has joined the resident set and the controller has accepted authoritative GPU paint truth. A timeout, missing predecessor, decode failure, rejected GPU mutation, site switch, or superseded generation leaves the relevant cursor unchanged. Missing older history settles as a truthful partial loop and does not mark the already-painted current radar unavailable.
 
 The existing generation token remains the cancellation authority. Beginning a new generation cancels the old site or poll request. The existing two global cross-IPC credits remain unchanged.
 
 ## Bounded CPU and GPU ownership
 
 - The frontend history limit is exactly 20 observations.
-- A successful update appends one newer observation and evicts at most the oldest one.
+- A successful backfill update prepends one older observation. A future update appends one newer observation and evicts at most the oldest one.
 - Retained observations keep their existing WebGL textures.
-- Only the appended observation is uploaded during an incremental update.
+- Only the added observation is uploaded during an incremental update.
 - At the 20-frame bound, the evicted textures remain available until the selected frame has authoritative paint truth; commit then deletes the evicted resources.
 - Failure rolls back CPU order and visible selection, deletes only the newly uploaded resources, and repaints the prior authoritative observation.
 - A site or product replacement still uses the existing full atomic replacement and a newer renderer generation.
@@ -28,13 +33,13 @@ The incremental transaction briefly owns at most one additional frame beyond the
 
 ## Playback and visible truth
 
-- A one-frame live history is paused and cannot play or scrub yet.
+- A one-frame live history cannot play or scrub yet. While predecessor work is active it says `LOADING RECENT`; once partial history settles it says `WAITING FOR NEXT SCAN`.
 - If paused on newest when a scan arrives, Mistr follows the new scan and remains paused on newest.
 - If paused on an older retained scan, Mistr preserves that inspection position.
 - If that older scan is evicted, Mistr paints the oldest remaining scan rather than pointing at a missing frame.
 - Active playback resumes after the incremental transaction commits.
 - Background polling does not disable resident play or direct scrubbing.
-- The bottom bar shows `BUILDING n/20` while live history is partial.
+- The bottom bar shows `LOADING RECENT n/20` during active backfill and `RECENT n/20` for a settled partial history. At 20 frames, the partial suffix disappears.
 - Displayed time, freshness, site, playback position, and dBZ always follow the observation that actually painted. A newly resident scan is not claimed as displayed while the operator is inspecting an older scan.
 - Recoverable acquisition failure preserves the last painted observation and exposes degraded/error state while retry keeps the same history cursor.
 
@@ -46,10 +51,11 @@ WebGL context loss abandons any uncommitted history mutation and restores its pr
 
 The phase is covered by deterministic frontend and Rust tests plus packaged Windows/WebView2 evidence:
 
-- history ordering, deduplication, exact 20-frame eviction, render-key checks, paused-newest behavior, older-frame preservation, aged-out selection, playback resumption, rollback, cursor bounds, and exact-next volume targeting;
+- history prepend/append ordering, deduplication, exact 20-frame eviction, render-key checks, paused-newest behavior, older-frame preservation, aged-out selection, playback resumption, rollback, cursor bounds, predecessor wrap/time validation, and exact-next volume targeting;
 - a packaged 3840x2160 lifecycle that performs 19 incremental updates against measured archive observations, caps the diagnostic resident set at five to force eviction, scrubs oldest/newest, loses and restores the real WebGL context, then runs the established two 1,000-transition hot-path scenarios;
 - zero long tasks and zero hot-path acquisition or frame uploads in both final Phase 4 scenarios;
 - a packaged real KTLX run that acquires volume 560 and exact-next volume 561, retains both GPU observations, uploads exactly one additional frame, and directly scrubs oldest then newest at 3840x2160;
+- a visible-first packaged backfill gate that paints current radar before loading predecessors, validates strict chronological residency, direct oldest/newest scrub, bounded resources, site supersession, and context recovery;
 - the established two-pass Phase 6 packaged N0S, context-recovery, minimize/restore, and restart gate; and
 - compact 1100x700 layout verification with no document overflow and both floating instruments inside the viewport.
 

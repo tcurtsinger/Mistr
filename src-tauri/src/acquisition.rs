@@ -7,10 +7,10 @@ use chrono::{DateTime, Datelike, Utc};
 use quick_xml::{Reader, events::Event};
 use reqwest::{Client, Url, redirect::Policy};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::future::Future;
 use std::sync::{
-    Arc,
+    Arc, OnceLock,
     atomic::{AtomicU64, Ordering},
 };
 use std::time::Duration;
@@ -24,6 +24,18 @@ const LIST_RESPONSE_LIMIT: usize = 2 * 1024 * 1024;
 const PROVIDER_RESPONSE_LIMIT: usize = 8 * 1024 * 1024;
 const HTTP_TIMEOUT: Duration = Duration::from_secs(15);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+const MAX_INITIAL_VOLUME_PROBES: u64 = 64;
+const RADAR_SITE_CATALOG_JSON: &str = include_str!("../../src/data/radar-sites.json");
+
+#[derive(Debug, Deserialize)]
+struct RadarSiteCatalog {
+    sites: Vec<RadarSiteRecord>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RadarSiteRecord {
+    id: String,
+}
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum AcquisitionError {
@@ -91,6 +103,7 @@ impl S3ObjectMetadata {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct S3ListPage {
     objects: Vec<S3ObjectMetadata>,
+    common_prefixes: Vec<String>,
     is_truncated: bool,
 }
 
@@ -127,19 +140,43 @@ impl PublicRadarClient {
         site: &str,
     ) -> Result<u16, AcquisitionError> {
         validate_site(site)?;
-        let found = rotated_max(999, |offset| async move {
-            let volume_index = u16::try_from(offset + 1)
-                .map_err(|_| AcquisitionError::MalformedResponse("volume index overflow".into()))?;
-            Ok(self
-                .list_realtime_volume_limited(site, volume_index, 1)
-                .await?
-                .first()
-                .map(|object| object.last_modified_unix_ms))
+        // Ask S3 which ring slots currently exist before comparing their
+        // timestamps. Probing all 999 possible slots made sparse or absent
+        // sites take hundreds of requests and tens of seconds to fail.
+        let volume_indices = self.list_realtime_volume_indices(site).await?;
+        let discovery_probes = AtomicU64::new(0);
+        let found = rotated_max(volume_indices.len(), |offset| {
+            let volume_index = volume_indices[offset];
+            let probe_number = discovery_probes.fetch_add(1, Ordering::Relaxed) + 1;
+            async move {
+                if probe_number > MAX_INITIAL_VOLUME_PROBES {
+                    return Err(AcquisitionError::MalformedResponse(
+                        "real-time volume inventory changed during bounded discovery".into(),
+                    ));
+                }
+                Ok(self
+                    .list_realtime_volume_limited(site, volume_index, 1)
+                    .await?
+                    .first()
+                    .map(|object| object.last_modified_unix_ms))
+            }
         })
         .await?;
         found
-            .and_then(|offset| u16::try_from(offset + 1).ok())
+            .map(|offset| volume_indices[offset])
             .ok_or_else(|| AcquisitionError::NoRealtimeVolume(site.into()))
+    }
+
+    async fn list_realtime_volume_indices(&self, site: &str) -> Result<Vec<u16>, AcquisitionError> {
+        validate_site(site)?;
+        let mut url = fixed_url(REALTIME_BASE)?;
+        url.query_pairs_mut()
+            .append_pair("list-type", "2")
+            .append_pair("prefix", &format!("{site}/"))
+            .append_pair("delimiter", "/")
+            .append_pair("max-keys", "1000");
+        let page = parse_s3_list(&self.fetch_bounded(url, LIST_RESPONSE_LIMIT).await?)?;
+        parse_realtime_volume_indices(site, page)
     }
 
     pub async fn list_realtime_volume(
@@ -377,12 +414,22 @@ fn validate_site(site: &str) -> Result<(), AcquisitionError> {
         || !site
             .bytes()
             .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit())
+        || !supported_site_ids().contains(site)
     {
         return Err(AcquisitionError::InvalidSite(
-            "site must be exactly four uppercase ASCII letters/digits".into(),
+            "site must be in Mistr's provider-qualified operational WSR-88D catalog".into(),
         ));
     }
     Ok(())
+}
+
+fn supported_site_ids() -> &'static BTreeSet<String> {
+    static IDS: OnceLock<BTreeSet<String>> = OnceLock::new();
+    IDS.get_or_init(|| {
+        let catalog: RadarSiteCatalog = serde_json::from_str(RADAR_SITE_CATALOG_JSON)
+            .expect("committed radar-site catalog must be valid JSON");
+        catalog.sites.into_iter().map(|site| site.id).collect()
+    })
 }
 
 fn parse_s3_list(bytes: &[u8]) -> Result<S3ListPage, AcquisitionError> {
@@ -397,7 +444,11 @@ fn parse_s3_list(bytes: &[u8]) -> Result<S3ListPage, AcquisitionError> {
     let mut reader = Reader::from_reader(bytes);
     reader.config_mut().trim_text(true);
     let mut objects = Vec::new();
+    let mut common_prefixes = Vec::new();
     let mut pending: Option<PendingObject> = None;
+    let mut in_common_prefix = false;
+    let mut root_started = false;
+    let mut root_closed = false;
     let mut field = Vec::new();
     let mut is_truncated = false;
     loop {
@@ -406,8 +457,17 @@ fn parse_s3_list(bytes: &[u8]) -> Result<S3ListPage, AcquisitionError> {
                 let name = element.local_name();
                 field.clear();
                 field.extend_from_slice(name.as_ref());
-                if name.as_ref() == b"Contents" {
+                if name.as_ref() == b"ListBucketResult" {
+                    if root_started || root_closed {
+                        return Err(AcquisitionError::MalformedResponse(
+                            "S3 XML contains more than one ListBucketResult root".into(),
+                        ));
+                    }
+                    root_started = true;
+                } else if name.as_ref() == b"Contents" {
                     pending = Some(PendingObject::default());
+                } else if name.as_ref() == b"CommonPrefixes" {
+                    in_common_prefix = true;
                 }
             }
             Ok(Event::End(element)) if element.local_name().as_ref() == b"Contents" => {
@@ -446,12 +506,27 @@ fn parse_s3_list(bytes: &[u8]) -> Result<S3ListPage, AcquisitionError> {
                 });
                 field.clear();
             }
+            Ok(Event::End(element)) if element.local_name().as_ref() == b"CommonPrefixes" => {
+                in_common_prefix = false;
+                field.clear();
+            }
+            Ok(Event::End(element)) if element.local_name().as_ref() == b"ListBucketResult" => {
+                if !root_started || root_closed {
+                    return Err(AcquisitionError::MalformedResponse(
+                        "S3 ListBucketResult close without one open root".into(),
+                    ));
+                }
+                root_closed = true;
+                field.clear();
+            }
             Ok(Event::Text(text)) => {
                 let value = text.decode().map_err(|error| {
                     AcquisitionError::MalformedResponse(format!("S3 text decode failed: {error}"))
                 })?;
                 if field.as_slice() == b"IsTruncated" {
                     is_truncated = value.as_ref() == "true";
+                } else if in_common_prefix && field.as_slice() == b"Prefix" {
+                    common_prefixes.push(value.into_owned());
                 } else if let Some(item) = pending.as_mut() {
                     match field.as_slice() {
                         b"Key" => item.key = Some(value.into_owned()),
@@ -476,10 +551,69 @@ fn parse_s3_list(bytes: &[u8]) -> Result<S3ListPage, AcquisitionError> {
             "S3 XML ended inside Contents".into(),
         ));
     }
+    if in_common_prefix {
+        return Err(AcquisitionError::MalformedResponse(
+            "S3 XML ended inside CommonPrefixes".into(),
+        ));
+    }
+    if !root_started || !root_closed {
+        return Err(AcquisitionError::MalformedResponse(
+            "S3 XML ended before ListBucketResult closed".into(),
+        ));
+    }
     Ok(S3ListPage {
         objects,
+        common_prefixes,
         is_truncated,
     })
+}
+
+fn parse_realtime_volume_indices(
+    site: &str,
+    page: S3ListPage,
+) -> Result<Vec<u16>, AcquisitionError> {
+    if page.is_truncated {
+        return Err(AcquisitionError::MalformedResponse(
+            "real-time volume directory exceeds the 999-slot ring".into(),
+        ));
+    }
+    if !page.objects.is_empty() {
+        return Err(AcquisitionError::MalformedResponse(
+            "real-time site directory contains unexpected objects".into(),
+        ));
+    }
+    let expected_prefix = format!("{site}/");
+    let mut indices = page
+        .common_prefixes
+        .into_iter()
+        .map(|prefix| {
+            let value = prefix
+                .strip_prefix(&expected_prefix)
+                .and_then(|value| value.strip_suffix('/'))
+                .ok_or_else(|| {
+                    AcquisitionError::MalformedResponse(format!(
+                        "unexpected real-time volume prefix {prefix:?}"
+                    ))
+                })?;
+            let index = value.parse::<u16>().map_err(|_| {
+                AcquisitionError::MalformedResponse(format!(
+                    "invalid real-time volume prefix {prefix:?}"
+                ))
+            })?;
+            (1..=999).contains(&index).then_some(index).ok_or_else(|| {
+                AcquisitionError::MalformedResponse(format!(
+                    "real-time volume index {index} is outside 1..=999"
+                ))
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    indices.sort_unstable();
+    if indices.windows(2).any(|pair| pair[0] == pair[1]) {
+        return Err(AcquisitionError::MalformedResponse(
+            "real-time volume directory contains duplicate prefixes".into(),
+        ));
+    }
+    Ok(indices)
 }
 
 fn parse_noaa_reflectivity_times(
@@ -667,6 +801,13 @@ mod tests {
   </Contents>
 </ListBucketResult>"#;
 
+    const S3_PREFIX_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+  <IsTruncated>false</IsTruncated>
+  <CommonPrefixes><Prefix>KTLX/337/</Prefix></CommonPrefixes>
+  <CommonPrefixes><Prefix>KTLX/338/</Prefix></CommonPrefixes>
+</ListBucketResult>"#;
+
     #[test]
     fn parses_bounded_s3_inventory() {
         let page = parse_s3_list(S3_XML.as_bytes()).unwrap();
@@ -675,6 +816,51 @@ mod tests {
         assert_eq!(page.objects[0].key, "KTLX/337/20260801-041327-001-S");
         assert_eq!(page.objects[0].etag.as_deref(), Some("abc"));
         assert_eq!(page.objects[0].size_bytes, 2430);
+        assert!(page.common_prefixes.is_empty());
+    }
+
+    #[test]
+    fn parses_realtime_volume_prefixes_without_treating_them_as_objects() {
+        let page = parse_s3_list(S3_PREFIX_XML.as_bytes()).unwrap();
+        assert!(!page.is_truncated);
+        assert!(page.objects.is_empty());
+        assert_eq!(page.common_prefixes, ["KTLX/337/", "KTLX/338/"]);
+        assert_eq!(
+            parse_realtime_volume_indices("KTLX", page).unwrap(),
+            [337, 338]
+        );
+    }
+
+    #[test]
+    fn realtime_volume_directory_fails_closed_on_malformed_inventory() {
+        let page = |prefixes: &[&str], is_truncated| S3ListPage {
+            objects: Vec::new(),
+            common_prefixes: prefixes.iter().map(|value| (*value).into()).collect(),
+            is_truncated,
+        };
+        assert_eq!(
+            parse_realtime_volume_indices("KTLX", page(&[], false)).unwrap(),
+            Vec::<u16>::new()
+        );
+        assert!(parse_realtime_volume_indices("KTLX", page(&["KINX/1/"], false)).is_err());
+        assert!(parse_realtime_volume_indices("KTLX", page(&["KTLX/0/"], false)).is_err());
+        assert!(
+            parse_realtime_volume_indices("KTLX", page(&["KTLX/1/", "KTLX/1/"], false)).is_err()
+        );
+        assert!(parse_realtime_volume_indices("KTLX", page(&["KTLX/1/"], true)).is_err());
+    }
+
+    #[test]
+    fn s3_inventory_fails_closed_when_xml_ends_before_structural_close() {
+        let inside_common_prefix = br#"<ListBucketResult>
+          <IsTruncated>false</IsTruncated>
+          <CommonPrefixes><Prefix>KTLX/1/</Prefix>"#;
+        assert!(parse_s3_list(inside_common_prefix).is_err());
+
+        let before_root_close = br#"<ListBucketResult>
+          <IsTruncated>false</IsTruncated>
+          <CommonPrefixes><Prefix>KTLX/1/</Prefix></CommonPrefixes>"#;
+        assert!(parse_s3_list(before_root_close).is_err());
     }
 
     #[test]
@@ -704,6 +890,17 @@ mod tests {
             ensure_allowed_url(&Url::parse("https://opengeo.ncep.noaa.gov:444/geoserver").unwrap())
                 .is_err()
         );
+    }
+
+    #[test]
+    fn shared_catalog_accepts_operational_non_conus_sites_and_rejects_test_ids() {
+        assert_eq!(supported_site_ids().len(), 155);
+        for site in ["KTLX", "PABC", "PHKI", "PGUA", "TJUA"] {
+            assert!(validate_site(site).is_ok(), "{site} should be supported");
+        }
+        for site in ["KOUN", "FOP1", "TATL", "RKSG", "ABCD"] {
+            assert!(validate_site(site).is_err(), "{site} should be rejected");
+        }
     }
 
     #[tokio::test]
@@ -747,6 +944,33 @@ mod tests {
                 assert_eq!(found, Some(expected), "length {length}, pivot {pivot}");
             }
         }
+    }
+
+    #[tokio::test]
+    async fn dense_ring_search_does_not_degrade_to_linear_request_volume() {
+        use std::cell::Cell;
+
+        let ordered = (1..=999).collect::<Vec<_>>();
+        let pivot = 363;
+        let values = ordered[pivot..]
+            .iter()
+            .chain(ordered[..pivot].iter())
+            .copied()
+            .map(Some)
+            .collect::<Vec<_>>();
+        let probes = Cell::new(0usize);
+        let found = rotated_max(values.len(), |index| {
+            probes.set(probes.get() + 1);
+            std::future::ready(Ok(values[index]))
+        })
+        .await
+        .unwrap();
+        assert_eq!(values[found.unwrap()], Some(999));
+        assert!(
+            probes.get() <= 64,
+            "dense ring used {} probes",
+            probes.get()
+        );
     }
 
     #[tokio::test]

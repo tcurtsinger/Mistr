@@ -19,11 +19,11 @@ export function validateAlphaReadiness(report) {
   }
 
   const keyboard = report?.keyboard;
-  requireGate(failures, keyboard?.menuInitialFocus === "Radar sitesChoose a NEXRAD station", "menu does not move focus into its first action");
+  requireGate(failures, keyboard?.menuInitialFocus?.startsWith("Recenter radar"), "menu does not move focus into its first action");
   requireGate(failures, keyboard?.menuFocusVisible === true, "menu action lacks visible keyboard focus");
   requireGate(failures, keyboard?.menuEscapeClosed === true, "Escape does not close the menu");
   requireGate(failures, keyboard?.menuEscapeReturn === "Open Mistr menu", "menu close does not restore trigger focus");
-  requireGate(failures, keyboard?.contextInitialFocus?.startsWith("KTLX"), "site panel does not move focus into its first site");
+  requireGate(failures, keyboard?.contextInitialFocus === "Search radar sites", "site panel does not move focus into search");
   requireGate(failures, keyboard?.contextFocusVisible === true, "site action lacks visible keyboard focus");
   requireGate(failures, keyboard?.contextEscapeClosed === true, "Escape does not close the site panel");
   requireGate(failures, keyboard?.contextEscapeReturn?.includes("SITE"), "site panel close does not restore selector focus");

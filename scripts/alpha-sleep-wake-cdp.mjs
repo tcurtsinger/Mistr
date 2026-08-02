@@ -131,7 +131,7 @@ async function waitForRadar() {
   const deadline = Date.now() + 120_000;
   while (Date.now() < deadline) {
     if (await evaluate("Boolean(window.__MISTR_PHASE4__ && window.__MISTR_PHASE6__)")) return;
-    const errorText = await evaluate("document.querySelector('.benchmark-error')?.textContent ?? null");
+    const errorText = await evaluate("document.querySelector('.radar-notice[role=alert]')?.textContent ?? null");
     if (errorText) throw new Error(`packaged app failed before sleep/wake: ${errorText}`);
     await delay(250);
   }

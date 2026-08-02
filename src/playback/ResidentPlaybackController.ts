@@ -13,6 +13,7 @@ export interface PlaybackStateSnapshot {
   playheadObservedAtUnixMs?: number;
   transitionCount: number;
   completedCycles: number;
+  residentReplacementPending: boolean;
   holdReason?: string;
 }
 
@@ -31,6 +32,7 @@ export class ResidentPlaybackController {
   private lastReceipt: RadarPaintReceipt | undefined;
   private operation: Promise<RadarPaintReceipt> | null = null;
   private replacementTail: Promise<void> = Promise.resolve();
+  private residentReplacementCount = 0;
   private readonly dwellMs: number;
   private readonly latestDwellMs: number;
 
@@ -82,6 +84,8 @@ export class ResidentPlaybackController {
   ): Promise<RadarPaintReceipt> {
     this.assertActive();
     if (frames.length < 1) throw new Error("playback requires at least one resident frame");
+    this.residentReplacementCount += 1;
+    this.emit();
     const priorReplacement = this.replacementTail;
     let releaseTurn = () => {};
     const turn = new Promise<void>((resolve) => {
@@ -94,6 +98,8 @@ export class ResidentPlaybackController {
         return await this.replaceResidentFramesNow(frames, beforeCommit);
       } finally {
         releaseTurn();
+        this.residentReplacementCount -= 1;
+        this.emit();
       }
     })();
   }
@@ -104,6 +110,8 @@ export class ResidentPlaybackController {
   ): Promise<RadarPaintReceipt> {
     this.assertActive();
     if (frames.length < 1) throw new Error("playback requires at least one resident frame");
+    this.residentReplacementCount += 1;
+    this.emit();
     const priorReplacement = this.replacementTail;
     let releaseTurn = () => {};
     const turn = new Promise<void>((resolve) => {
@@ -116,6 +124,8 @@ export class ResidentPlaybackController {
         return await this.updateResidentHistoryNow(frames, beforeCommit);
       } finally {
         releaseTurn();
+        this.residentReplacementCount -= 1;
+        this.emit();
       }
     })();
   }
@@ -272,16 +282,20 @@ export class ResidentPlaybackController {
 
   async step(): Promise<RadarPaintReceipt> {
     this.assertActive();
+    this.assertResidentInteractionReady();
     await this.pauseAndWait();
+    this.assertResidentInteractionReady();
     return this.advanceOnce();
   }
 
   async scrub(index: number): Promise<RadarPaintReceipt> {
     this.assertActive();
+    this.assertResidentInteractionReady();
+    await this.pauseAndWait();
+    this.assertResidentInteractionReady();
     if (!Number.isInteger(index) || index < 0 || index >= this.frames.length) {
       throw new RangeError(`frame index ${index} is not resident`);
     }
-    await this.pauseAndWait();
     return this.select(this.frames[index].observationId);
   }
 
@@ -293,7 +307,9 @@ export class ResidentPlaybackController {
     if (!Number.isSafeInteger(count) || count < 1 || count > 10_000) {
       throw new RangeError("transition count must be between 1 and 10000");
     }
+    this.assertResidentInteractionReady();
     await this.pauseAndWait();
+    this.assertResidentInteractionReady();
     const receipts: RadarPaintReceipt[] = [];
     for (let transition = 1; transition <= count; transition += 1) {
       const receipt = await this.advanceOnce();
@@ -318,6 +334,7 @@ export class ResidentPlaybackController {
       playheadObservedAtUnixMs: frame?.observedAtUnixMs,
       transitionCount: this.transitionCount,
       completedCycles: this.completedCycles,
+      residentReplacementPending: this.residentReplacementCount > 0,
       holdReason: this.operation ? "AWAITING_GPU_PAINT" : undefined,
       ...(renderer.recovery.phase !== "ready"
         ? { holdReason: `GPU_RECOVERY_${renderer.recovery.phase.toUpperCase()}` }
@@ -419,6 +436,12 @@ export class ResidentPlaybackController {
 
   private assertActive() {
     if (this.disposed) throw new Error("playback controller is disposed");
+  }
+
+  private assertResidentInteractionReady() {
+    if (this.residentReplacementCount > 0) {
+      throw new Error("resident radar history is being replaced");
+    }
   }
 }
 

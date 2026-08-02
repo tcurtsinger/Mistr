@@ -36,13 +36,16 @@ The product earns additional capabilities only when they improve live storm insp
 ### Alpha v1
 
 - Installable Windows desktop application named Mistr.
-- One selected NEXRAD site at a time, with a simple site-selection workflow.
+- One selected operational WSR-88D site at a time, chosen from the provider-qualified 155-site catalog with a searchable workflow. Test, decommissioned, TDWR, and provider-absent identifiers are excluded.
 - Live high-resolution base reflectivity.
 - Smooth map pan and zoom.
 - A bounded recent-observation loop with play, pause, and direct timeline scrubbing. Focused timeline arrow-key movement may be supported without adding dedicated previous/next buttons.
 - Clear measured time, freshness, loading, stale, recovery, and failure state.
 - The visible timeline follows a completed GPU paint, not merely a request or selected frame.
 - The last genuinely painted observation remains visible while newer data loads or a recoverable failure is handled.
+- The newest bundled archive observation establishes a safe first paint without decoding the entire diagnostic loop; every launch then proceeds automatically to current live radar for the stored site or KTLX on a fresh profile.
+- Current live radar paints before history backfill. Mistr then loads safe preceding observations into a bounded recent loop and only afterward waits for exact-next future volumes.
+- Existing resident playback and scrubbing remain usable while a different site's network/decode work is staged; only the bounded atomic GPU replacement may hold transport briefly.
 - Automatic cancellation of superseded site/data work and bounded ownership of network, CPU, IPC, and GPU resources.
 - Deterministic fixture, packaged-runtime, performance, and recovery validation remains part of the product engineering contract even when those diagnostics are absent from the normal interface.
 
@@ -72,7 +75,7 @@ The product earns additional capabilities only when they improve live storm insp
 
 ## Evidence on Hand
 
-- The existing repository proves strict Level II acquisition/decoding, exact-next rolling live polling, bounded binary IPC, incremental GPU-resident history and playback, live progressive publication, cancellation, Level III `N0S` parity, and visible-first WebGL recovery.
+- The existing repository proves strict Level II acquisition/decoding, bounded predecessor backfill plus exact-next rolling live polling, bounded binary IPC, incremental GPU-resident history and playback, live progressive publication, cancellation, Level III `N0S` parity, and visible-first WebGL recovery.
 - Pinned public-data fixtures and expected results live under `fixtures/`.
 - Architecture and accepted engineering decisions live under `docs/`, including the packed wire, GPU renderer, resident playback, live freshness/fallback, and recovery records.
 - Packaged Windows validation scripts reproduce critical WebView2, 4K, performance, lifecycle, and recovery behavior.

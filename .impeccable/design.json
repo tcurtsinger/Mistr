@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-08-01T19:00:00Z",
+  "generatedAt": "2026-08-02T16:30:00Z",
   "title": "Design System: Mistr",
   "extensions": {
     "colorMeta": {
@@ -10,10 +10,11 @@
       "rose-gather": { "role": "secondary", "displayName": "Rose Gather", "canonical": "#D24BFF", "tonalRamp": ["#66207F", "#D24BFF", "#E6A2FF"] },
       "rose-light": { "role": "secondary", "displayName": "Rose Light", "canonical": "#FF7BAE", "tonalRamp": ["#8F3659", "#FF7BAE", "#FFB8D1"] },
       "dawn-wash": { "role": "secondary", "displayName": "Dawn Wash", "canonical": "#FFD7E6", "tonalRamp": ["#8C747D", "#FFD7E6", "#FFF0F5"] },
-      "fresh": { "role": "tertiary", "displayName": "Fresh", "canonical": "#73E6B2", "tonalRamp": ["#2A7557", "#73E6B2", "#B8F5D8"] }
+      "fresh": { "role": "tertiary", "displayName": "Fresh", "canonical": "#73E6B2", "tonalRamp": ["#2A7557", "#73E6B2", "#B8F5D8"] },
+      "scan-cyan": { "role": "tertiary", "displayName": "Scan Cyan", "canonical": "#4BDCFF", "tonalRamp": ["#0A5F78", "#4BDCFF", "#BCEFFF"] }
     },
     "typographyMeta": {
-      "display": { "displayName": "Cue Display", "purpose": "Mistr identity and rare sequence markers only." },
+      "display": { "displayName": "Instrument Display", "purpose": "Mistr identity and concise panel titles without novelty letterforms." },
       "body": { "displayName": "Operational Body", "purpose": "Readable interface and recovery copy." },
       "label": { "displayName": "Cue Label", "purpose": "Short uppercase equipment labels." },
       "numeric": { "displayName": "Measured Readout", "purpose": "Tabular time, freshness, position, and dBZ values." }
@@ -36,9 +37,9 @@
       "name": "Radar Context Bar",
       "kind": "nav",
       "refersTo": "context-bar",
-      "description": "The compact top-center control for what radar is displayed.",
-      "html": "<nav class=\"ds-context\"><strong>MISTR</strong><button>KTLX</button><button>REFLECTIVITY</button><button>0.5&deg;</button></nav>",
-      "css": ".ds-context{height:50px;padding:6px 10px;border-radius:16px;background:rgba(8,11,18,.88);color:#F4F7FA;border:1px solid rgba(255,255,255,.16);box-shadow:0 12px 36px rgba(0,0,0,.44);backdrop-filter:blur(14px);display:flex;align-items:center;gap:6px}.ds-context strong{font:400 16px 'Saira Stencil One',sans-serif;letter-spacing:.12em;padding:0 10px}.ds-context button{height:36px;padding:0 12px;border:0;border-left:1px solid rgba(255,255,255,.1);background:transparent;color:#F4F7FA;font:600 12px 'Barlow Semi Condensed',sans-serif;letter-spacing:.08em}.ds-context button:hover,.ds-context button:focus-visible{background:linear-gradient(90deg,rgba(10,43,255,.22),rgba(210,75,255,.14));outline:none}"
+      "description": "The compact top-center identity and canonical searchable site selector.",
+      "html": "<nav class=\"ds-context\"><strong>Mistr</strong><button>SITE KTLX</button></nav>",
+      "css": ".ds-context{height:40px;padding:4px 6px;border-radius:12px;background:rgba(8,11,18,.88);color:#F4F7FA;border:1px solid rgba(255,255,255,.16);box-shadow:0 10px 28px rgba(0,0,0,.44);backdrop-filter:blur(14px);display:flex;align-items:center;gap:4px}.ds-context strong{font:600 14px 'Barlow Semi Condensed',sans-serif;letter-spacing:.08em;padding:0 9px}.ds-context button{height:30px;padding:0 10px;border:0;border-left:1px solid rgba(255,255,255,.1);background:transparent;color:#F4F7FA;font:600 11px 'Barlow Semi Condensed',sans-serif;letter-spacing:.08em}.ds-context button:hover,.ds-context button:focus-visible{background:rgba(255,255,255,.055);outline:none}"
     },
     {
       "name": "Menu Trigger",
@@ -46,14 +47,21 @@
       "refersTo": "edge-trigger",
       "description": "The single small trigger for global application tools.",
       "html": "<button class=\"ds-menu-trigger\" aria-label=\"Open Mistr menu\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M5 7h14M5 12h14M5 17h14\"/></svg></button>",
-      "css": ".ds-menu-trigger{width:48px;height:48px;border-radius:16px;border:1px solid rgba(255,255,255,.16);background:rgba(8,11,18,.88);color:#F4F7FA;box-shadow:0 12px 36px rgba(0,0,0,.44);backdrop-filter:blur(14px)}.ds-menu-trigger svg{width:21px;fill:none;stroke:currentColor;stroke-width:1.5}.ds-menu-trigger:hover,.ds-menu-trigger:focus-visible{border-color:#D24BFF;box-shadow:0 0 18px rgba(210,75,255,.22);outline:none}"
+      "css": ".ds-menu-trigger{width:40px;height:40px;border-radius:12px;border:1px solid rgba(255,255,255,.16);background:rgba(8,11,18,.88);color:#F4F7FA;box-shadow:0 10px 28px rgba(0,0,0,.44);backdrop-filter:blur(14px)}.ds-menu-trigger svg{width:18px;fill:none;stroke:currentColor;stroke-width:1.5}.ds-menu-trigger:hover,.ds-menu-trigger:focus-visible{background:rgba(15,18,29,.94);outline:none}"
     },
     {
       "name": "Compact Tool Menu",
       "kind": "custom",
-      "description": "A grouped temporary menu growing from the left trigger.",
-      "html": "<aside class=\"ds-tool-menu\"><p>MISTR</p><button>RADAR SITES</button><button>MAP APPEARANCE</button><button>SETTINGS</button><button>HELP &amp; ABOUT</button></aside>",
-      "css": ".ds-tool-menu{width:260px;padding:12px;border-radius:16px;background:#080B12;color:#F4F7FA;border:1px solid rgba(255,255,255,.14);box-shadow:0 20px 50px rgba(0,0,0,.52)}.ds-tool-menu p{margin:6px 8px 12px;color:#8F96A8;font:500 11px 'Barlow Condensed',sans-serif;letter-spacing:.16em}.ds-tool-menu button{width:100%;padding:12px;border:0;border-top:1px solid rgba(255,255,255,.08);background:transparent;color:#F4F7FA;text-align:left;font:500 13px 'Barlow Semi Condensed',sans-serif;letter-spacing:.05em}.ds-tool-menu button:hover,.ds-tool-menu button:focus-visible{background:linear-gradient(90deg,rgba(10,43,255,.2),rgba(210,75,255,.12));outline:none}"
+      "description": "A compact grouped temporary menu with a conventional internal close control and no decorative accent rail.",
+      "html": "<aside class=\"ds-tool-menu\"><header><strong>Menu</strong><button aria-label=\"Close Mistr menu\">&times;</button></header><button>Recenter radar</button><button>About Mistr</button></aside>",
+      "css": ".ds-tool-menu{width:286px;padding:14px;border-radius:14px;background:rgba(8,11,18,.98);color:#F4F7FA;border:1px solid rgba(255,255,255,.14);box-shadow:0 18px 44px rgba(0,0,0,.54)}.ds-tool-menu header{display:flex;align-items:center;justify-content:space-between}.ds-tool-menu strong{font:600 16px 'Barlow Semi Condensed',sans-serif;letter-spacing:.035em}.ds-tool-menu button{width:100%;min-height:50px;padding:8px;border:0;border-top:1px solid rgba(255,255,255,.08);background:transparent;color:#F4F7FA;text-align:left;font:500 13px 'Barlow Semi Condensed',sans-serif}.ds-tool-menu button:hover,.ds-tool-menu button:focus-visible{background:rgba(255,255,255,.055);outline:none}"
+    },
+    {
+      "name": "Radar Site Browser",
+      "kind": "custom",
+      "description": "The single searchable browser for all 155 provider-qualified operational WSR-88D sites.",
+      "html": "<aside class=\"ds-site-browser\"><header><strong>Radar sites</strong><small>155 WSR-88D STATIONS</small></header><input type=\"search\" aria-label=\"Search radar sites\" placeholder=\"Search ID or place\"><button>KTLX <small>Oklahoma City, OK</small></button></aside>",
+      "css": ".ds-site-browser{width:360px;max-height:calc(100vh - 154px);overflow:auto;padding:14px;border-radius:14px;background:rgba(8,11,18,.98);color:#F4F7FA;border:1px solid rgba(255,255,255,.14);box-shadow:0 18px 44px rgba(0,0,0,.54)}.ds-site-browser header{display:grid;gap:4px}.ds-site-browser input{height:36px;margin:12px 0 8px;padding:0 12px;border:1px solid rgba(255,255,255,.14);border-radius:9px;background:#050506;color:#F4F7FA}.ds-site-browser button{width:100%;min-height:50px;border:0;border-top:1px solid rgba(255,255,255,.08);background:transparent;color:#F4F7FA;text-align:left}"
     },
     {
       "name": "Playback Bar",
@@ -61,7 +69,7 @@
       "refersTo": "playback-bar",
       "description": "The stable bottom-center control for observation time and playback truth.",
       "html": "<section class=\"ds-playback\"><button aria-label=\"Play radar loop\">&#9654;</button><input aria-label=\"Displayed scan\" type=\"range\"><output>12:29:26 CDT · PAUSED · FRESH 00:41</output></section>",
-      "css": ".ds-playback{min-height:62px;padding:8px 15px;border-radius:18px;background:rgba(8,11,18,.88);color:#F4F7FA;border:1px solid rgba(255,255,255,.16);box-shadow:0 14px 40px rgba(0,0,0,.48);backdrop-filter:blur(14px);display:flex;align-items:center;gap:14px}.ds-playback:before{content:'';position:absolute;inset:0;border-radius:inherit;padding:1px;background:linear-gradient(90deg,#0A2BFF,#D24BFF,#FFD7E6);opacity:.48;pointer-events:none}.ds-playback input{flex:1;accent-color:#D24BFF}.ds-playback button{background:#0A2BFF;color:#F4F7FA;border:0;border-radius:8px;width:40px;height:40px}.ds-playback button:focus-visible{outline:2px solid #FFD7E6;outline-offset:2px}"
+      "css": ".ds-playback{width:min(960px,calc(100vw - 96px));min-height:44px;padding:4px 9px;border-radius:14px;background:rgba(8,11,18,.88);color:#F4F7FA;border:1px solid rgba(255,255,255,.16);box-shadow:0 10px 28px rgba(0,0,0,.44);backdrop-filter:blur(14px);display:flex;align-items:center;gap:10px}.ds-playback:before{content:'';position:absolute;inset:0;border-radius:inherit;padding:1px;background:linear-gradient(90deg,#0A2BFF,#D24BFF,#FFD7E6);opacity:.48;pointer-events:none}.ds-playback input{flex:1;accent-color:#D24BFF}.ds-playback button{background:rgba(6,25,36,.82);color:#4BDCFF;border:1px solid rgba(71,211,255,.46);border-radius:50%;width:34px;height:34px}.ds-playback button:focus-visible{outline:2px solid #FFD7E6;outline-offset:2px}"
     },
     {
       "name": "Measured Readout",
@@ -75,7 +83,7 @@
       "kind": "custom",
       "description": "A map crosshair paired with a playback-bar dBZ readout rather than a floating tooltip.",
       "html": "<span class=\"ds-reticle\" aria-label=\"Selected radar sample\"></span>",
-      "css": ".ds-reticle{display:block;width:28px;height:28px;border:1px solid #F4F7FA;border-radius:50%;position:relative;filter:drop-shadow(0 0 4px rgba(0,0,0,.9))}.ds-reticle:before,.ds-reticle:after{content:'';position:absolute;background:#F4F7FA}.ds-reticle:before{width:42px;height:1px;left:-7px;top:13px}.ds-reticle:after{width:1px;height:42px;left:13px;top:-7px}"
+      "css": ".ds-reticle{display:block;width:14px;height:14px;border:1px solid #F4F7FA;border-radius:50%;position:relative;filter:drop-shadow(0 1px 2px rgba(0,0,0,.95))}.ds-reticle:before,.ds-reticle:after{content:'';position:absolute;background:#F4F7FA}.ds-reticle:before{width:22px;height:1px;left:-5px;top:6px}.ds-reticle:after{width:1px;height:22px;left:6px;top:-5px}"
     }
   ],
   "narrative": {
@@ -85,9 +93,9 @@
     "rules": [
       { "name": "The Weather Separation Rule", "body": "Cyclorama color never overlays radar pixels or imitates weather severity.", "section": "colors" },
       { "name": "The One Panel Rule", "body": "Only one side panel may be open and it never resizes the map.", "section": "elevation" },
-      { "name": "The Cue, Not Costume Rule", "body": "Stencil type is reserved for identity and rare sequence markers.", "section": "typography" }
+      { "name": "The Instrument Type Rule", "body": "Typography earns character through proportion, weight, and spacing rather than novelty letterforms.", "section": "typography" }
     ],
-    "dos": ["Keep each spatial zone responsible for one class of task.", "Keep the playback bar stationary.", "Keep temporary menus short and grouped."],
-    "donts": ["Do not build a permanent sidebar.", "Do not add chains of side buttons.", "Do not show alerts before alerts exist.", "Do not wash radar with decorative color."]
+    "dos": ["Keep each spatial zone responsible for one class of task.", "Keep the playback bar stationary.", "Keep the canonical site browser searchable.", "Keep temporary menus short and grouped."],
+    "donts": ["Do not build a permanent sidebar.", "Do not duplicate the site picker.", "Do not present fixed product or tilt facts as controls.", "Do not add chains of side buttons.", "Do not show alerts before alerts exist.", "Do not wash radar with decorative color."]
   }
 }

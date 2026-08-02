@@ -154,7 +154,7 @@ async function waitForPhase4Api() {
     const ready = await evaluate("Boolean(window.__MISTR_PHASE4__)");
     if (ready) return;
     const errorText = await evaluate(
-      "document.querySelector('.benchmark-error')?.textContent ?? null",
+      "document.querySelector('.radar-notice[role=alert]')?.textContent ?? null",
     );
     if (errorText) throw new Error(`packaged app failed before residency: ${errorText}`);
     await delay(250);

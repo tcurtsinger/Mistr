@@ -18,6 +18,8 @@ try {
   await evaluate("localStorage.clear(); location.reload()", false);
   await delay(1_000);
   await waitForArchive();
+  await evaluate("window.__MISTR_PHASE4__.prepareArchive()", true, 30_000);
+  await evaluate("window.__MISTR_PHASE4__.pause()");
   const report = await evaluate(`(()=>({
     phase4:window.__MISTR_PHASE4__.report(),
     phase5:window.__MISTR_PHASE5__.report(),

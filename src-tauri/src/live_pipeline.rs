@@ -162,7 +162,7 @@ pub struct LiveSweepSession {
     token: GenerationToken,
     site: String,
     target_volume_index: u16,
-    minimum_started_exclusive: i64,
+    volume_time_constraint: VolumeTimeConstraint,
     selected_started_at: Option<i64>,
     assembler: ChunkAssembler,
     downloaded_keys: BTreeSet<String>,
@@ -204,9 +204,9 @@ impl LiveSweepSession {
             site,
             target_volume_index,
             if fresh_only {
-                latest_started
+                VolumeTimeConstraint::StrictlyAfter(latest_started)
             } else {
-                latest_started.saturating_sub(1)
+                VolumeTimeConstraint::Exact(latest_started)
             },
             (!fresh_only).then_some(latest_started),
             counters_at_start,
@@ -230,7 +230,30 @@ impl LiveSweepSession {
             token,
             site,
             next_volume_index(volume_index),
-            volume_started_at_unix_ms,
+            VolumeTimeConstraint::StrictlyAfter(volume_started_at_unix_ms),
+            None,
+            counters_at_start,
+        )
+    }
+
+    pub async fn start_before(
+        client: PublicRadarClient,
+        token: GenerationToken,
+        site: &str,
+        volume_index: u16,
+        volume_started_at_unix_ms: i64,
+    ) -> Result<Self, LivePipelineError> {
+        token.ensure_current()?;
+        if !(1..=999).contains(&volume_index) || volume_started_at_unix_ms <= 0 {
+            return Err(LivePipelineError::InvalidHistoryCursor);
+        }
+        let counters_at_start = client.counters();
+        Self::from_target(
+            client,
+            token,
+            site,
+            previous_volume_index(volume_index),
+            VolumeTimeConstraint::StrictlyBefore(volume_started_at_unix_ms),
             None,
             counters_at_start,
         )
@@ -241,7 +264,7 @@ impl LiveSweepSession {
         token: GenerationToken,
         site: &str,
         target_volume_index: u16,
-        minimum_started_exclusive: i64,
+        volume_time_constraint: VolumeTimeConstraint,
         selected_started_at: Option<i64>,
         counters_at_start: AcquisitionCounters,
     ) -> Result<Self, LivePipelineError> {
@@ -250,7 +273,7 @@ impl LiveSweepSession {
             token: token.clone(),
             site: site.into(),
             target_volume_index,
-            minimum_started_exclusive,
+            volume_time_constraint,
             selected_started_at,
             assembler: ChunkAssembler::new(token.generation(), site)?,
             downloaded_keys: BTreeSet::new(),
@@ -379,7 +402,10 @@ impl LiveSweepSession {
             .into_iter()
             .filter_map(|object| {
                 let chunk = object.as_realtime_chunk(&self.site).ok()?;
-                if chunk.volume_started_at_unix_ms <= self.minimum_started_exclusive {
+                if !self
+                    .volume_time_constraint
+                    .accepts(chunk.volume_started_at_unix_ms)
+                {
                     return None;
                 }
                 if let Some(selected) = self.selected_started_at
@@ -391,7 +417,10 @@ impl LiveSweepSession {
             })
             .collect::<Vec<_>>();
         if self.selected_started_at.is_none()
-            && let Some(started) = candidates.iter().map(|(_, _, started)| *started).max()
+            && let Some(started) = select_volume_start(
+                self.volume_time_constraint,
+                candidates.iter().map(|(_, _, started)| *started),
+            )
         {
             self.selected_started_at = Some(started);
             candidates.retain(|(_, _, candidate)| *candidate == started);
@@ -536,6 +565,37 @@ struct SweepFingerprint {
     azimuths: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum VolumeTimeConstraint {
+    Exact(i64),
+    StrictlyAfter(i64),
+    StrictlyBefore(i64),
+}
+
+impl VolumeTimeConstraint {
+    fn accepts(self, started_at_unix_ms: i64) -> bool {
+        match self {
+            Self::Exact(expected) => started_at_unix_ms == expected,
+            Self::StrictlyAfter(boundary) => started_at_unix_ms > boundary,
+            Self::StrictlyBefore(boundary) => started_at_unix_ms < boundary,
+        }
+    }
+}
+
+fn select_volume_start(
+    constraint: VolumeTimeConstraint,
+    candidates: impl IntoIterator<Item = i64>,
+) -> Option<i64> {
+    // A ring prefix should normally contain one measured volume. If provider
+    // rollover briefly leaves more than one, choose the newest eligible start:
+    // the current exact volume, the newest newer replacement for forward
+    // compatibility, or the closest older predecessor for backfill.
+    candidates
+        .into_iter()
+        .filter(|started| constraint.accepts(*started))
+        .max()
+}
+
 impl SweepFingerprint {
     fn from_output(output: &DecodeOutput) -> Self {
         Self {
@@ -548,6 +608,10 @@ impl SweepFingerprint {
 
 fn next_volume_index(index: u16) -> u16 {
     if index == 999 { 1 } else { index + 1 }
+}
+
+fn previous_volume_index(index: u16) -> u16 {
+    if index == 1 { 999 } else { index - 1 }
 }
 
 fn subtract_counters(
@@ -598,6 +662,8 @@ mod tests {
     fn volume_index_wrap_is_explicit() {
         assert_eq!(next_volume_index(998), 999);
         assert_eq!(next_volume_index(999), 1);
+        assert_eq!(previous_volume_index(2), 1);
+        assert_eq!(previous_volume_index(1), 999);
     }
 
     #[tokio::test]
@@ -615,7 +681,10 @@ mod tests {
         .unwrap();
 
         assert_eq!(session.target_volume_index, 1);
-        assert_eq!(session.minimum_started_exclusive, 1_800_000_000_000);
+        assert_eq!(
+            session.volume_time_constraint,
+            VolumeTimeConstraint::StrictlyAfter(1_800_000_000_000)
+        );
         assert!(session.selected_started_at.is_none());
         assert_eq!(
             LiveSweepSession::start_after(
@@ -628,6 +697,78 @@ mod tests {
             .await
             .unwrap_err(),
             LivePipelineError::InvalidHistoryCursor,
+        );
+    }
+
+    #[tokio::test]
+    async fn history_cursor_targets_the_exact_previous_volume_with_wrap() {
+        let clock = GenerationClock::default();
+        let token = clock.begin(11).unwrap();
+        let session = LiveSweepSession::start_before(
+            PublicRadarClient::new().unwrap(),
+            token.clone(),
+            "KEWX",
+            1,
+            1_800_000_000_000,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(session.target_volume_index, 999);
+        assert_eq!(
+            session.volume_time_constraint,
+            VolumeTimeConstraint::StrictlyBefore(1_800_000_000_000)
+        );
+        assert!(session.selected_started_at.is_none());
+        assert_eq!(
+            LiveSweepSession::start_before(
+                PublicRadarClient::new().unwrap(),
+                token,
+                "KEWX",
+                1000,
+                1_800_000_000_000,
+            )
+            .await
+            .unwrap_err(),
+            LivePipelineError::InvalidHistoryCursor,
+        );
+    }
+
+    #[test]
+    fn predecessor_selection_is_strictly_older_and_chooses_closest_start() {
+        let boundary = 1_800_000_000_000;
+        assert_eq!(
+            select_volume_start(
+                VolumeTimeConstraint::StrictlyBefore(boundary),
+                [boundary - 10_000, boundary, boundary + 10_000, boundary - 1],
+            ),
+            Some(boundary - 1)
+        );
+        assert_eq!(
+            select_volume_start(
+                VolumeTimeConstraint::StrictlyBefore(boundary),
+                [boundary, boundary + 1],
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn forward_and_exact_selection_retain_existing_time_semantics() {
+        let boundary = 1_800_000_000_000;
+        assert_eq!(
+            select_volume_start(
+                VolumeTimeConstraint::StrictlyAfter(boundary),
+                [boundary - 1, boundary, boundary + 1, boundary + 2],
+            ),
+            Some(boundary + 2)
+        );
+        assert_eq!(
+            select_volume_start(
+                VolumeTimeConstraint::Exact(boundary),
+                [boundary - 1, boundary, boundary + 1],
+            ),
+            Some(boundary)
         );
     }
 
@@ -705,7 +846,7 @@ mod tests {
             token,
             site: "KTLX".into(),
             target_volume_index: 1,
-            minimum_started_exclusive: 0,
+            volume_time_constraint: VolumeTimeConstraint::StrictlyAfter(0),
             selected_started_at: None,
             assembler: ChunkAssembler::new(1, "KTLX").unwrap(),
             downloaded_keys: BTreeSet::new(),

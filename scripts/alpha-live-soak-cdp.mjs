@@ -4,7 +4,7 @@ import { CdpClient, fetchJsonWithTimeout, openWebSocketWithTimeout } from "./cdp
 import { validateAlphaLiveSoak } from "./alpha-live-soak-validation.mjs";
 
 const port = Number(process.env.MISTR_CDP_PORT ?? 9341);
-const targetFrames = Number(process.env.MISTR_ALPHA_SOAK_FRAMES ?? 4);
+const targetFrames = Number(process.env.MISTR_ALPHA_SOAK_FRAMES ?? 20);
 const timeoutSeconds = Number(process.env.MISTR_ALPHA_SOAK_TIMEOUT_SECONDS ?? 2_700);
 const output = resolve(process.env.MISTR_ALPHA_SOAK_OUTPUT ?? "artifacts/alpha-release/live-soak");
 if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) throw new Error("invalid CDP port");
@@ -22,6 +22,15 @@ try {
   await call("Runtime.enable");
   await call("Page.enable");
   await waitForRadar();
+  const startup = await evaluate(`(()=>{
+    const phase4=window.__MISTR_PHASE4__.report();
+    return {
+      firstPaintMs:phase4.renderer?.paintReceipt?.completedAtUnixMs-performance.timeOrigin,
+      preparedArchiveFrameCount:phase4.frames?.count,
+      diskReads:phase4.activityAtResidency?.diskReads,
+      bodyText:document.body.innerText
+    };
+  })()`);
   await evaluate("window.__MISTR_PHASE4__.prepareArchive()", true, 30_000);
   await evaluate("window.__MISTR_PHASE4__.pause()");
   const windowInfo = await call("Browser.getWindowForTarget", { targetId: target.id });
@@ -33,10 +42,9 @@ try {
   await delay(1_000);
 
   const archiveUploads = await evaluate("window.__MISTR_PHASE4__.report().renderer.metrics.frameUploadCount");
-  await selectSite("KOUN");
-  await delay(75);
-  const pendingTruth = await surfaceTruth();
-  await delay(175);
+  await evaluate(`window.__MISTR_PHASE5__.setHistoryLimitForDiagnostics(${targetFrames})`);
+  await selectSite("KINX");
+  const pendingTruth = await waitForPendingSite("KINX");
   await selectSite("KTLX");
 
   const historyEvents = [];
@@ -53,6 +61,7 @@ try {
         history:live.history,
         evidence:live.evidence,
         receipt:live.receipt,
+        historyUpdate:live.historyUpdate,
         renderer:phase4.renderer,
         playback:phase4.playback,
         freshness:document.querySelector('.freshness')?.textContent?.trim(),
@@ -63,16 +72,14 @@ try {
     if (snapshot.error && !snapshot.error.includes("cancel")) fatalErrors.push(snapshot.error);
     if (snapshot.displayKind === "degraded") degradedSamples += 1;
     const count = snapshot.history?.residentCount ?? snapshot.renderer?.metrics?.residentFrameCount ?? 0;
-    if (count > lastCount && snapshot.evidence?.safe?.site === "KTLX") {
-      if (count !== lastCount + 1) {
-        fatalErrors.push(`history count jumped from ${lastCount} to ${count}`);
-      }
+    const historyEvidence = snapshot.historyUpdate?.evidence ?? snapshot.evidence;
+    if (count > lastCount && historyEvidence?.safe?.site === "KTLX") {
       historyEvents.push({
         residentCount: count,
-        site: snapshot.evidence.safe.site,
-        observationId: snapshot.evidence.observationId,
-        volumeIndex: snapshot.evidence.safe.volumeIndex,
-        volumeStartedAtUnixMs: snapshot.evidence.safe.volumeStartedAtUnixMs,
+        site: historyEvidence.safe.site,
+        observationId: historyEvidence.observationId,
+        volumeIndex: historyEvidence.safe.volumeIndex,
+        volumeStartedAtUnixMs: historyEvidence.safe.volumeStartedAtUnixMs,
         rendererGeneration: snapshot.renderer.generation,
         rendererResidentCount: snapshot.renderer.metrics?.residentFrameCount,
         frameUploadCount: snapshot.renderer.metrics?.frameUploadCount,
@@ -84,6 +91,11 @@ try {
     if (lastCount < targetFrames) await delay(2_000);
   }
   if (lastCount < targetFrames) fatalErrors.push(`soak timed out at ${lastCount}/${targetFrames} frames`);
+  // Freeze the bounded resident set before scrub and context-recovery checks.
+  // This cancels either the next predecessor or future-volume request without
+  // changing the last authoritative GPU paint.
+  await evaluate("window.__MISTR_PHASE5__.stopSession()", true, 10_000);
+  await delay(100);
 
   const finalBeforeInteraction = await snapshotFinal();
   const residentIds = finalBeforeInteraction.renderer?.residentObservationIds ?? [];
@@ -95,6 +107,7 @@ try {
   const report = {
     targetFrames,
     timeoutSeconds,
+    startup,
     startedAtUnixMs,
     completedAtUnixMs: Date.now(),
     siteSwitch: {
@@ -152,6 +165,19 @@ function surfaceTruth() {
   }))()`);
 }
 
+async function waitForPendingSite(site, timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const truth = await surfaceTruth();
+    if (truth.freshness === `UPDATING ${site}`) return truth;
+    if (truth.topSite === site) {
+      throw new Error(`${site} painted before the pending request could be superseded`);
+    }
+    await delay(10);
+  }
+  throw new Error(`pending ${site} acquisition state did not appear`);
+}
+
 function snapshotFinal() {
   return evaluate(`(()=>{
     const live=window.__MISTR_PHASE5__.report();
@@ -159,6 +185,9 @@ function snapshotFinal() {
     return {
       history:live.history,
       evidence:live.evidence,
+      receipt:live.receipt,
+      publicationRenderer:live.renderer,
+      historyUpdate:live.historyUpdate,
       renderer:phase4.renderer,
       playback:phase4.playback,
       topSite:document.querySelector('.context-selector strong')?.textContent?.trim(),
@@ -199,7 +228,7 @@ async function waitForRadar() {
   const deadline = Date.now() + 120_000;
   while (Date.now() < deadline) {
     if (await evaluate("Boolean(window.__MISTR_PHASE4__ && window.__MISTR_PHASE5__ && window.__MISTR_PHASE6__)")) return;
-    const errorText = await evaluate("document.querySelector('.benchmark-error')?.textContent ?? null");
+    const errorText = await evaluate("document.querySelector('.radar-notice[role=alert]')?.textContent ?? null");
     if (errorText) throw new Error(`packaged app failed before soak: ${errorText}`);
     await delay(250);
   }

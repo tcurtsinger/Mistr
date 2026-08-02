@@ -16,11 +16,11 @@ function validReport() {
       openPanelCount: 0,
     })),
     keyboard: {
-      menuInitialFocus: "Radar sitesChoose a NEXRAD station",
+      menuInitialFocus: "Recenter radarReturn to KTLX",
       menuFocusVisible: true,
       menuEscapeClosed: true,
       menuEscapeReturn: "Open Mistr menu",
-      contextInitialFocus: "KTLXOklahoma City, Oklahoma",
+      contextInitialFocus: "Search radar sites",
       contextFocusVisible: true,
       contextEscapeClosed: true,
       contextEscapeReturn: "SITEKTLX",
