@@ -6,11 +6,11 @@ The map remains fully interactive while playback behaves like a bounded game loo
 
 ## Status
 
-**Alpha product foundation.** The normal interface is now radar-first: choose a NEXRAD site, inspect reflectivity, play or scrub the resident observation loop, and see the time and freshness of the frame that actually painted. Windows is the Alpha release platform; the shared Tauri application remains compatible with a later macOS build.
+**Alpha selected-site radar.** The normal interface is radar-first: choose a NEXRAD site, inspect reflectivity, play or scrub its bounded recent-observation loop, and see the time and freshness of the frame that actually painted. Windows is the Alpha release platform; the shared Tauri application remains compatible with a later macOS build.
 
 The underlying engine has passed the historical Phase 0 through 6 feasibility gates on the primary Windows workstation, including 20-frame GPU-resident playback, bounded live Level II acquisition, strict Level III `N0S` decoding, and visible-first WebGL context recovery. Those phase records remain as engineering evidence rather than product UI.
 
-The current product foundation opens a clearly labeled pinned archive loop and can replace it with one freshly acquired live observation for a selected site. Accumulating the bounded rolling history from successive live observations is the next Alpha engine milestone; see [Alpha Product Foundation](docs/19_ALPHA_PRODUCT_FOUNDATION.md) for the exact boundary.
+First launch without a stored site opens a clearly labeled pinned archive loop. Selecting or reopening a stored live site acquires a current safe observation, then requests exact-next provider volumes and accumulates up to 20 chronological GPU-resident live frames. Retained frames are reused, only the appended frame is uploaded, and the oldest is evicted at the bound. See [Bounded Rolling Live History](docs/21_BOUNDED_ROLLING_LIVE_HISTORY.md) for the exact ownership and truth contract.
 
 Start with the [product definition](PRODUCT.md), [design system](DESIGN.md), [current Alpha state](docs/20_ALPHA_CURRENT_STATE.md), and [documentation index](docs/README.md).
 
@@ -78,11 +78,11 @@ After downloading the 20 public fixtures, run the real release/WebView2 4K gate:
 npm run test:phase4:packaged
 ```
 
-The runner performs two 1,000-transition interaction scenarios and five atomic loop replacements per scenario. Its ignored evidence is written under `artifacts/phase-4/`. The contract and results are documented in the [resident playback decision](docs/16_RESIDENT_PLAYBACK_DECISION.md) and [Phase 4 report](docs/phase-reports/PHASE_4_RESIDENT_PLAYBACK.md).
+The runner performs two 1,000-transition interaction scenarios and five atomic loop replacements per scenario. It also performs 19 incremental history updates, forced bounded eviction, oldest/newest scrubbing, and a real WebGL context reset before each hot-path workload. Its ignored evidence is written under `artifacts/phase-4/`. The contract and results are documented in the [resident playback decision](docs/16_RESIDENT_PLAYBACK_DECISION.md), [rolling-history decision](docs/21_BOUNDED_ROLLING_LIVE_HISTORY.md), and [Phase 4 report](docs/phase-reports/PHASE_4_RESIDENT_PLAYBACK.md).
 
 ### Phase 5 live gate
 
-Run the release/WebView2 live acquisition, site-supersession, and 4K GPU-paint gate with:
+Run the release/WebView2 live acquisition, site-supersession, exact-next two-observation history, direct-scrub, and 4K GPU-paint gate with:
 
 ```powershell
 npm run test:phase5:packaged

@@ -38,8 +38,28 @@ try {
     await new Promise(resolve => setTimeout(resolve, 1000));
     const current = await window.__MISTR_PHASE5__.acquire("KTLX", false, 180);
     const oldResult = await old;
-    return {...oldResult,currentObservationId:current.evidence?.observationId};
+    return {
+      ...oldResult,
+      currentObservationId:current.evidence?.observationId,
+      currentVolumeIndex:current.evidence?.safe?.volumeIndex,
+      currentVolumeStartedAtUnixMs:current.evidence?.safe?.volumeStartedAtUnixMs,
+      currentFrameUploadCount:current.renderer?.metrics?.frameUploadCount,
+    };
   })()`, true, 240_000);
+  const rolling = await evaluate(`(async()=>{
+    const next = await window.__MISTR_PHASE5__.acquire("KTLX", true, 900);
+    const oldest = await window.__MISTR_PHASE4__.scrub(0);
+    const newest = await window.__MISTR_PHASE4__.scrub(1);
+    return {
+      nextObservationId:next.evidence?.observationId,
+      nextVolumeIndex:next.evidence?.safe?.volumeIndex,
+      nextVolumeStartedAtUnixMs:next.evidence?.safe?.volumeStartedAtUnixMs,
+      history:next.history,
+      renderer:next.renderer,
+      oldestScrubObservationId:oldest.observationId,
+      newestScrubObservationId:newest.observationId,
+    };
+  })()`, true, 960_000);
   const report = await evaluate("window.__MISTR_PHASE5__.report()");
   const bodyText = await evaluate("document.body.innerText");
   const finalBounds = await call("Browser.getWindowForTarget", { targetId: target.id });
@@ -53,10 +73,17 @@ try {
 
   await writeFile(resolve(output, "packaged-report-4k.json"), `${JSON.stringify(report, null, 2)}\n`);
   await writeFile(resolve(output, "packaged-cancellation.json"), `${JSON.stringify(cancellation, null, 2)}\n`);
+  await writeFile(resolve(output, "packaged-rolling-history.json"), `${JSON.stringify(rolling, null, 2)}\n`);
   await writeFile(resolve(output, "packaged-ui-4k.txt"), `${bodyText}\n`);
   await writeFile(resolve(output, "packaged-4k.png"), Buffer.from(screenshot.result.data, "base64"));
 
-  const failures = validatePhase5Acceptance(report, cancellation, finalBounds.result.bounds, bodyText);
+  const failures = validatePhase5Acceptance(
+    report,
+    cancellation,
+    rolling,
+    finalBounds.result.bounds,
+    bodyText,
+  );
   const summary = {
     status: failures.length === 0 ? "PASS" : "FAIL",
     bounds: finalBounds.result.bounds,
@@ -70,6 +97,13 @@ try {
       ? report.receipt.completedAtUnixMs - report.evidence.safe.decodeCompletedAtUnixMs
       : null,
     cancellation,
+    rollingHistory: {
+      residentCount: rolling.history?.residentCount,
+      firstObservationId: cancellation.currentObservationId,
+      nextObservationId: rolling.nextObservationId,
+      oldestScrubObservationId: rolling.oldestScrubObservationId,
+      newestScrubObservationId: rolling.newestScrubObservationId,
+    },
     failures,
   };
   await writeFile(resolve(output, "packaged-summary-4k.json"), `${JSON.stringify(summary, null, 2)}\n`);

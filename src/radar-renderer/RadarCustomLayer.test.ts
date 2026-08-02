@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { Map as MapLibreMap } from "maplibre-gl";
 import {
   assertNoWebGlError,
   hasVerifiedHardwareAcceleration,
@@ -87,6 +88,47 @@ describe("resident loop validation", () => {
 });
 
 describe("resident replacement rollback", () => {
+  it("commits an incremental mutation by deleting only the evicted GPU frame", () => {
+    const onSnapshot = vi.fn();
+    const layer = new RadarCustomLayer(model(0), { onSnapshot });
+    const deleteTexture = vi.fn();
+    const retained = frameResources(model(1));
+    const evicted = frameResources(model(0));
+    const added = frameResources(model(2));
+    const internals = layer as unknown as Record<string, unknown>;
+    internals.gl = { deleteTexture } as unknown as WebGL2RenderingContext;
+    internals.models = [model(1), model(2)];
+    internals.frameResources = new Map([
+      ["observation-1", retained],
+      ["observation-2", added],
+    ]);
+    internals.selectedObservationId = "observation-1";
+    internals.selectionSequence = 1;
+    internals.paintReceipt = receiptFor("observation-1", 1);
+    internals.pendingReplacement = {
+      previousModels: [model(0), model(1)],
+      previousFrames: new Map([
+        ["observation-0", evicted],
+        ["observation-1", retained],
+      ]),
+      previousPalette: {} as WebGLTexture,
+      previousSelectedObservationId: "observation-1",
+      previousSelectionSequence: 1,
+      previousTextureValidation: undefined,
+      previousPaintReceipts: [],
+      previousSwitchLatencySamples: [],
+      deleteOnCommit: [evicted],
+      deleteOnRollback: [added],
+    };
+
+    layer.commitResidentFrameReplacement(1);
+
+    expect(deleteTexture).toHaveBeenCalledTimes(4);
+    expect(deleteTexture).not.toHaveBeenCalledWith(retained.rawTexture);
+    expect(deleteTexture).not.toHaveBeenCalledWith(added.rawTexture);
+    expect(layer.hasPendingResidentFrameReplacement()).toBe(false);
+  });
+
   it("restores capped histories but withholds prior paint truth until restoration completes", async () => {
     const previousReceipts = Array.from({ length: 64 }, (_, index) => receipt(index));
     const previousLatencies = Array.from({ length: 240 }, (_, index) => index);
@@ -117,6 +159,8 @@ describe("resident replacement rollback", () => {
       previousSelectionSequence: 1,
       previousPaintReceipts: previousReceipts,
       previousSwitchLatencySamples: previousLatencies,
+      deleteOnCommit: [],
+      deleteOnRollback: [],
     };
 
     const rollback = layer.rollbackResidentFrameReplacement(10);
@@ -134,6 +178,30 @@ describe("resident replacement rollback", () => {
 });
 
 describe("context recovery truth", () => {
+  it("re-adds radar before its diagnostic successor instead of above map labels", () => {
+    const addLayer = vi.fn();
+    const map = {
+      addLayer,
+      getLayer: vi.fn((id: string) => id === "mistr-anchor" ? { id } : undefined),
+      getStyle: vi.fn(() => ({ layers: [{ id: "place-label", type: "symbol" }] })),
+    } as unknown as MapLibreMap;
+    const layer = new RadarCustomLayer(model(0), {
+      recoveryBeforeLayerId: "mistr-anchor",
+      onSnapshot: vi.fn(),
+    });
+    const internals = layer as unknown as {
+      map: MapLibreMap;
+      recoveryPhase: string;
+      tryReaddAfterContextRestore(): void;
+    };
+    internals.map = map;
+    internals.recoveryPhase = "waiting_for_style";
+
+    internals.tryReaddAfterContextRestore();
+
+    expect(addLayer).toHaveBeenCalledWith(layer, "mistr-anchor");
+  });
+
   it("invalidates old paint truth, advances the context epoch, and retains CPU observations", () => {
     const models = [model(0), model(1), model(2)];
     const layer = new RadarCustomLayer(models, { onSnapshot: vi.fn() });
@@ -234,6 +302,8 @@ describe("context recovery truth", () => {
       previousTextureValidation: undefined,
       previousPaintReceipts: [],
       previousSwitchLatencySamples: [],
+      deleteOnCommit: [],
+      deleteOnRollback: [],
     };
     const abandoned = expect(layer.waitForPaint(2, 1_000)).rejects.toThrow(
       "abandoned by WebGL context loss",
@@ -277,5 +347,27 @@ function receipt(index: number): RadarPaintReceipt {
     residentSwitchLatencyMs: index,
     framebufferWidth: 3840,
     framebufferHeight: 2160,
+  };
+}
+
+function receiptFor(observationId: string, selectionSequence: number): RadarPaintReceipt {
+  return {
+    ...receipt(selectionSequence - 1),
+    observationId,
+    selectionSequence,
+  };
+}
+
+function frameResources(modelValue: RadarSweepCpuModel) {
+  return {
+    model: modelValue,
+    rawTexture: { kind: `${modelValue.observationId}-raw` } as unknown as WebGLTexture,
+    statusTexture: { kind: `${modelValue.observationId}-status` } as unknown as WebGLTexture,
+    lookupTexture: { kind: `${modelValue.observationId}-lookup` } as unknown as WebGLTexture,
+    radialMetadataTexture: {
+      kind: `${modelValue.observationId}-metadata`,
+    } as unknown as WebGLTexture,
+    textureValidation: { allPassed: true },
+    gpuBytes: 4,
   };
 }

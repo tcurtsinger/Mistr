@@ -40,6 +40,11 @@ export interface SafeSweepEvidence {
   acquisitionDelta: AcquisitionCounters;
 }
 
+export interface LiveSweepCursor {
+  volumeIndex: number;
+  volumeStartedAtUnixMs: number;
+}
+
 export interface Phase5LiveTransferEvidence {
   observationId: string;
   sourceKind: "nexrad_level2_chunks";
@@ -225,6 +230,7 @@ export class PackedSweepTransferClient {
     site: string,
     freshOnly = false,
     timeoutSeconds = 180,
+    after?: LiveSweepCursor,
   ): Promise<PackedSweepLease> {
     if (!/^[A-Z0-9]{4}$/.test(site)) {
       throw new TypeError("site must be exactly four uppercase ASCII letters/digits");
@@ -232,12 +238,34 @@ export class PackedSweepTransferClient {
     if (!Number.isInteger(timeoutSeconds) || timeoutSeconds < 10 || timeoutSeconds > 900) {
       throw new RangeError("timeoutSeconds must be an integer between 10 and 900");
     }
+    if (
+      after
+      && (
+        !freshOnly
+        || !Number.isInteger(after.volumeIndex)
+        || after.volumeIndex < 1
+        || after.volumeIndex > 999
+        || !Number.isSafeInteger(after.volumeStartedAtUnixMs)
+        || after.volumeStartedAtUnixMs <= 0
+      )
+    ) {
+      throw new RangeError("live history cursor requires fresh-only mode and a valid volume identity");
+    }
     return this.requestFromCommand(
       "request_phase5_live_sweep",
       0,
       false,
       undefined,
-      { site, freshOnly, timeoutSeconds },
+      {
+        site,
+        freshOnly,
+        timeoutSeconds,
+        ...(after
+          ? {
+              historyCursor: after,
+            }
+          : {}),
+      },
     );
   }
 

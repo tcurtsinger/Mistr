@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   beginLiveDisplay,
+  beginLiveRefresh,
   failLiveDisplay,
   initialLiveDisplay,
   publishLiveDisplay,
@@ -73,6 +74,43 @@ describe("live display truth", () => {
     expect(afterDiagnosticFailure).toMatchObject({
       kind: "painted",
       lastComplete: liveFrame,
+    });
+  });
+
+  it("keeps painted live truth interactive while the next observation is pending", () => {
+    const painted = publishLiveDisplay(
+      beginLiveDisplay(initialLiveDisplay(archiveFrame), 2, "KTLX", false),
+      2,
+      liveFrame,
+    );
+    const refreshing = beginLiveRefresh(painted, 3, "KTLX");
+
+    expect(refreshing).toMatchObject({
+      kind: "refreshing",
+      generation: 3,
+      live: liveFrame,
+      lastComplete: liveFrame,
+    });
+    expect(() => beginLiveRefresh(painted, 3, "KOUN")).toThrow("painted live truth");
+  });
+
+  it("synchronizes displayed live truth when playback paints another resident scan", () => {
+    const painted = publishLiveDisplay(
+      beginLiveDisplay(initialLiveDisplay(archiveFrame), 2, "KTLX", false),
+      2,
+      liveFrame,
+    );
+    const olderLiveFrame = {
+      ...liveFrame,
+      observationId: "d".repeat(32),
+      observedAtUnixMs: 2,
+      paintedAtUnixMs: 5,
+    };
+
+    expect(retainPaintedFallback(painted, olderLiveFrame)).toMatchObject({
+      kind: "painted",
+      live: olderLiveFrame,
+      lastComplete: olderLiveFrame,
     });
   });
 });

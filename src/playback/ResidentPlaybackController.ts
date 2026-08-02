@@ -43,6 +43,7 @@ export class ResidentPlaybackController {
       | "replaceResidentFrames"
       | "rollbackResidentFrameReplacement"
       | "selectAndWait"
+      | "updateResidentHistory"
       | "waitForRecovery"
       | "waitForPaint"
     >,
@@ -95,6 +96,83 @@ export class ResidentPlaybackController {
         releaseTurn();
       }
     })();
+  }
+
+  updateResidentHistory(
+    frames: readonly RadarSweepCpuModel[],
+    beforeCommit?: () => void,
+  ): Promise<RadarPaintReceipt> {
+    this.assertActive();
+    if (frames.length < 1) throw new Error("playback requires at least one resident frame");
+    const priorReplacement = this.replacementTail;
+    let releaseTurn = () => {};
+    const turn = new Promise<void>((resolve) => {
+      releaseTurn = resolve;
+    });
+    this.replacementTail = priorReplacement.then(() => turn, () => turn);
+    return (async () => {
+      await priorReplacement.catch(() => {});
+      try {
+        return await this.updateResidentHistoryNow(frames, beforeCommit);
+      } finally {
+        releaseTurn();
+      }
+    })();
+  }
+
+  private async updateResidentHistoryNow(
+    frames: readonly RadarSweepCpuModel[],
+    beforeCommit?: () => void,
+  ): Promise<RadarPaintReceipt> {
+    this.assertActive();
+    const resumePlayback = this.playing;
+    const previousFrames = this.frames;
+    const previousSelected = this.layer.getSnapshot().selectedObservationId;
+    const wasPausedAtNewest = !resumePlayback
+      && previousSelected === previousFrames[previousFrames.length - 1].observationId;
+    await this.pauseAndWait();
+    if (this.layer.getSnapshot().recovery.phase !== "ready") {
+      await this.layer.waitForRecovery();
+    }
+    const selectedObservationId = wasPausedAtNewest
+      ? frames[frames.length - 1].observationId
+      : frames.some((frame) => frame.observationId === previousSelected)
+        ? previousSelected
+        : frames[0].observationId;
+    beforeCommit?.();
+
+    this.layer.updateResidentHistory(frames, selectedObservationId);
+    this.frames = [...frames];
+    let receipt: RadarPaintReceipt;
+    try {
+      receipt = await this.establishInitialPaint();
+      beforeCommit?.();
+      this.layer.commitResidentFrameReplacement(receipt.selectionSequence);
+    } catch (error) {
+      this.frames = previousFrames;
+      this.lastReceipt = undefined;
+      const restoration = this.layer.hasPendingResidentFrameReplacement()
+        ? this.layer.rollbackResidentFrameReplacement()
+        : this.waitForRecoveredAuthoritativePaint();
+      this.operation = restoration;
+      this.emit();
+      try {
+        const restoredReceipt = await restoration;
+        this.assertReceipt(restoredReceipt);
+        this.lastReceipt = restoredReceipt;
+      } catch (rollbackError) {
+        throw new Error(
+          `resident history update failed (${errorMessage(error)}) and rollback GPU paint failed (${errorMessage(rollbackError)})`,
+        );
+      } finally {
+        this.operation = null;
+        this.emit();
+        if (resumePlayback && !this.disposed) this.play();
+      }
+      throw error;
+    }
+    if (resumePlayback && !this.disposed) this.play();
+    return receipt;
   }
 
   private async replaceResidentFramesNow(

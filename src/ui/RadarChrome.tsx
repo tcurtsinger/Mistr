@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { GateInterrogation } from "../radar-renderer/cpuModel";
-import type { FreshnessPresentation } from "./radarChromeModel";
+import { timelinePosition, type FreshnessPresentation } from "./radarChromeModel";
 
 export interface RadarSiteOption {
   id: string;
@@ -13,6 +13,7 @@ export interface RadarChromeProps {
   dismissPanelsSignal: number;
   frameCount: number;
   frameIndex: number;
+  historyCapacity?: number;
   freshness: FreshnessPresentation;
   interrogation: GateInterrogation | null;
   mapStatus: string;
@@ -37,6 +38,7 @@ export function RadarChrome({
   dismissPanelsSignal,
   frameCount,
   frameIndex,
+  historyCapacity,
   freshness,
   interrogation,
   mapStatus,
@@ -211,7 +213,7 @@ export function RadarChrome({
           />
           <div aria-hidden="true" className="timeline-ticks" />
           <div className="timeline-meta">
-            <span>{frameCount > 0 ? `${frameIndex + 1} / ${frameCount}` : "0 / 0"}</span>
+            <span>{timelinePosition(frameIndex, frameCount, historyCapacity)}</span>
             <strong>{playbackLabel}</strong>
           </div>
         </div>

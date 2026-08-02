@@ -191,6 +191,7 @@ Persistent instruments use one continuous rounded silhouette apiece. Internal gr
 - Contains play/pause and a directly clickable/draggable scan timeline; no dedicated visible previous/next buttons.
 - Always exposes displayed scan time, freshness in words and elapsed time, and playback position/state.
 - A focused timeline may respond to arrow keys one observation at a time.
+- While a selected site's live history contains fewer than 20 observations, playback position remains visible and the timeline metadata adds `BUILDING n/20`. Background polling does not replace freshness age or disable already-resident playback.
 
 ### Inspection Reticle
 - Appears after a deliberate map click.

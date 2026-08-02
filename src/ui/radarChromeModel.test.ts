@@ -7,8 +7,9 @@ import {
   playbackErrorAfterRendererStatus,
   playbackInteractionReady,
   playbackPresentation,
-  radarProductLabel,
-  rendererFailureMessage,
+    radarProductLabel,
+    rendererFailureMessage,
+    timelinePosition,
 } from "./radarChromeModel";
 
 describe("radar chrome model", () => {
@@ -57,6 +58,7 @@ describe("radar chrome model", () => {
     expect(playbackInteractionReady("acquiring")).toBe(false);
     expect(playbackInteractionReady("idle")).toBe(true);
     expect(playbackInteractionReady("painted")).toBe(true);
+    expect(playbackInteractionReady("refreshing")).toBe(true);
     expect(playbackInteractionReady("degraded")).toBe(true);
   });
 
@@ -75,6 +77,12 @@ describe("radar chrome model", () => {
       kind: "fresh",
       label: "FRESH · 00:40",
     });
+  });
+
+  it("makes a partial rolling live loop explicit without hiding playback position", () => {
+    expect(timelinePosition(0, 1, 20)).toBe("1 / 1 · BUILDING 1/20");
+    expect(timelinePosition(4, 20, 20)).toBe("5 / 20");
+    expect(timelinePosition(4, 20)).toBe("5 / 20");
   });
 
   it("formats longer ages without pretending they are minute-second values", () => {

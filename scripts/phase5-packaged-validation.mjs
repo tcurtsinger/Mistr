@@ -1,4 +1,4 @@
-export function validatePhase5Acceptance(report, cancellation, bounds, bodyText) {
+export function validatePhase5Acceptance(report, cancellation, rolling, bounds, bodyText) {
   const failures = [];
   const evidence = report?.evidence;
   const receipt = report?.receipt;
@@ -24,7 +24,38 @@ export function validatePhase5Acceptance(report, cancellation, bounds, bodyText)
     ["live_start_failed", "live_sweep_failed", "stale_response"].includes(cancellation?.oldCode),
     "superseded request reported an unexpected error",
   );
-  requireGate(failures, cancellation?.currentObservationId === evidence?.observationId, "current site request did not own final publication");
+  requireGate(
+    failures,
+    cancellation?.currentObservationId === rolling?.history?.oldestObservationId,
+    "current site request did not establish the first rolling observation",
+  );
+  const expectedNextVolumeIndex = cancellation?.currentVolumeIndex === 999
+    ? 1
+    : cancellation?.currentVolumeIndex + 1;
+  requireGate(failures, rolling?.nextObservationId === evidence?.observationId, "next live observation did not own final publication");
+  requireGate(failures, rolling?.nextObservationId !== cancellation?.currentObservationId, "rolling history duplicated the first observation");
+  requireGate(failures, rolling?.nextVolumeIndex === expectedNextVolumeIndex, "rolling history skipped the exact next volume index");
+  requireGate(
+    failures,
+    rolling?.nextVolumeStartedAtUnixMs > cancellation?.currentVolumeStartedAtUnixMs,
+    "rolling history did not advance measured volume time",
+  );
+  requireGate(failures, rolling?.history?.residentCount === 2, "rolling history did not retain two observations");
+  requireGate(failures, rolling?.history?.capacity === 20, "rolling history capacity is not bounded at twenty");
+  requireGate(failures, rolling?.history?.partial === true, "partial rolling history is not explicit");
+  requireGate(
+    failures,
+    rolling?.renderer?.metrics?.frameUploadCount === cancellation?.currentFrameUploadCount + 1,
+    "rolling history did not upload exactly one new GPU frame",
+  );
+  requireGate(
+    failures,
+    rolling?.renderer?.residentObservationIds?.[0] === cancellation?.currentObservationId
+      && rolling?.renderer?.residentObservationIds?.[1] === rolling?.nextObservationId,
+    "rolling GPU observations are not chronological and resident",
+  );
+  requireGate(failures, rolling?.oldestScrubObservationId === cancellation?.currentObservationId, "direct scrub did not paint the oldest live scan");
+  requireGate(failures, rolling?.newestScrubObservationId === rolling?.nextObservationId, "direct scrub did not restore the newest live scan");
   requireGate(failures, !/\bINCOMPLETE\b/i.test(bodyText), "UI labels an incomplete frame");
   return failures;
 }

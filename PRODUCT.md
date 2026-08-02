@@ -72,7 +72,7 @@ The product earns additional capabilities only when they improve live storm insp
 
 ## Evidence on Hand
 
-- The existing repository proves strict Level II acquisition/decoding, bounded binary IPC, GPU-resident rendering and playback, live progressive publication, cancellation, Level III `N0S` parity, and visible-first WebGL recovery.
+- The existing repository proves strict Level II acquisition/decoding, exact-next rolling live polling, bounded binary IPC, incremental GPU-resident history and playback, live progressive publication, cancellation, Level III `N0S` parity, and visible-first WebGL recovery.
 - Pinned public-data fixtures and expected results live under `fixtures/`.
 - Architecture and accepted engineering decisions live under `docs/`, including the packed wire, GPU renderer, resident playback, live freshness/fallback, and recovery records.
 - Packaged Windows validation scripts reproduce critical WebView2, 4K, performance, lifecycle, and recovery behavior.

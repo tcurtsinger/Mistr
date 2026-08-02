@@ -24,7 +24,7 @@ export interface RendererStatusLike {
   error?: string;
 }
 
-export type LiveDisplayKind = "idle" | "acquiring" | "painted" | "degraded";
+export type LiveDisplayKind = "idle" | "acquiring" | "refreshing" | "painted" | "degraded";
 
 const SITE_PATTERN = /^K[A-Z0-9]{3}$/;
 
@@ -75,6 +75,20 @@ export function playbackPresentation(
   if (playback?.playing) return "PLAYING";
   if (frameCount > 0 && frameIndex === frameCount - 1) return "PAUSED · NEWEST";
   return "PAUSED";
+}
+
+export function timelinePosition(
+  frameIndex: number,
+  frameCount: number,
+  historyCapacity?: number,
+): string {
+  const position = frameCount > 0 ? `${Math.min(frameIndex + 1, frameCount)} / ${frameCount}` : "0 / 0";
+  if (
+    historyCapacity === undefined
+    || frameCount < 1
+    || frameCount >= historyCapacity
+  ) return position;
+  return `${position} · BUILDING ${frameCount}/${historyCapacity}`;
 }
 
 export function freshnessPresentation(

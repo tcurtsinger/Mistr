@@ -20,6 +20,7 @@ import {
   tauriInvokeFunction,
   type Phase4ActivitySnapshot,
   type Phase5LiveTransferEvidence,
+  type LiveSweepCursor,
   type TransferTiming,
 } from "./packed-sweep/transferClient";
 import {
@@ -54,6 +55,7 @@ import {
 import { getRuntimeSnapshot, type RuntimeSnapshot } from "./runtime";
 import {
   beginLiveDisplay,
+  beginLiveRefresh,
   failLiveDisplay,
   initialLiveDisplay,
   publishLiveDisplay,
@@ -61,6 +63,11 @@ import {
   type LiveDisplayState,
   type PaintedFrameTruth,
 } from "./live/liveDisplayState";
+import {
+  appendLiveHistory,
+  beginLiveHistory,
+  MAX_LIVE_HISTORY_FRAMES,
+} from "./live/liveHistory";
 import { SiteRequestTracker } from "./live/siteRequestTracker";
 import { RadarChrome, type RadarSiteOption } from "./ui/RadarChrome";
 import {
@@ -91,6 +98,7 @@ const DIAGNOSTIC_LAYER_IDS = {
 const DEFAULT_CENTER: [number, number] = [-97.27776, 35.333363];
 const LAST_SITE_STORAGE_KEY = "mistr.lastRadarSite";
 const RADAR_ENGINE_PREPARING_ERROR = "Radar engine is still preparing the resident loop";
+const LIVE_POLL_RETRY_MS = 15_000;
 const ALPHA_SITES: readonly RadarSiteOption[] = [
   { id: "KTLX", name: "Oklahoma City, Oklahoma" },
   { id: "KOUN", name: "Norman, Oklahoma" },
@@ -200,6 +208,9 @@ export function App() {
     let startupAcquisition: Promise<void> | null = null;
     let prepareArchiveForDiagnostics: (() => Promise<RadarPaintReceipt>) | null = null;
     let transferGeneration = 1;
+    let livePollingSession = 0;
+    let residentLiveHistory: readonly RadarSweepCpuModel[] | null = null;
+    let liveSweepCursor: LiveSweepCursor | null = null;
     let liveDisplay = initialLiveDisplay();
     let latestPhase5: Phase5Report = { display: liveDisplay };
     const modelsById = new Map<string, RadarSweepCpuModel>();
@@ -209,10 +220,20 @@ export function App() {
       if (!cancelled) setPhase5(report);
     };
 
-    const synchronizeArchiveFallback = (renderer: RadarRendererSnapshot) => {
+    const synchronizePaintedDisplay = (renderer: RadarRendererSnapshot) => {
       const receipt = renderer.paintReceipt;
       const paintedModel = receipt ? modelsById.get(receipt.observationId) : undefined;
-      if (!receipt || paintedModel?.sourceKind !== "nexrad_level2_archive_ii") return;
+      if (
+        !receipt
+        || (
+          paintedModel?.sourceKind !== "nexrad_level2_archive_ii"
+          && paintedModel?.sourceKind !== "nexrad_level2_chunks"
+        )
+      ) return;
+      radarModelRef.current = paintedModel;
+      paintedSiteRef.current = paintedModel.siteIcao;
+      setPaintedProduct(paintedModel.product);
+      setPaintedSourceKind(paintedModel.sourceKind);
       const synchronized = retainPaintedFallback(
         liveDisplay,
         frameTruth(paintedModel, receipt),
@@ -238,8 +259,63 @@ export function App() {
       const activeClient = client;
       const baseModels = [...modelsById.values()]
         .sort((left, right) => left.observedAtUnixMs - right.observedAtUnixMs);
+      if (
+        baseModels.length !== PHASE4_FRAME_COUNT
+        || baseModels.some((model) => model.sourceKind !== "nexrad_level2_archive_ii")
+      ) {
+        throw new Error("Phase 4 scenario requires the prepared 20-frame archive loop");
+      }
       activeScenario = (async () => {
         await activeController.pauseAndWait();
+        const rollingGeneration = activeLayer.getSnapshot().generation + 1;
+        let rollingModels = [{ ...baseModels[0], generation: BigInt(rollingGeneration) }];
+        await activeController.replaceResidentFrames(rollingModels);
+        const rollingUploadStart = activeLayer.getSnapshot().metrics?.frameUploadCount ?? 0;
+        const rollingResidentCounts: number[] = [];
+        const rollingReceipts: RadarPaintReceipt[] = [];
+        for (let index = 1; index < baseModels.length; index += 1) {
+          rollingModels = [
+            ...rollingModels,
+            { ...baseModels[index], generation: BigInt(rollingGeneration) },
+          ].slice(-5);
+          const receipt = await activeController.updateResidentHistory(rollingModels);
+          rollingReceipts.push(receipt);
+          rollingResidentCounts.push(activeLayer.getSnapshot().metrics?.residentFrameCount ?? 0);
+        }
+        const expectedRollingIds = rollingModels.map((model) => model.observationId);
+        const scrubOldest = await activeController.scrub(0);
+        const scrubNewest = await activeController.scrub(rollingModels.length - 1);
+        const beforeRollingRecovery = activeLayer.getSnapshot();
+        const rollingRecovery = await activeLayer.simulateContextResetForTest(100);
+        const afterRollingRecovery = activeLayer.getSnapshot();
+        const rollingUploadEnd = beforeRollingRecovery.metrics?.frameUploadCount ?? 0;
+        const rollingHistory: Phase4RollingHistoryEvidence = {
+          requestedUpdates: baseModels.length - 1,
+          completedUpdates: rollingReceipts.length,
+          uploadCountDelta: rollingUploadEnd - rollingUploadStart,
+          residentCounts: rollingResidentCounts,
+          finalResidentObservationIds: beforeRollingRecovery.residentObservationIds,
+          recoveredResidentObservationIds: afterRollingRecovery.residentObservationIds,
+          oldestScrubObservationId: scrubOldest.observationId,
+          newestScrubObservationId: scrubNewest.observationId,
+          contextEpochBefore: beforeRollingRecovery.contextEpoch,
+          contextEpochAfter: afterRollingRecovery.contextEpoch,
+          recovery: rollingRecovery,
+          passed: rollingReceipts.length === baseModels.length - 1
+            && rollingReceipts.every((receipt, index) => (
+              receipt.generation === rollingGeneration
+              && receipt.observationId === baseModels[index + 1].observationId
+            ))
+            && rollingUploadEnd - rollingUploadStart === baseModels.length - 1
+            && rollingResidentCounts.every((count, index) => count === Math.min(index + 2, 5))
+            && arraysEqual(beforeRollingRecovery.residentObservationIds, expectedRollingIds)
+            && sameMembers(afterRollingRecovery.residentObservationIds, expectedRollingIds)
+            && scrubOldest.observationId === expectedRollingIds[0]
+            && scrubNewest.observationId === expectedRollingIds.at(-1)
+            && rollingRecovery.phase === "ready"
+            && afterRollingRecovery.contextEpoch === beforeRollingRecovery.contextEpoch + 1
+            && afterRollingRecovery.lastPaintedObservationId === scrubNewest.observationId,
+        };
         const replacementGpuBytes: number[] = [];
         for (let round = 1; round <= PHASE4_REPLACEMENT_ROUNDS; round += 1) {
           const replacementGeneration = activeLayer.getSnapshot().generation + 1;
@@ -301,6 +377,7 @@ export function App() {
           replacementRounds: PHASE4_REPLACEMENT_ROUNDS,
           replacementGpuBytes,
           replacementStable,
+          rollingHistory,
           receiptTruthPassed,
           activityBefore,
           activityAfter,
@@ -389,9 +466,10 @@ export function App() {
         coexistence: emptyLayerCoexistenceReport(),
       };
       layer = new RadarCustomLayer(models, {
+        recoveryBeforeLayerId: ANCHOR_LAYER_ID,
         onSnapshot(renderer) {
           setPlaybackError((current) => playbackErrorAfterRendererStatus(current, renderer.status));
-          synchronizeArchiveFallback(renderer);
+          synchronizePaintedDisplay(renderer);
           const receipt = renderer.paintReceipt;
           const point = inspectionPointRef.current;
           if (
@@ -509,12 +587,25 @@ export function App() {
           activeLayer.getSnapshot().generation + 1,
         );
         transferGeneration = generation;
-        liveDisplay = beginLiveDisplay(liveDisplay, generation, site, freshOnly);
+        const appendingHistory = freshOnly
+          && residentLiveHistory?.[0]?.siteIcao === site
+          && residentLiveHistory[0].sourceKind === "nexrad_level2_chunks"
+          && liveSweepCursor !== null;
+        liveDisplay = appendingHistory
+          ? beginLiveRefresh(liveDisplay, generation, site)
+          : beginLiveDisplay(liveDisplay, generation, site, freshOnly);
         publishPhase5({ display: liveDisplay });
         let lease: Awaited<ReturnType<PackedSweepTransferClient["requestPhase5Live"]>> | undefined;
+        let stagedObservationId: string | undefined;
+        let priorStagedModel: RadarSweepCpuModel | undefined;
         try {
           await activeClient.begin(generation);
-          lease = await activeClient.requestPhase5Live(site, freshOnly, timeoutSeconds);
+          lease = await activeClient.requestPhase5Live(
+            site,
+            freshOnly,
+            timeoutSeconds,
+            appendingHistory ? liveSweepCursor ?? undefined : undefined,
+          );
           const model = createRadarSweepCpuModel(lease.packed);
           if (model.sourceKind !== "nexrad_level2_chunks" || model.siteIcao !== site) {
             throw new Error("live response does not match the requested NEXRAD site/source");
@@ -530,31 +621,69 @@ export function App() {
           if (transferGeneration !== generation) {
             throw new Error(`live generation ${generation} was superseded before GPU publication`);
           }
-          const liveAlignment = createAlignmentReport(model);
-          const receipt = await activeController.replaceResidentFrames([model], () => {
+          const ownershipCheck = () => {
             if (transferGeneration !== generation) {
               throw new Error(`live generation ${generation} was superseded before GPU publication`);
             }
-          });
-          if (receipt.observationId !== model.observationId || receipt.generation !== generation) {
-            throw new Error("GPU paint receipt does not match the live sweep");
+          };
+          let nextHistory: readonly RadarSweepCpuModel[];
+          let receipt: RadarPaintReceipt;
+          if (appendingHistory && residentLiveHistory) {
+            const update = appendLiveHistory(residentLiveHistory, model);
+            nextHistory = update.frames;
+            if (update.appended) {
+              const normalizedModel = nextHistory[nextHistory.length - 1];
+              stagedObservationId = normalizedModel.observationId;
+              priorStagedModel = modelsById.get(stagedObservationId);
+              modelsById.set(stagedObservationId, normalizedModel);
+              receipt = await activeController.updateResidentHistory(nextHistory, ownershipCheck);
+            } else {
+              ownershipCheck();
+              const currentReceipt = activeLayer.getSnapshot().paintReceipt;
+              if (!currentReceipt) throw new Error("resident live history has no painted frame");
+              receipt = currentReceipt;
+            }
+          } else {
+            nextHistory = beginLiveHistory(model, generation);
+            const normalizedModel = nextHistory[0];
+            stagedObservationId = normalizedModel.observationId;
+            priorStagedModel = modelsById.get(stagedObservationId);
+            modelsById.set(stagedObservationId, normalizedModel);
+            receipt = await activeController.replaceResidentFrames(nextHistory, ownershipCheck);
           }
+          ownershipCheck();
+          const rendererGeneration = Number(nextHistory[0].generation);
+          const paintedModel = nextHistory.find(
+            (candidate) => candidate.observationId === receipt.observationId,
+          );
+          if (!paintedModel || receipt.generation !== rendererGeneration) {
+            throw new Error("GPU paint receipt does not match resident live history");
+          }
+          residentLiveHistory = nextHistory;
+          liveSweepCursor = {
+            volumeIndex: evidence.safe.volumeIndex,
+            volumeStartedAtUnixMs: evidence.safe.volumeStartedAtUnixMs,
+          };
           modelsById.clear();
-          modelsById.set(model.observationId, model);
-          paintedSiteRef.current = model.siteIcao;
-          radarModelRef.current = model;
-          setPaintedProduct(model.product);
-          setPaintedSourceKind(model.sourceKind);
-          setTimelineFrames([timelineFrame(model)]);
-          inspectionMarkerRef.current?.remove();
-          inspectionMarkerRef.current = null;
-          inspectionPointRef.current = null;
-          interrogationObservationRef.current = null;
-          setInterrogation(null);
+          nextHistory.forEach((residentModel) => {
+            modelsById.set(residentModel.observationId, residentModel);
+          });
+          paintedSiteRef.current = paintedModel.siteIcao;
+          radarModelRef.current = paintedModel;
+          setPaintedProduct(paintedModel.product);
+          setPaintedSourceKind(paintedModel.sourceKind);
+          setTimelineFrames(nextHistory.map(timelineFrame));
+          if (!appendingHistory) {
+            inspectionMarkerRef.current?.remove();
+            inspectionMarkerRef.current = null;
+            inspectionPointRef.current = null;
+            interrogationObservationRef.current = null;
+            setInterrogation(null);
+          }
           liveDisplay = publishLiveDisplay(
             liveDisplay,
             generation,
-            frameTruth(model, receipt),
+            frameTruth(paintedModel, receipt),
           );
           let report: Phase5Report = {
             display: liveDisplay,
@@ -562,13 +691,18 @@ export function App() {
             receipt,
             transferTiming: lease.timing,
             renderer: activeLayer.getSnapshot(),
+            history: liveHistoryReport(nextHistory),
           };
           // GPU paint is authoritative even if auxiliary MapLibre diagnostics
           // disappear during a style lifecycle. Publish that truth first.
           publishPhase5(report);
           try {
-            updateDiagnosticSources(instance, model, liveAlignment);
-            focusRadar(instance, model);
+            updateDiagnosticSources(
+              instance,
+              paintedModel,
+              createAlignmentReport(paintedModel),
+            );
+            if (!appendingHistory) focusRadar(instance, paintedModel);
           } catch (diagnosticError) {
             report = {
               ...report,
@@ -580,6 +714,10 @@ export function App() {
           }
           return report;
         } catch (error) {
+          if (stagedObservationId) {
+            if (priorStagedModel) modelsById.set(stagedObservationId, priorStagedModel);
+            else modelsById.delete(stagedObservationId);
+          }
           const priorDisplay = liveDisplay;
           const failedDisplay = failLiveDisplay(
             liveDisplay,
@@ -593,14 +731,37 @@ export function App() {
           await lease?.release();
         }
       };
-      acquireLiveRef.current = (site, freshOnly) => acquireLive(site, freshOnly);
+      const runLivePolling = async (site: string, pollingSession: number) => {
+        while (!cancelled && pollingSession === livePollingSession) {
+          try {
+            await acquireLive(site, true);
+          } catch {
+            if (cancelled || pollingSession !== livePollingSession) return;
+            await delay(LIVE_POLL_RETRY_MS);
+          }
+        }
+      };
+      const startLiveSession = async (site: string): Promise<Phase5Report> => {
+        const pollingSession = livePollingSession + 1;
+        livePollingSession = pollingSession;
+        liveSweepCursor = null;
+        const report = await acquireLive(site, false);
+        if (!cancelled && pollingSession === livePollingSession) {
+          void runLivePolling(site, pollingSession);
+        }
+        return report;
+      };
+      acquireLiveRef.current = (site) => startLiveSession(site);
       setSiteSelectionReady(true);
       setSiteRequestError((current) => (
         current === RADAR_ENGINE_PREPARING_ERROR ? null : current
       ));
       globalThis.__MISTR_PHASE5__ = {
         report: () => latestPhase5,
-        acquire: acquireLive,
+        acquire: (site, freshOnly, timeoutSeconds) => {
+          livePollingSession += 1;
+          return acquireLive(site, freshOnly, timeoutSeconds);
+        },
       };
       const phase6Report = (): Phase6Report => {
         if (!layer || !controller) throw new Error("Phase 6 renderer is unavailable");
@@ -630,6 +791,7 @@ export function App() {
         fixtureId = "ktlx-n0s-2024-05-20-230512",
       ): Promise<Phase6Report> => {
         if (!layer || !controller || !client) throw new Error("Phase 6 renderer is unavailable");
+        livePollingSession += 1;
         const generation = Math.max(
           transferGeneration + 1,
           layer.getSnapshot().generation + 1,
@@ -648,6 +810,8 @@ export function App() {
           }
           const alignment = createAlignmentReport(model);
           await controller.replaceResidentFrames([model]);
+          residentLiveHistory = null;
+          liveSweepCursor = null;
           modelsById.clear();
           modelsById.set(model.observationId, model);
           radarModelRef.current = model;
@@ -691,6 +855,7 @@ export function App() {
         // any persisted-site startup request before restoring the measured
         // archive loop, so live publication cannot overlap gate measurements.
         siteRequestTrackerRef.current.invalidate();
+        livePollingSession += 1;
         const generation = Math.max(
           transferGeneration + 1,
           layer.getSnapshot().generation + 1,
@@ -710,6 +875,8 @@ export function App() {
         if (!paintedModel) throw new Error("prepared archive paint receipt is unknown");
 
         modelsById.clear();
+        residentLiveHistory = null;
+        liveSweepCursor = null;
         archiveModels.forEach((model) => modelsById.set(model.observationId, model));
         paintedSiteRef.current = paintedModel.siteIcao;
         selectedSiteRef.current = paintedModel.siteIcao;
@@ -734,7 +901,7 @@ export function App() {
         const startupSite = selectedSiteRef.current;
         const requestSequence = siteRequestTrackerRef.current.begin();
         setRequestedSite(startupSite);
-        startupAcquisition = acquireLive(startupSite, false).then(
+        startupAcquisition = startLiveSession(startupSite).then(
           () => {
             if (siteRequestTrackerRef.current.isCurrent(requestSequence)) {
               setSelectedSite(startupSite);
@@ -771,6 +938,7 @@ export function App() {
 
     return () => {
       cancelled = true;
+      livePollingSession += 1;
       siteRequestTrackerRef.current.invalidate();
       controller?.dispose();
       if (playbackControllerRef.current === controller) playbackControllerRef.current = null;
@@ -805,7 +973,7 @@ export function App() {
         ? "error"
         : paintedSourceKind === "nexrad_level3_n0s"
           ? "archive_frame"
-          : phase5.display.kind === "painted"
+          : phase5.display.kind === "painted" || phase5.display.kind === "refreshing"
             ? "live"
           : displayedAtUnixMs === undefined
             ? "waiting"
@@ -896,6 +1064,9 @@ export function App() {
         dismissPanelsSignal={dismissPanelsSignal}
         frameCount={timelineFrames.length}
         frameIndex={frameIndex}
+        historyCapacity={paintedSourceKind === "nexrad_level2_chunks"
+          ? MAX_LIVE_HISTORY_FRAMES
+          : undefined}
         freshness={freshness}
         interrogation={interrogation}
         mapStatus={mapState}
@@ -988,6 +1159,7 @@ export interface Phase4ScenarioReport {
   replacementRounds: number;
   replacementGpuBytes: number[];
   replacementStable: boolean;
+  rollingHistory: Phase4RollingHistoryEvidence;
   receiptTruthPassed: boolean;
   activityBefore: Phase4ActivitySnapshot;
   activityAfter: Phase4ActivitySnapshot;
@@ -1005,6 +1177,21 @@ export interface Phase4ScenarioReport {
   completedAtUnixMs: number;
 }
 
+export interface Phase4RollingHistoryEvidence {
+  requestedUpdates: number;
+  completedUpdates: number;
+  uploadCountDelta: number;
+  residentCounts: number[];
+  finalResidentObservationIds: string[];
+  recoveredResidentObservationIds: string[];
+  oldestScrubObservationId: string;
+  newestScrubObservationId: string;
+  contextEpochBefore: number;
+  contextEpochAfter: number;
+  recovery: RadarRendererSnapshot["recovery"];
+  passed: boolean;
+}
+
 interface RendererActivitySnapshot {
   frameUploadCount: number;
   frameUploadBytes: number;
@@ -1016,7 +1203,16 @@ export interface Phase5Report {
   receipt?: RadarPaintReceipt;
   transferTiming?: TransferTiming;
   renderer?: RadarRendererSnapshot;
+  history?: LiveHistoryReport;
   diagnosticsError?: string;
+}
+
+export interface LiveHistoryReport {
+  residentCount: number;
+  capacity: number;
+  partial: boolean;
+  oldestObservationId: string;
+  newestObservationId: string;
 }
 
 export interface Phase6Report {
@@ -1065,6 +1261,17 @@ function frameTruth(model: RadarSweepCpuModel, receipt: RadarPaintReceipt): Pain
     source: model.sourceKind,
     observedAtUnixMs: model.observedAtUnixMs,
     paintedAtUnixMs: receipt.completedAtUnixMs,
+  };
+}
+
+function liveHistoryReport(history: readonly RadarSweepCpuModel[]): LiveHistoryReport {
+  if (history.length < 1) throw new Error("live history report requires a resident frame");
+  return {
+    residentCount: history.length,
+    capacity: MAX_LIVE_HISTORY_FRAMES,
+    partial: history.length < MAX_LIVE_HISTORY_FRAMES,
+    oldestObservationId: history[0].observationId,
+    newestObservationId: history[history.length - 1].observationId,
   };
 }
 
@@ -1126,6 +1333,14 @@ function readHeapBytes(): number | null {
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => globalThis.setTimeout(resolve, milliseconds));
+}
+
+function arraysEqual(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function sameMembers(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value) => right.includes(value));
 }
 
 function installDiagnosticLayers(
