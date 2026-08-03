@@ -25,7 +25,7 @@
 | R13 | Timeline reports a frame that did not paint | Medium | Critical | Playhead/time differs from paint receipt | Authoritative paint receipt with generation/context/observation; invariant tests | Mitigated for Phase 4 playback; site/context fault paths remain open |
 | R14 | Rapid site/product changes publish stale work | High | High | Old site appears after switch | Generation IDs at every stage; cancellation; publish-time generation checks; stress tests | Mitigated for Phase 5 packaged supersession; product/context stress remains open |
 | R15 | Raw source is not fresher or is less reliable than IEM/NOAA | Medium | Medium | Latency losses, frequent gaps, missing sites | Measure P50/P95/worst and failure rate; preserve current provider fallback; do not make speed claims early | Mitigated for the Phase 5 observation window; nationwide/seasonal reliability remains open |
-| R16 | National view is accidentally degraded or removed | Low | Critical | No wide-view radar or misleading overlap | National mosaic explicitly out of scope; keep handoff; integration tests across zoom threshold | Open |
+| R16 | National implementation is conflated with Site or exposed before it is complete | Medium | Critical | Automatic zoom handoff, shared timeline, placeholder source control, or Level II client mosaicking | Explicit source choice; separate sessions/renderers; no Phase 1 UI; old source remains until matching paint; phased review gates | Open |
 | R17 | CPU point interrogation and shader color use different scale/offset semantics | Medium | High | Tooltip value disagrees with color/reference | Shared scale/offset metadata; exact unrounded code-to-dBZ conversion; exhaustive palette/code tests; native inspection assertions | Mitigated for Alpha reflectivity; future products remain open |
 | R18 | Visual smoothing invents intermediate measured values | Medium | High | Filtered color is reported as dBZ, gaps bridge, or UI implies a generated frame | `Smooth`/`Native` labels; spatial-only filtering inside one observation; native-gate inspection; no temporal interpolation; status-aware edge tests; packaged visual validation | Mitigated for Alpha reflectivity; future products remain open |
 | R19 | Fixture corpus is too narrow and overfits one site/VCP | High | High | New live volume fails despite green tests | Corpus matrix including severe/quiet/non-CONUS/VCP/negative/chunks; add every demonstrated failure | Open |
@@ -41,6 +41,8 @@
 | R29 | Velocity dealiasing expands scope without scientific validation | Medium | Critical | Prototype adds “corrected velocity” with no oracle | Explicit non-goal; separate future research/ADR; use established algorithms and meteorological validation only | Open |
 | R30 | Prototype success is declared from browser development only | Medium | Critical | No packaged artifacts or WebView2 traces | Packaged Windows gate is mandatory and cannot be waived as “equivalent” | Mitigated through committed packaged 4K runner; every later phase must repeat it |
 | R31 | Palette styling hides meaningful weak precipitation or visually overstates reflectivity | Medium | High | Drizzle or snow disappears; ordinary rain shifts into yellow/red too early; a presentation cutoff is mislabeled as clutter removal | Preserve every valid raw code and native inspection; pin NOAA/NWS operational `SR_BREF` RGB anchors; bound the display-only alpha curve to non-positive through 20 dBZ; test exact unrounded conversion and all 256 entries; validate clear-air plus weak-precipitation scenes | Accepted presentation tradeoff for Alpha; broader seasonal corpus remains open |
+| R32 | Source coordination lets intent, stale work, or persistence outrun paint truth | Medium | Critical | Requested source labels early, old generation commits, failed request overwrites stored source | Typed `RadarSourceKey`; one coordinator; matching source/generation receipt; tested supersession and rollback; persistence callback only after accepted paint | Mitigated in Phase 1 unit tests and packaged Phase 5 supersession; future National path remains open |
+| R33 | Phase 1 refactor breaks established selected-site packaged diagnostics | Medium | Critical | Missing `__MISTR_PHASE*__` methods, archive race, history/polling change, or different GPU evidence | Preserve public diagnostic APIs; run Phase 4/5/6 packaged paths; compare existing gates without threshold relaxation | Mitigated by Phase 1 packaged Phase 4/5/6 passes; repeat every later phase |
 
 ## Top risks by immediate priority
 
@@ -50,6 +52,7 @@
 4. R13 — timeline/paint truth.
 5. R2/R3 — real-time chunk correctness.
 6. R30 — packaged-runtime proof.
+7. R32/R33 — source-transition truth and selected-site regression safety.
 
 ## Triggered stop/review conditions
 
@@ -63,6 +66,8 @@ Pause the current phase and perform a design review if:
 - A performance repair requires weakening correctness or freshness labeling.
 - Integration changes national mosaic semantics.
 - A dependency requires unbounded or arbitrary network access.
+- A stale source receipt or failed transition changes painted or persisted source truth.
+- Phase 1 requires exposing an incomplete National control or changing selected-site behavior.
 
 ## Risk review cadence
 

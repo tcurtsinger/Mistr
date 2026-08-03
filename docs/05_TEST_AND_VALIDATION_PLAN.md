@@ -213,7 +213,11 @@ Required sequences:
 - Scrub to resident and non-resident frames.
 - Pause/resume.
 - WebGL context loss while playing and while uploading.
-- National/selected-site handoff during playback.
+- Typed Site/future-National transition while the old source remains painted.
+- A newer source request superseding an older transition before acquisition, transfer, and paint completion.
+- Matching paint acceptance followed by persistence.
+- Failed replacement rolling back to prior painted-source truth without persistence.
+- Stale source, generation, or observation receipts being rejected.
 - Raw failure activates tile fallback.
 
 Invariant assertions:
@@ -225,6 +229,23 @@ Invariant assertions:
 - Context epoch mismatch prevents draw.
 - Failure never marks data fresh.
 - Resource counts remain within budget.
+- Requested-source intent never replaces painted-source UI truth before receipt acceptance.
+- Persistence occurs only for the current intentional transition after matching GPU paint.
+
+### Phase 1 source-coordinator regression gate
+
+The behavior-preserving coordinator phase must prove:
+
+1. `RadarSourceKey` exhaustively distinguishes selected Site from the future CONUS National source.
+2. `SiteLevel2Session` passes the coordinator-owned generation into the existing qualified Level II acquisition and replacement path.
+3. Starting a newer transition makes every older completion non-authoritative.
+4. Failure clears the pending request but retains the previous painted source and observation.
+5. A mismatched source or stale generation receipt cannot paint, persist, or change the selected source.
+6. Startup's safe archive paint does not overwrite the stored intended live site.
+7. Diagnostic archive/Phase 5 transitions preserve their public APIs without changing persistence.
+8. `window.__MISTR_PHASE4__`, `window.__MISTR_PHASE5__`, and `window.__MISTR_PHASE6__` remain callable by their existing packaged runners.
+
+Phase 1 exit requires `npm run verify`, documentation and public-repository checks, whitespace validation, and the existing packaged Phase 4, 5, and 6 paths. An unavailable packaged path is reported as unverified rather than silently passed.
 
 ## 7. Performance plan
 

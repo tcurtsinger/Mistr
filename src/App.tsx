@@ -75,7 +75,16 @@ import {
   MAX_LIVE_HISTORY_FRAMES,
   prependLiveHistory,
 } from "./live/liveHistory";
-import { SiteRequestTracker } from "./live/siteRequestTracker";
+import {
+  RadarSessionCoordinator,
+  siteRadarSource,
+  type RadarSessionSnapshot,
+} from "./radar-session/RadarSessionCoordinator";
+import {
+  isRadarSourceSuperseded,
+  RadarSourceSupersededError,
+  SiteLevel2Session,
+} from "./radar-session/SiteLevel2Session";
 import { RadarChrome } from "./ui/RadarChrome";
 import {
   frameAgePresentation,
@@ -120,16 +129,22 @@ export function App() {
   const map = useRef<MapLibreMap | null>(null);
   const playbackControllerRef = useRef<ResidentPlaybackController | null>(null);
   const radarLayerRef = useRef<RadarCustomLayer | null>(null);
-  const selectedSiteRef = useRef(restoreLastSite());
-  const siteRequestTrackerRef = useRef(new SiteRequestTracker());
-  const paintedSiteRef = useRef("KTLX");
+  const startupSourceRef = useRef(siteRadarSource(restoreLastSite()));
+  const radarSessionCoordinatorRef = useRef<RadarSessionCoordinator | null>(null);
+  if (!radarSessionCoordinatorRef.current) {
+    radarSessionCoordinatorRef.current = new RadarSessionCoordinator({
+      persistPaintedSource(source) {
+        if (source.kind === "site") storeLastSite(source.siteIcao);
+      },
+    });
+  }
+  const siteLevel2SessionRef = useRef<SiteLevel2Session<Phase5Report> | null>(null);
   const radarModelRef = useRef<RadarSweepCpuModel | null>(null);
   const inspectionMarkerRef = useRef<maplibregl.Marker | null>(null);
   const inspectionPointRef = useRef<{ longitude: number; latitude: number } | null>(null);
   const interrogationObservationRef = useRef<string | null>(null);
   const queuedScrubRef = useRef<number | null>(null);
   const scrubRunningRef = useRef(false);
-  const acquireLiveRef = useRef<((site: string, freshOnly?: boolean) => Promise<Phase5Report>) | null>(null);
   const [runtime, setRuntime] = useState<RuntimeSnapshot>({
     shell: "browser",
     appVersion: "development",
@@ -165,6 +180,10 @@ export function App() {
     const timer = globalThis.setInterval(() => setNowUnixMs(Date.now()), 1_000);
     return () => globalThis.clearInterval(timer);
   }, []);
+
+  useEffect(() => radarSessionCoordinatorRef.current!.subscribe((snapshot) => {
+    synchronizeRadarSourceUi(snapshot, setRequestedSite, setSelectedSite);
+  }), []);
 
   useEffect(() => {
     if (!mapContainer.current || map.current) return;
@@ -217,6 +236,7 @@ export function App() {
     let layer: RadarCustomLayer | null = null;
     let controller: ResidentPlaybackController | null = null;
     let client: PackedSweepTransferClient | null = null;
+    let siteLevel2Session: SiteLevel2Session<Phase5Report> | null = null;
     let clickHandler: ((event: MapMouseEvent) => void) | null = null;
     let latestReport: Phase4Report | null = null;
     let activeScenario: Promise<Phase4ScenarioReport> | null = null;
@@ -248,7 +268,9 @@ export function App() {
         )
       ) return;
       radarModelRef.current = paintedModel;
-      paintedSiteRef.current = paintedModel.siteIcao;
+      radarSessionCoordinatorRef.current!.synchronizePaint(
+        radarPaintIdentity(paintedModel, receipt),
+      );
       setPaintedSourceKind(paintedModel.sourceKind);
       const synchronized = retainPaintedFallback(
         liveDisplay,
@@ -551,9 +573,11 @@ export function App() {
       const newestReceipt = initialReceipt;
       const initialModel = modelsById.get(newestReceipt.observationId);
       if (!initialModel) throw new Error("newest painted archive frame is unknown");
-      paintedSiteRef.current = initialModel.siteIcao;
       radarModelRef.current = initialModel;
       setPaintedSourceKind(initialModel.sourceKind);
+      radarSessionCoordinatorRef.current!.establishPaintedSource(
+        radarPaintIdentity(initialModel, newestReceipt),
+      );
       liveDisplay = initialLiveDisplay(frameTruth(initialModel, newestReceipt));
       publishPhase5({ display: liveDisplay });
       const activityAtResidency = await client.phase4ActivitySnapshot();
@@ -640,15 +664,20 @@ export function App() {
         freshOnly = false,
         timeoutSeconds = freshOnly ? 900 : 180,
         historyDirection: "after" | "before" = "after",
+        requestedGeneration?: number,
       ): Promise<Phase5Report> => {
         if (!layer || !controller || !client) throw new Error("live renderer is unavailable");
         const activeLayer = layer;
         const activeController = controller;
         const activeClient = client;
-        const generation = Math.max(
+        const minimumGeneration = Math.max(
           transferGeneration + 1,
           activeLayer.getSnapshot().generation + 1,
         );
+        const generation = requestedGeneration ?? minimumGeneration;
+        if (!Number.isSafeInteger(generation) || generation < minimumGeneration) {
+          throw new Error("requested site generation is no longer current");
+        }
         transferGeneration = generation;
         const appendingHistory = freshOnly
           && historyDirection === "after"
@@ -766,7 +795,6 @@ export function App() {
           nextHistory.forEach((residentModel) => {
             modelsById.set(residentModel.observationId, residentModel);
           });
-          paintedSiteRef.current = paintedModel.siteIcao;
           radarModelRef.current = paintedModel;
           setPaintedSourceKind(paintedModel.sourceKind);
           setTimelineFrames(nextHistory.map(timelineFrame));
@@ -908,14 +936,17 @@ export function App() {
         }
         return reachedHistoryLimit && historyLimit < MAX_LIVE_HISTORY_FRAMES;
       };
-      const startLiveSession = async (site: string): Promise<Phase5Report> => {
+      const startLiveSession = async (
+        site: string,
+        requestedGeneration?: number,
+      ): Promise<Phase5Report> => {
         const pollingSession = livePollingSession + 1;
         const historyLimit = diagnosticHistoryLimit;
         livePollingSession = pollingSession;
         liveSweepCursor = null;
         liveBackfillCursor = null;
         setLiveHistoryStatus(undefined);
-        const report = await acquireLive(site, false);
+        const report = await acquireLive(site, false, 180, "after", requestedGeneration);
         if (!cancelled && pollingSession === livePollingSession) {
           setLiveHistoryStatus("loading");
           void runLiveBackfill(site, pollingSession, historyLimit).then((stoppedAtLimit) => {
@@ -926,7 +957,30 @@ export function App() {
         }
         return report;
       };
-      acquireLiveRef.current = (site) => startLiveSession(site);
+      if (!layer) throw new Error("selected-site renderer is unavailable");
+      const siteSessionLayer = layer;
+      siteLevel2Session = new SiteLevel2Session({
+        coordinator: radarSessionCoordinatorRef.current!,
+        nextGeneration: () => Math.max(
+          transferGeneration + 1,
+          siteSessionLayer.getSnapshot().generation + 1,
+        ),
+        acquireAndPaint: async (siteIcao, generation) => {
+          const report = await startLiveSession(siteIcao, generation);
+          if (!report.receipt) {
+            throw new Error("selected-site session completed without an authoritative paint receipt");
+          }
+          return {
+            value: report,
+            paint: {
+              source: siteRadarSource(siteIcao),
+              generation: report.receipt.generation,
+              observationId: report.receipt.observationId,
+            },
+          };
+        },
+      });
+      siteLevel2SessionRef.current = siteLevel2Session;
       setSiteSelectionReady(true);
       setSiteRequestError((current) => (
         current === RADAR_ENGINE_PREPARING_ERROR ? null : current
@@ -945,10 +999,8 @@ export function App() {
         },
         startSession: async (site) => {
           const normalized = normalizeRadarSite(site);
-          selectedSiteRef.current = normalized;
-          const report = await startLiveSession(normalized);
-          if (!cancelled) setSelectedSite(normalized);
-          return report;
+          if (!siteLevel2Session) throw new Error("selected-site session is unavailable");
+          return siteLevel2Session.start(normalized, { persistOnPaint: false });
         },
         stopSession: async () => {
           livePollingSession += 1;
@@ -958,6 +1010,7 @@ export function App() {
             layer.getSnapshot().generation + 1,
           );
           transferGeneration = generation;
+          radarSessionCoordinatorRef.current!.cancelPending(generation);
           await client.begin(generation);
           if (residentLiveHistory) {
             setLiveHistoryStatus(
@@ -968,7 +1021,46 @@ export function App() {
         },
         acquire: (site, freshOnly, timeoutSeconds) => {
           livePollingSession += 1;
-          return acquireLive(site, freshOnly, timeoutSeconds);
+          const normalized = normalizeRadarSite(site);
+          if (!freshOnly) {
+            if (!siteLevel2Session) {
+              return Promise.reject(new Error("selected-site session is unavailable"));
+            }
+            return siteLevel2Session.start(normalized, { persistOnPaint: false });
+          }
+          const paintedSource = radarSessionCoordinatorRef.current!.snapshot().painted?.source;
+          if (paintedSource?.kind === "site" && paintedSource.siteIcao === normalized) {
+            return acquireLive(normalized, true, timeoutSeconds);
+          }
+          if (!siteLevel2Session) {
+            return Promise.reject(new Error("selected-site session is unavailable"));
+          }
+          return siteLevel2Session.startWith(
+            normalized,
+            async (siteIcao, generation) => {
+              const report = await acquireLive(
+                siteIcao,
+                true,
+                timeoutSeconds,
+                "after",
+                generation,
+              );
+              if (!report.receipt) {
+                throw new Error(
+                  "selected-site diagnostic completed without an authoritative paint receipt",
+                );
+              }
+              return {
+                value: report,
+                paint: {
+                  source: siteRadarSource(siteIcao),
+                  generation: report.receipt.generation,
+                  observationId: report.receipt.observationId,
+                },
+              };
+            },
+            { persistOnPaint: false },
+          );
         },
       };
       const phase6Report = (): Phase6Report => {
@@ -1063,77 +1155,82 @@ export function App() {
         // Packaged gates reuse the normal WebView profile. Supersede and await
         // any persisted-site startup request before restoring the measured
         // archive loop, so live publication cannot overlap gate measurements.
-        siteRequestTrackerRef.current.invalidate();
         livePollingSession += 1;
-        const generation = Math.max(
+        const minimumGeneration = Math.max(
           transferGeneration + 1,
           layer.getSnapshot().generation + 1,
         );
-        transferGeneration = generation;
-        await client.begin(generation);
-        await startupAcquisition?.catch(() => {});
-
-        const hydratedArchive = await hydrateArchiveLoop();
-        const preparedArchiveModels = hydratedArchive.map((model) => ({
-          ...model,
-          generation: BigInt(generation),
-        }));
-        const receipt = await controller.replaceResidentFrames(preparedArchiveModels);
-        const paintedModel = preparedArchiveModels.find(
-          (model) => model.observationId === receipt.observationId,
+        const transition = radarSessionCoordinatorRef.current!.beginTransition(
+          siteRadarSource("KTLX"),
+          minimumGeneration,
+          { persistOnPaint: false },
         );
-        if (!paintedModel) throw new Error("prepared archive paint receipt is unknown");
+        const generation = transition.generation;
+        transferGeneration = generation;
+        try {
+          await client.begin(generation);
+          await startupAcquisition?.catch(() => {});
 
-        modelsById.clear();
-        residentLiveHistory = null;
-        liveSweepCursor = null;
-        liveBackfillCursor = null;
-        setLiveHistoryStatus(undefined);
-        preparedArchiveModels.forEach((model) => modelsById.set(model.observationId, model));
-        paintedSiteRef.current = paintedModel.siteIcao;
-        selectedSiteRef.current = paintedModel.siteIcao;
-        radarModelRef.current = paintedModel;
-        setPaintedSourceKind(paintedModel.sourceKind);
-        updateDiagnosticSources(instance, paintedModel, createAlignmentReport(paintedModel));
-        setSelectedSite(paintedModel.siteIcao);
-        setRequestedSite(null);
-        setSiteRequestError(null);
-        setTimelineFrames(preparedArchiveModels.map(timelineFrame));
-        liveDisplay = initialLiveDisplay(frameTruth(paintedModel, receipt));
-        publishPhase5({ display: liveDisplay });
-        publish({
-          frames: summarizeFrames(preparedArchiveModels),
-          renderer: layer.getSnapshot(),
-          playback: controller.snapshot(),
-          activityAtResidency: await client.phase4ActivitySnapshot(),
-        });
-        return receipt;
+          const hydratedArchive = await hydrateArchiveLoop();
+          const preparedArchiveModels = hydratedArchive.map((model) => ({
+            ...model,
+            generation: BigInt(generation),
+          }));
+          const receipt = await controller.replaceResidentFrames(preparedArchiveModels);
+          const paintedModel = preparedArchiveModels.find(
+            (model) => model.observationId === receipt.observationId,
+          );
+          if (!paintedModel) throw new Error("prepared archive paint receipt is unknown");
+          if (!radarSessionCoordinatorRef.current!.acceptPaint(
+            transition,
+            radarPaintIdentity(paintedModel, receipt),
+          )) {
+            throw new RadarSourceSupersededError(
+              "archive diagnostic preparation was superseded before paint acceptance",
+            );
+          }
+
+          modelsById.clear();
+          residentLiveHistory = null;
+          liveSweepCursor = null;
+          liveBackfillCursor = null;
+          setLiveHistoryStatus(undefined);
+          preparedArchiveModels.forEach((model) => modelsById.set(model.observationId, model));
+          radarModelRef.current = paintedModel;
+          setPaintedSourceKind(paintedModel.sourceKind);
+          updateDiagnosticSources(instance, paintedModel, createAlignmentReport(paintedModel));
+          setSelectedSite(paintedModel.siteIcao);
+          setRequestedSite(null);
+          setSiteRequestError(null);
+          setTimelineFrames(preparedArchiveModels.map(timelineFrame));
+          liveDisplay = initialLiveDisplay(frameTruth(paintedModel, receipt));
+          publishPhase5({ display: liveDisplay });
+          publish({
+            frames: summarizeFrames(preparedArchiveModels),
+            renderer: layer.getSnapshot(),
+            playback: controller.snapshot(),
+            activityAtResidency: await client.phase4ActivitySnapshot(),
+          });
+          return receipt;
+        } catch (error) {
+          radarSessionCoordinatorRef.current!.failTransition(transition, error);
+          throw error;
+        }
       };
       // The packaged archive is a safe first paint, not a permanent demo mode.
       // Every launch proceeds to current live radar; a stored site chooses the
       // target and a fresh profile starts with KTLX.
-      const startupSite = selectedSiteRef.current;
-      const requestSequence = siteRequestTrackerRef.current.begin();
-      setRequestedSite(startupSite);
-      startupAcquisition = startLiveSession(startupSite).then(
+      const startupSite = startupSourceRef.current.siteIcao;
+      if (!siteLevel2Session) throw new Error("selected-site session is unavailable");
+      startupAcquisition = siteLevel2Session.start(startupSite).then(
         () => {
-          if (siteRequestTrackerRef.current.isCurrent(requestSequence)) {
-            setSelectedSite(startupSite);
-            setRequestedSite(null);
-            storeLastSite(startupSite);
-            setSiteRequestError(null);
-          }
+          setSiteRequestError(null);
         },
         (error: unknown) => {
-          if (siteRequestTrackerRef.current.isCurrent(requestSequence)) {
-            const fallbackSite = paintedSiteRef.current;
-            selectedSiteRef.current = fallbackSite;
-            setSelectedSite(fallbackSite);
-            setRequestedSite(null);
-            // A failed refresh does not earn persistence. Keep the last
-            // successfully painted live-site preference for the next launch.
-            setSiteRequestError(error instanceof Error ? error.message : String(error));
-          }
+          if (isRadarSourceSuperseded(error)) return;
+          // A failed refresh does not earn persistence. The coordinator keeps
+          // the prior painted source and the stored preference unchanged.
+          setSiteRequestError(error instanceof Error ? error.message : String(error));
         },
       );
     };
@@ -1152,7 +1249,6 @@ export function App() {
     return () => {
       cancelled = true;
       livePollingSession += 1;
-      siteRequestTrackerRef.current.invalidate();
       controller?.dispose();
       if (playbackControllerRef.current === controller) playbackControllerRef.current = null;
       if (radarLayerRef.current === layer) radarLayerRef.current = null;
@@ -1160,7 +1256,7 @@ export function App() {
       if (globalThis.__MISTR_PHASE4__) delete globalThis.__MISTR_PHASE4__;
       if (globalThis.__MISTR_PHASE5__) delete globalThis.__MISTR_PHASE5__;
       if (globalThis.__MISTR_PHASE6__) delete globalThis.__MISTR_PHASE6__;
-      acquireLiveRef.current = null;
+      if (siteLevel2SessionRef.current === siteLevel2Session) siteLevel2SessionRef.current = null;
       inspectionMarkerRef.current?.remove();
       inspectionMarkerRef.current = null;
       inspectionPointRef.current = null;
@@ -1282,14 +1378,11 @@ export function App() {
 
   const selectSite = (site: string) => {
     const normalized = normalizeRadarSite(site);
-    const acquire = acquireLiveRef.current;
-    if (!acquire) {
+    const session = siteLevel2SessionRef.current;
+    if (!session) {
       setSiteRequestError(RADAR_ENGINE_PREPARING_ERROR);
       return;
     }
-    const requestSequence = siteRequestTrackerRef.current.begin();
-    selectedSiteRef.current = normalized;
-    setRequestedSite(normalized);
     setSiteRequestError(null);
     setInterrogation(null);
     setInspectionSelected(false);
@@ -1297,25 +1390,15 @@ export function App() {
     inspectionMarkerRef.current = null;
     inspectionPointRef.current = null;
     interrogationObservationRef.current = null;
-    void acquire(normalized, false).then(
+    void session.start(normalized).then(
       () => {
-        if (siteRequestTrackerRef.current.isCurrent(requestSequence)) {
-          setSelectedSite(normalized);
-          setRequestedSite(null);
-          storeLastSite(normalized);
-          setSiteRequestError(null);
-        }
+        setSiteRequestError(null);
       },
       (error: unknown) => {
-        if (siteRequestTrackerRef.current.isCurrent(requestSequence)) {
-          const fallbackSite = paintedSiteRef.current;
-          selectedSiteRef.current = fallbackSite;
-          setSelectedSite(fallbackSite);
-          setRequestedSite(null);
-          // Preserve the last successful live-site preference when a new
-          // request fails, even when an archive fallback is what remains painted.
-          setSiteRequestError(error instanceof Error ? error.message : String(error));
-        }
+        if (isRadarSourceSuperseded(error)) return;
+        // Source rollback is coordinator-owned. The UI continues naming the
+        // prior painted site and persistence remains untouched.
+        setSiteRequestError(error instanceof Error ? error.message : String(error));
       },
     );
   };
@@ -1377,6 +1460,29 @@ function timelineFrame(model: RadarSweepCpuModel): TimelineFrame {
     observationId: model.observationId,
     observedAtUnixMs: model.observedAtUnixMs,
   };
+}
+
+function radarPaintIdentity(model: RadarSweepCpuModel, receipt: RadarPaintReceipt) {
+  return {
+    source: siteRadarSource(model.siteIcao),
+    generation: receipt.generation,
+    observationId: receipt.observationId,
+  };
+}
+
+function synchronizeRadarSourceUi(
+  snapshot: RadarSessionSnapshot,
+  setRequestedSite: (site: string | null) => void,
+  setSelectedSite: (site: string) => void,
+): void {
+  setRequestedSite(
+    snapshot.requestedSource?.kind === "site"
+      ? snapshot.requestedSource.siteIcao
+      : null,
+  );
+  if (snapshot.painted?.source.kind === "site") {
+    setSelectedSite(snapshot.painted.source.siteIcao);
+  }
 }
 
 function focusRadar(instance: MapLibreMap, model: RadarSweepCpuModel): void {

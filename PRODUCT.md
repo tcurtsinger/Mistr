@@ -24,6 +24,12 @@ Mistr is a focused radar instrument, not a general weather dashboard. Its select
 
 The product earns additional capabilities only when they improve live storm inspection without weakening performance, truthfulness, or maintainability.
 
+## Approved National Direction
+
+National radar is the approved next product milestone, but it is not part of the currently visible product. The active Phase 1 foundation introduces a typed radar-session coordinator and places the existing selected-site engine behind `SiteLevel2Session`. This internal boundary keeps requested-source intent separate from the source that actually painted, rejects stale generation receipts, rolls failed transitions back to the last painted source, and persists source choice only after authoritative GPU paint.
+
+Phase 1 does not add a `National` control, MRMS acquisition, a gridded renderer, National history, or a second active radar loop. The existing Site experience remains the only exposed radar source until the later static National phase can paint a complete, truthful CONUS observation. The approved phased product and engineering contract is [National Radar Implementation Plan](docs/26_NATIONAL_RADAR_IMPLEMENTATION_PLAN.md).
+
 ## Operating Context
 
 - The primary environment is a Windows desktop with mouse and keyboard, used at a desk during storm monitoring.
@@ -59,6 +65,8 @@ The product earns additional capabilities only when they improve live storm insp
 - Warnings, watches, outlooks, cameras, video, notifications, and unrelated weather overlays.
 - A large settings surface or general-purpose storm-command-center shell.
 - macOS as a release-blocking acceptance platform.
+
+The approved post-Alpha National milestone does not retroactively make any of these capabilities part of the shipped Alpha surface. Documentation and UI must continue to distinguish the active internal foundation from a usable National product.
 
 ### Platform policy
 

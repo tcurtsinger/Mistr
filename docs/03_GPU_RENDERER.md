@@ -2,7 +2,9 @@
 
 ## 1. Objective
 
-Render measured selected-site radar data inside MapLibre without representing each observation as a raster tile pyramid. The basemap and other GustAVO layers remain ordinary MapLibre layers; only selected-site radar uses a custom WebGL2 layer.
+Render measured selected-site radar data inside MapLibre without representing each observation as a raster tile pyramid. The basemap remains ordinary MapLibre content; selected-site radar uses its qualified polar WebGL2 layer. The approved future National source will use a separate numeric-grid custom layer rather than pretending MRMS is a polar sweep or a MapLibre radar-tile animation.
+
+National Phase 1 changes no shaders, textures, renderer resources, memory limits, paint receipts, or context-recovery behavior. It places the existing polar renderer behind `SiteLevel2Session` and a source coordinator while keeping the current selected-site draw path intact.
 
 ## 2. Required rendering contract
 
@@ -251,6 +253,8 @@ For site/product/elevation changes:
 - New resources are validated before atomic activation.
 - Old resources are freed only after they are no longer referenced by a draw.
 - A failed new generation cannot evict the last-known-good visible observation unless the operator explicitly disables it.
+
+The Phase 1 source coordinator now owns the intent/commit boundary around this transaction. Requested source remains separate from painted source, and only a receipt matching the current typed source and transition generation can commit source truth or persistence. A stale receipt is rejected even if its GPU work completed. Later National replacement must obey the same atomic rule while using its own gridded renderer and coverage-aware receipt.
 
 ## 14. Point interrogation
 

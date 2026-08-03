@@ -1,18 +1,18 @@
 # Alpha Current State
 
-**Checkpoint:** 2026-08-02
+**Checkpoint:** 2026-08-03
 
-**Merged baseline:** [PR #13 - Harden the radar chrome](https://github.com/tcurtsinger/Mistr/pull/13), merge commit `28322ef`
+**Merged baseline:** [PR #14 - Improve radar legibility and map context](https://github.com/tcurtsinger/Mistr/pull/14), merge commit `0b7b5ef`
 
-**Active change:** [PR #14 - Improve radar legibility and map context](https://github.com/tcurtsinger/Mistr/pull/14)
+**Active change:** National Phase 1 foundation; Ready-for-review PR pending from `codex/mistr-national-foundation`
 
-**Branch:** `codex/mistr-radar-legibility`
+**Branch:** `codex/mistr-national-foundation`
 
 This document is the durable starting point for the next Mistr development session. Verify the active branch, worktree, and any future pull-request checks or threads before acting because repository state can change after this checkpoint.
 
 ## Product decision
 
-Mistr is the product. Alpha remains deliberately narrow: one selected NEXRAD site, live high-resolution base reflectivity, smooth pan and zoom, and a truthful recent-observation timeline. National mosaic, velocity UI, alerts, cameras, video, notifications, broad settings, and the wider GustAVO feature set remain outside Alpha v1.
+Mistr is the product. The currently exposed product remains deliberately narrow: one selected NEXRAD site, live high-resolution base reflectivity, smooth pan and zoom, and a truthful recent-observation timeline. National radar is now an approved post-Alpha milestone, but no National data path or visible source control exists yet. Velocity UI, alerts, cameras, video, notifications, broad settings, and the wider GustAVO feature set remain outside the current product.
 
 Windows is the Alpha release platform. Shared Tauri, Rust, React, TypeScript, MapLibre, and WebGL code must continue to avoid unnecessary Windows-only assumptions so later macOS work remains practical.
 
@@ -95,7 +95,33 @@ Visible-first WebGL recovery remains in force. Context loss during an uncommitte
 
 The `window.__MISTR_PHASE4__`, `window.__MISTR_PHASE5__`, and `window.__MISTR_PHASE6__` diagnostic APIs remain required by packaged evidence runners. They are not normal product controls.
 
+## Active Phase 1 foundation
+
+This branch adds the internal source boundary required before National acquisition work can begin:
+
+- `RadarSourceKey` is a closed union of `{ kind: "site", siteIcao }` and the future `{ kind: "national", domain: "conus" }` identity;
+- `RadarSessionCoordinator` owns requested-source intent, last authoritative painted source, monotonic source-transition generations, supersession, rollback, stale receipt rejection, and persistence after paint;
+- `SiteLevel2Session` adapts the already-qualified selected-site acquisition/history/renderer path to that coordinator without changing Level II decoding, rolling history, playback, transfer credits, or GPU behavior;
+- the safe startup archive establishes painted Site truth without overwriting a stored live-site preference;
+- user and startup site requests persist only after a matching GPU receipt is accepted; diagnostic transitions do not persist;
+- failed or superseded transitions retain the previous painted source; and
+- no incomplete National UI, MRMS acquisition, PackedGrid wire, numeric-grid renderer, or National timeline is present.
+
+The existing Phase 4, 5, 6, readiness, history, UI, and map-quality diagnostic surfaces remain required and unchanged.
+
 ## Validation state
+
+The National Phase 1 foundation passes the full source and packaged regression contract on the branch checkpoint:
+
+- `npm run verify`: public scan of 225 candidate files, links across 76 Markdown files, 227 frontend tests, production TypeScript/Vite build, Rust formatting and clippy with warnings denied, 98 Rust tests across library and binaries, and Rust check;
+- packaged Phase 4: an unchanged rerun passed both 1,000-transition Native/Smooth scenarios at 3840x2160 with 20 residents, 6.2 ms frame-time P95, zero long tasks, zero hot-path acquisition/uploads, stable 53,099,312-byte GPU residency, and passing rolling-history/context-recovery evidence;
+- the first Phase 4 run crossed only the documented non-consecutive stabilized-heap sampling threshold while every radar-specific gate passed; the immediate unchanged rerun passed, so `DRF-004` remains closed under its existing two-consecutive-failures reopen rule;
+- packaged Phase 5 passed deterministic in-flight source supersession with the preserved `live_sweep_failed` diagnostic code, then painted two chronological KTLX observations beginning at provider volume 885 with direct oldest/newest scrubbing; and
+- packaged Phase 6 passed both release-runtime N0S, real WebGL context-recovery, minimize/restore, restart, and cold-start runs.
+
+An intermediate Phase 5 run exposed that wrapping a superseded provider error erased its established diagnostic code. Phase 1 now marks the original error object as superseded without replacing it, so UI callbacks can ignore stale work while packaged diagnostics retain the exact provider code. A regression test covers that ownership boundary.
+
+These results prove selected-site behavior through the coordinator refactor. They do not prove or imply any National acquisition, decoding, rendering, history, or UI behavior.
 
 The merged rolling-history change passed:
 
@@ -136,7 +162,7 @@ Release readiness also corrects a demonstrated installer defect: prior bundles d
 
 ## Pull-request checkpoint
 
-PR #8, rolling-history [PR #9](https://github.com/tcurtsinger/Mistr/pull/9), release-readiness [PR #10](https://github.com/tcurtsinger/Mistr/pull/10), UI/live-site hardening [PR #11](https://github.com/tcurtsinger/Mistr/pull/11), rendering quality [PR #12](https://github.com/tcurtsinger/Mistr/pull/12), and radar-chrome hardening [PR #13](https://github.com/tcurtsinger/Mistr/pull/13) are merged. Radar legibility is ready for review in [PR #14](https://github.com/tcurtsinger/Mistr/pull/14) on `codex/mistr-radar-legibility`. It is not a draft. Only the repository owner merges.
+PR #8, rolling-history [PR #9](https://github.com/tcurtsinger/Mistr/pull/9), release-readiness [PR #10](https://github.com/tcurtsinger/Mistr/pull/10), UI/live-site hardening [PR #11](https://github.com/tcurtsinger/Mistr/pull/11), rendering quality [PR #12](https://github.com/tcurtsinger/Mistr/pull/12), radar-chrome hardening [PR #13](https://github.com/tcurtsinger/Mistr/pull/13), and radar legibility [PR #14](https://github.com/tcurtsinger/Mistr/pull/14) are merged. National Phase 1 is isolated on `codex/mistr-national-foundation`; only the repository owner merges its eventual Ready-for-review PR.
 
 Review workflow:
 
@@ -150,7 +176,7 @@ Review workflow:
 
 ## Next work after this checkpoint
 
-Do not begin national radar work. Continue owner-led UI and runtime hardening, then return to Store packaging only after the normal radar surface is accepted. Real sleep/wake and clean-machine installation are closed. The existing NSIS and MSI evidence remains useful, but new public packaging waits for this surface to stabilize.
+Complete and review National Phase 1 only. After its Ready-for-review PR passes review, the owner merges it and separately authorizes Phase 2. Do not begin MRMS acquisition/decoding, PackedGrid, National rendering/history, or visible National controls on this branch. Microsoft Store packaging and signing remain paused.
 
 ## Public-repository safety
 

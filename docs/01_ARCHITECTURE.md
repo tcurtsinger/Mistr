@@ -2,7 +2,7 @@
 
 ## 1. Architecture principles
 
-1. **Bound the experiment.** Mistr replaces only selected-site radar transport and rendering.
+1. **Bound each source.** The implemented product still paints selected-site radar only; future National work enters through a separate session and renderer rather than changing Level II into a mosaic engine.
 2. **One authoritative state machine.** UI components display state; they do not infer data readiness.
 3. **No radar tiles in the selected-site hot path.** Radar observations are decoded datasets, not MapLibre raster sources.
 4. **No bulk JSON.** Large numeric data crosses the Tauri boundary as packed bytes.
@@ -10,14 +10,16 @@
 6. **Measured observations only.** Hard cuts are the default. Any interpolation must be explicitly labeled and never change stored values.
 7. **Resource ownership is explicit.** Every task, buffer, texture, event listener, and cancellation token has one owner and one release path.
 8. **Dev and packaged use the same contract.** Fixtures may replace the network, but they do not replace the decoder, wire format, renderer, or state machine.
-9. **Fallback is a first-class state.** The old tile path remains available during GustAVO integration.
+9. **Fallback is a first-class state.** A failed or superseded source transition preserves the last authoritative painted observation.
 
 ## 2. Top-level design
 
 ```mermaid
 flowchart LR
-    UI["Minimal React diagnostic UI"] --> ORCH["Radar coordinator"]
-    ORCH --> ACQ["Rust acquisition service"]
+    UI["React product UI"] --> ORCH["Radar Session Coordinator"]
+    ORCH --> SITE["SiteLevel2Session"]
+    ORCH -. "later phase" .-> NAT["NationalMrmsSession"]
+    SITE --> ACQ["Rust acquisition service"]
     ACQ --> L2A["Level II archive adapter"]
     ACQ --> L2C["Level II chunks adapter"]
     ACQ --> L3["Level III N0S adapter"]
@@ -32,6 +34,7 @@ flowchart LR
     IPC --> RES["Renderer resource manager"]
     RES --> GL["MapLibre WebGL2 custom layer"]
     GL --> MAP["Basemap and overlays"]
+    ORCH --> TRUTH["Requested source and painted-source truth"]
     ORCH --> OBS["Structured events and debug bundle"]
     ACQ --> OBS
     DEC --> OBS
@@ -74,14 +77,25 @@ The prototype should not have separate browser and packaged provider implementat
 
 ## 4. Component responsibilities
 
-### `RadarCoordinator`
+### `RadarSessionCoordinator`
 
-- Accept site/product/time-window intent.
-- Increment a generation on site, product, or request-window change.
-- Cancel work owned by the previous generation.
-- Request inventory and frames.
-- Enforce the state machine and loop policy.
-- Publish only metadata and identifiers to React.
+- Accept typed source intent through `RadarSourceKey`: `{ kind: "site", siteIcao }` or the future `{ kind: "national", domain: "conus" }`.
+- Keep requested-source intent separate from the last source proven by a GPU paint receipt.
+- Allocate monotonically increasing source-transition generations and supersede older requests.
+- Accept a transition only when source, generation, and observation identity match the current authoritative receipt.
+- Preserve painted-source truth on cancellation or failure.
+- Persist an intentional source choice only after matching paint acceptance; diagnostic transitions never persist.
+- Publish small source-state snapshots to React while leaving bulk data outside UI state.
+
+### `SiteLevel2Session`
+
+- Adapt the current selected-site Level II engine to the shared source coordinator.
+- Preserve current acquisition, decoder, rolling-history, two-credit IPC, renderer, playback, and recovery behavior.
+- Pass the coordinator-assigned transition generation through acquisition and GPU replacement.
+- Return the final paint identity for coordinator acceptance.
+- Reject a completion when a newer Site or future National request has superseded it.
+
+Phase 1 implements these two components without adding `NationalMrmsSession`, MRMS acquisition, or a visible National control.
 
 ### `AcquisitionService`
 
@@ -228,17 +242,20 @@ One response should contain one sweep unless measurement proves batching is bett
 - Cancellation revokes outstanding credits for the prior generation.
 - Metrics expose queued bytes on both sides.
 
-## 8. Selected-site and national radar coexistence
+## 8. Selected-site and National source sessions
 
-Mistr does not build a national mosaic.
+Mistr does not build a national mosaic from Level II sites and never switches sources automatically based on zoom.
 
-For eventual GustAVO integration:
+The approved model is one coordinator with exactly one active source generation and one painted source truth:
 
-- Below the established handoff zoom, the existing national mosaic remains authoritative.
-- At and above the handoff zoom, the raw selected-site layer becomes authoritative when healthy and resident.
-- A raw-layer failure may fall back to tiled selected-site radar with an explicit source/status change.
-- Products with different valid times are not blended as if simultaneous.
-- Handoff tests must cover both camera movement and timeline transitions.
+- `SiteLevel2Session` owns the currently implemented per-site Level II path.
+- A later `NationalMrmsSession` will own NOAA's processed `MergedBaseReflectivityQC` CONUS grid.
+- Site and National keep independent timelines, but only the painted source exposes one timeline at a time.
+- During transition the old source may remain visibly painted, but superseded backfill stops and the replacement does not become UI truth until a complete receipt commits.
+- After commit, the old source releases its complete loop; Mistr does not keep two permanent warm radar histories.
+- MapLibre source-loaded state, hidden opacity, and tile events are not radar readiness signals.
+
+Phase 1 establishes this ownership boundary around Site while deliberately shipping no National data or UI.
 
 ## 9. Cache architecture
 
