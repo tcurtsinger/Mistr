@@ -15,6 +15,7 @@ import type {
 } from "maplibre-gl";
 import fixtureManifest from "../fixtures/manifest.json";
 import openFreeMapDarkStyle from "./data/openFreeMapDarkStyle.json";
+import { radarContextAnchorLayerId } from "./data/radarMapContext";
 import { RADAR_SITES } from "./data/radarSites";
 import { configureMapLibreWorker } from "./mapWorker";
 import { mapReadinessError, updateMapReadiness, type MapReadiness } from "./mapReadiness";
@@ -537,7 +538,7 @@ export function App() {
         },
       });
       radarLayerRef.current = layer;
-      const beforeId = firstSymbolLayer(instance);
+      const beforeId = radarContextAnchorLayerId(instance.getStyle().layers ?? []);
       installDiagnosticLayers(instance, diagnosticModel, alignment, layer, beforeId);
       publish({ coexistence: currentLayerCoexistenceReport(instance) });
       controller = new ResidentPlaybackController(layer, [diagnosticModel], {
@@ -1753,10 +1754,6 @@ function removeDiagnosticLayers(map: MapLibreMap, radarLayer: RadarCustomLayer |
   for (const id of [ANCHOR_SOURCE_ID, RANGE_SOURCE_ID]) {
     if (map.getSource(id)) map.removeSource(id);
   }
-}
-
-function firstSymbolLayer(map: MapLibreMap): string | undefined {
-  return map.getStyle().layers?.find((layer) => layer.type === "symbol")?.id;
 }
 
 function emptyLayerCoexistenceReport(): LayerCoexistenceReport {

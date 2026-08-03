@@ -7,12 +7,18 @@ interface PaletteAnchor {
   color: Rgba;
 }
 
+interface OpacityAnchor {
+  dbz: number;
+  alpha: number;
+}
+
 // These anchors pin Mistr to the operational NOAA/NWS SR_BREF
 // `radar_reflectivity` WMS legend captured from the KAMX service on 2026-08-02:
 // https://opengeo.ncep.noaa.gov/geoserver/kamx/wms
-// The legend is a continuous five-dBZ ramp from -25 through 70 dBZ. Its valid
-// pixels are fully opaque while no-data pixels are transparent. Presentation
-// never changes the exact dBZ used by interrogation or playback truth.
+// The legend is a continuous five-dBZ ramp from -25 through 70 dBZ. Mistr keeps
+// those operational RGB thresholds, then applies a separate weak-return
+// visibility curve. Presentation never changes the exact dBZ used by
+// interrogation or playback truth.
 const REFLECTIVITY_ANCHORS: readonly PaletteAnchor[] = [
   { dbz: -25, color: [145, 137, 105, 255] },
   { dbz: -20, color: [164, 161, 107, 255] },
@@ -34,6 +40,20 @@ const REFLECTIVITY_ANCHORS: readonly PaletteAnchor[] = [
   { dbz: 60, color: [241, 185, 253, 255] },
   { dbz: 65, color: [241, 116, 253, 255] },
   { dbz: 70, color: [130, 0, 231, 255] },
+];
+
+// Level II marks many weak clear-air, biological, sea, and ground returns as
+// valid measurements. Painting all of them fully opaque makes that background
+// dominate both precipitation and map context. This conservative display-only
+// curve hides non-positive returns, lets weak positive returns emerge
+// progressively, and leaves operational precipitation fully opaque from
+// 20 dBZ upward. It does not classify clutter or mutate a measured value.
+const REFLECTIVITY_OPACITY_ANCHORS: readonly OpacityAnchor[] = [
+  { dbz: 0, alpha: 0 },
+  { dbz: 5, alpha: 56 },
+  { dbz: 10, alpha: 120 },
+  { dbz: 15, alpha: 184 },
+  { dbz: 20, alpha: 255 },
 ];
 
 export const RANGE_FOLDED_COLOR: Rgba = [144, 91, 211, 220];
@@ -120,9 +140,10 @@ export function colorForReflectivity(valueDbz: number): Rgba {
     throw new RangeError("reflectivity color requires a finite dBZ value");
   }
 
+  const alpha = reflectivityDisplayAlpha(valueDbz);
   const first = REFLECTIVITY_ANCHORS[0];
   if (valueDbz <= first.dbz) {
-    return first.color;
+    return withAlpha(first.color, alpha);
   }
 
   for (let index = 1; index < REFLECTIVITY_ANCHORS.length; index += 1) {
@@ -130,11 +151,31 @@ export function colorForReflectivity(valueDbz: number): Rgba {
     if (valueDbz <= upper.dbz) {
       const lower = REFLECTIVITY_ANCHORS[index - 1];
       const progress = (valueDbz - lower.dbz) / (upper.dbz - lower.dbz);
-      return interpolateRgba(lower.color, upper.color, progress);
+      return withAlpha(interpolateRgba(lower.color, upper.color, progress), alpha);
     }
   }
 
-  return REFLECTIVITY_ANCHORS[REFLECTIVITY_ANCHORS.length - 1].color;
+  return withAlpha(REFLECTIVITY_ANCHORS[REFLECTIVITY_ANCHORS.length - 1].color, alpha);
+}
+
+export function reflectivityDisplayAlpha(valueDbz: number): number {
+  if (!Number.isFinite(valueDbz)) {
+    throw new RangeError("reflectivity opacity requires a finite dBZ value");
+  }
+
+  const first = REFLECTIVITY_OPACITY_ANCHORS[0];
+  if (valueDbz <= first.dbz) return first.alpha;
+
+  for (let index = 1; index < REFLECTIVITY_OPACITY_ANCHORS.length; index += 1) {
+    const upper = REFLECTIVITY_OPACITY_ANCHORS[index];
+    if (valueDbz <= upper.dbz) {
+      const lower = REFLECTIVITY_OPACITY_ANCHORS[index - 1];
+      const progress = (valueDbz - lower.dbz) / (upper.dbz - lower.dbz);
+      return interpolateChannel(lower.alpha, upper.alpha, progress);
+    }
+  }
+
+  return REFLECTIVITY_OPACITY_ANCHORS[REFLECTIVITY_OPACITY_ANCHORS.length - 1].alpha;
 }
 
 function interpolateRgba(lower: Rgba, upper: Rgba, progress: number): Rgba {
@@ -148,6 +189,10 @@ function interpolateRgba(lower: Rgba, upper: Rgba, progress: number): Rgba {
 
 function interpolateChannel(lower: number, upper: number, progress: number): number {
   return Math.round(lower + (upper - lower) * progress);
+}
+
+function withAlpha(color: Rgba, alpha: number): Rgba {
+  return [color[0], color[1], color[2], alpha];
 }
 
 function writePremultiplied(target: Uint8Array, offset: number, color: Rgba) {

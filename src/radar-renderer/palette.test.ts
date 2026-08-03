@@ -4,6 +4,7 @@ import {
   buildStormRelativeVelocityPalette,
   colorForReflectivity,
   paletteColor,
+  reflectivityDisplayAlpha,
   RANGE_FOLDED_COLOR,
   TRANSPARENT_COLOR,
 } from "./palette";
@@ -29,11 +30,59 @@ describe("reflectivity palette", () => {
     ]);
   });
 
-  it("keeps every valid reflectivity code operationally opaque without a low-return cutoff", () => {
+  it("validates every 256-entry palette byte against its exact physical dBZ", () => {
+    const scale = 2;
+    const offset = 66;
+    const palette = buildReflectivityPalette(scale, offset);
+
+    for (let rawCode = 0; rawCode < 256; rawCode += 1) {
+      const uploaded = [...palette.slice(rawCode * 4, rawCode * 4 + 4)];
+      if (rawCode < 2) {
+        expect(uploaded).toEqual([0, 0, 0, 0]);
+        continue;
+      }
+
+      const exactDbz = (rawCode - offset) / scale;
+      const source = colorForReflectivity(exactDbz);
+      const alpha = source[3] / 255;
+      expect(uploaded).toEqual([
+        Math.round(source[0] * alpha),
+        Math.round(source[1] * alpha),
+        Math.round(source[2] * alpha),
+        source[3],
+      ]);
+    }
+  });
+
+  it("applies a monotonic weak-return visibility curve and preserves full operational opacity", () => {
     const palette = buildReflectivityPalette(2, 66);
 
-    for (let rawCode = 2; rawCode < 256; rawCode += 1) {
-      expect(palette[rawCode * 4 + 3]).toBe(255);
+    expect(reflectivityDisplayAlpha(-25)).toBe(0);
+    expect(reflectivityDisplayAlpha(0)).toBe(0);
+    expect(reflectivityDisplayAlpha(2.5)).toBe(28);
+    expect(reflectivityDisplayAlpha(5)).toBe(56);
+    expect(reflectivityDisplayAlpha(7.5)).toBe(88);
+    expect(reflectivityDisplayAlpha(10)).toBe(120);
+    expect(reflectivityDisplayAlpha(12.5)).toBe(152);
+    expect(reflectivityDisplayAlpha(15)).toBe(184);
+    expect(reflectivityDisplayAlpha(17.5)).toBe(220);
+    expect(reflectivityDisplayAlpha(20)).toBe(255);
+    expect(reflectivityDisplayAlpha(70)).toBe(255);
+
+    let previous = -1;
+    for (let dbz = -32; dbz <= 95; dbz += 0.1) {
+      const alpha = reflectivityDisplayAlpha(dbz);
+      expect(Number.isInteger(alpha)).toBe(true);
+      expect(alpha).toBeGreaterThanOrEqual(0);
+      expect(alpha).toBeLessThanOrEqual(255);
+      expect(alpha).toBeGreaterThanOrEqual(previous);
+      if (dbz <= 0) expect(alpha).toBe(0);
+      if (dbz >= 20) expect(alpha).toBe(255);
+      previous = alpha;
+    }
+
+    for (let rawCode = 106; rawCode < 256; rawCode += 1) {
+      expect(palette[rawCode * 4 + 3]).toBe(255); // scale 2, offset 66: >= 20 dBZ
     }
   });
 
@@ -45,13 +94,17 @@ describe("reflectivity palette", () => {
 
     expect(paletteColor("reflectivity", rawCode, 0, scale, offset))
       .toEqual(colorForReflectivity(exactDbz));
+    expect(paletteColor("reflectivity", rawCode, 0, scale, offset)[3]).toBe(28);
     expect(colorForReflectivity(exactDbz)).not.toEqual(colorForReflectivity(2));
     expect(colorForReflectivity(exactDbz)).not.toEqual(colorForReflectivity(3));
   });
 
   it("pins the NOAA operational SR_BREF anchor colors and interpolates between them", () => {
-    expect(colorForReflectivity(-32)).toEqual([145, 137, 105, 255]);
-    expect(colorForReflectivity(0)).toEqual([123, 136, 174, 255]);
+    expect(colorForReflectivity(-32)).toEqual([145, 137, 105, 0]);
+    expect(colorForReflectivity(0)).toEqual([123, 136, 174, 0]);
+    expect(colorForReflectivity(5)).toEqual([83, 106, 163, 56]);
+    expect(colorForReflectivity(10)).toEqual([80, 133, 183, 120]);
+    expect(colorForReflectivity(15)).toEqual([88, 193, 184, 184]);
     expect(colorForReflectivity(20)).toEqual([48, 214, 91, 255]);
     expect(colorForReflectivity(30)).toEqual([10, 115, 12, 255]);
     expect(colorForReflectivity(40)).toEqual([244, 202, 23, 255]);
@@ -59,7 +112,25 @@ describe("reflectivity palette", () => {
     expect(colorForReflectivity(60)).toEqual([241, 185, 253, 255]);
     expect(colorForReflectivity(70)).toEqual([130, 0, 231, 255]);
     expect(colorForReflectivity(80)).toEqual([130, 0, 231, 255]);
-    expect(colorForReflectivity(2.5)).toEqual([103, 121, 169, 255]);
+    expect(colorForReflectivity(2.5)).toEqual([103, 121, 169, 28]);
+  });
+
+  it("premultiplies progressive weak-return colors without changing their RGB lookup", () => {
+    const palette = buildReflectivityPalette(2, 66);
+    const cases = [
+      { rawCode: 66, source: [123, 136, 174, 0], uploaded: [0, 0, 0, 0] },
+      { rawCode: 76, source: [83, 106, 163, 56], uploaded: [18, 23, 36, 56] },
+      { rawCode: 86, source: [80, 133, 183, 120], uploaded: [38, 63, 86, 120] },
+      { rawCode: 96, source: [88, 193, 184, 184], uploaded: [63, 139, 133, 184] },
+      { rawCode: 106, source: [48, 214, 91, 255], uploaded: [48, 214, 91, 255] },
+    ];
+
+    for (const testCase of cases) {
+      expect(paletteColor("reflectivity", testCase.rawCode, 0, 2, 66))
+        .toEqual(testCase.source);
+      expect([...palette.slice(testCase.rawCode * 4, testCase.rawCode * 4 + 4)])
+        .toEqual(testCase.uploaded);
+    }
   });
 
   it("keeps N0S categories separate from reflectivity scaling", () => {
@@ -74,5 +145,6 @@ describe("reflectivity palette", () => {
   it("rejects invalid scale metadata", () => {
     expect(() => buildReflectivityPalette(0, 66)).toThrow("positive scale");
     expect(() => colorForReflectivity(Number.NaN)).toThrow("finite dBZ");
+    expect(() => reflectivityDisplayAlpha(Number.POSITIVE_INFINITY)).toThrow("finite dBZ");
   });
 });
