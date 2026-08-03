@@ -213,10 +213,11 @@ Chrome is content-sized rather than viewport-filling. The toolbar and playback b
 - User pan and zoom remain unconstrained after the initial fit.
 
 ### Operational Map Context
+- Land and water use close matte charcoal tones so a coastline reads as geography rather than a bright slab; parks and wooded areas remain secondary texture beneath radar.
 - The radar is inserted at an explicit context boundary rather than beneath every symbol. Local roads, paths, railways, buildings, water names, local road names, towns, and secondary places remain below it.
 - Coastlines, country and state boundaries, motorways, primary/trunk routes, major route identifiers, states, countries, and important city labels sit above radar using cool neutral contrast rather than Stormlight color.
 - Regional framing shows motorways first and delays primary/trunk density until closer zoom. At detailed zooms, restrained major-road casing and label halos remain legible across dark, green, yellow, red, and weak-return backgrounds. Neither treatment lowers the entire radar layer's opacity.
-- Local road names are title case, appear only at close zoom, and remain dim below radar. Important city labels receive more visual authority than route lines; missing sprite icons are not part of their presentation.
+- Local road names are title case, appear only at close zoom, and remain dim below radar. Important city labels receive more visual authority than route lines, while state labels use natural case and quieter contrast; missing sprite icons are not part of their presentation.
 - The map uses the existing bundled OpenFreeMap source graph; visual context does not introduce another provider or network path.
 
 ### Status and Recovery

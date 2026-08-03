@@ -58,6 +58,8 @@ Palette anchors may interpolate color and alpha for presentation, but each looku
 
 Radar is inserted at the explicit `mistr-coastline-context` boundary in the bundled style rather than below the map's first symbol. That boundary creates two intentional graphs without a second provider or global radar-opacity reduction.
 
+The base plane keeps land, water, parks, and wooded areas within a narrow matte-charcoal range. Water remains recognizable without becoming a large bright field, and the separate restrained coastline carries the geographic edge. Important cities remain the strongest neutral labels; state labels use natural case and quieter contrast so administrative text does not compete with precipitation.
+
 Below radar:
 
 - buildings, aeroways, paths, minor/service/track roads, secondary/tertiary roads, railways, and one-way markers;

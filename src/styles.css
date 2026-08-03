@@ -42,14 +42,25 @@ button { color: inherit; }
 .map-surface { position: absolute; inset: 0; }
 .maplibregl-map { font-family: "Barlow Semi Condensed", "Segoe UI", sans-serif; }
 .maplibregl-ctrl-top-right { top: 8px; right: 8px; }
-.maplibregl-ctrl-attrib.maplibregl-compact {
+.maplibregl-ctrl-attrib,
+.maplibregl-ctrl-attrib.maplibregl-compact-show {
   background: rgba(5, 5, 6, 0.62);
   color: rgba(174, 184, 194, 0.58);
+  box-shadow: none;
+}
+.maplibregl-ctrl-attrib.maplibregl-compact {
   opacity: 0.72;
   transition: opacity 140ms ease-out;
 }
 .maplibregl-ctrl-attrib.maplibregl-compact:hover,
 .maplibregl-ctrl-attrib.maplibregl-compact:focus-within { opacity: 0.9; }
+.maplibregl-ctrl-attrib-button {
+  opacity: 0.52;
+  transition: opacity 140ms ease-out;
+}
+.maplibregl-ctrl-attrib-button:hover,
+.maplibregl-ctrl-attrib-button:focus-visible,
+.maplibregl-ctrl-attrib.maplibregl-compact-show .maplibregl-ctrl-attrib-button { opacity: 0.86; }
 .maplibregl-ctrl-attrib a { color: rgba(218, 226, 234, 0.72); }
 
 .radar-chrome {

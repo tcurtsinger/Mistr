@@ -48,6 +48,14 @@ describe("quiet operational radar map context", () => {
     expect(Object.keys(style.sources).sort()).toEqual(["ne2_shaded", "openmaptiles"]);
   });
 
+  it("uses close matte tones for the land-water base plane", () => {
+    expect(paint("background")["background-color"]).toBe("rgb(12,12,12)");
+    expect(paint("water")["fill-color"]).toBe("rgb(18,20,24)");
+    expect(paint("waterway")["line-color"]).toBe("rgb(18,20,24)");
+    expect(paint("landcover_wood")["fill-color"]).toBe("rgb(20,21,22)");
+    expect(paint("landuse_park")["fill-color"]).toBe("rgb(20,21,22)");
+  });
+
   it("keeps only essential geographic context above the explicit radar anchor", () => {
     const anchorIndex = layers.findIndex(
       (candidate) => candidate.id === RADAR_CONTEXT_ANCHOR_LAYER_ID,
@@ -107,13 +115,13 @@ describe("quiet operational radar map context", () => {
           ["linear"],
           ["zoom"],
           4,
-          0.3,
+          0.28,
           8,
-          0.34,
+          0.32,
           12,
-          0.38,
+          0.36,
           16,
-          0.42,
+          0.4,
         ],
       },
     });
@@ -171,8 +179,8 @@ describe("quiet operational radar map context", () => {
 
   it("uses title-case city labels without missing sprite dependencies", () => {
     const expected = {
-      place_city_large: ["rgba(232,236,240,0.86)", 14, 1.3],
-      place_city: ["rgba(218,226,234,0.76)", 11, 1.15],
+      place_city_large: ["rgba(226,232,238,0.82)", 14, 1.2],
+      place_city: ["rgba(208,216,224,0.68)", 11, 1],
       place_town: ["rgba(170,180,190,0.50)", 10, 1],
     } as const;
 
@@ -190,6 +198,15 @@ describe("quiet operational radar map context", () => {
       });
       expect(layout(id)).not.toHaveProperty("icon-image");
       expect(layout(id)).not.toHaveProperty("text-transform");
+    }
+  });
+
+  it("keeps administrative labels natural-case and subordinate to cities", () => {
+    expect(layout("place_state")).not.toHaveProperty("text-transform");
+    expect(paint("place_state")["text-color"]).toBe("rgba(182,192,202,0.46)");
+
+    for (const id of ["place_country_other", "place_country_minor", "place_country_major"]) {
+      expect(paint(id)["text-color"]).toBe("rgba(180,190,200,0.44)");
     }
   });
 });
