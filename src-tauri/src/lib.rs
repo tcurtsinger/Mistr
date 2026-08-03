@@ -1,6 +1,9 @@
 pub mod acquisition;
 pub mod chunk_assembly;
 pub mod live_pipeline;
+pub mod mrms;
+pub mod national_phase2;
+pub mod packed_grid;
 pub mod packed_sweep;
 mod phase2_ipc;
 pub mod radar;
@@ -11,6 +14,7 @@ use tauri::{Manager, webview::PageLoadEvent};
 pub fn run() {
     tauri::Builder::default()
         .manage(phase2_ipc::TransferBroker::default())
+        .manage(national_phase2::NationalPhase2State::default())
         .setup(|app| {
             let resource_root = app.path().resource_dir()?;
             app.manage(phase2_ipc::RuntimeResources::new(resource_root));
@@ -42,6 +46,9 @@ pub fn run() {
             phase2_ipc::request_phase6_n0s_fixture_sweep,
             phase2_ipc::request_phase5_live_sweep,
             phase2_ipc::benchmark_phase2_encoder,
+            national_phase2::prepare_national_phase2_diagnostic,
+            national_phase2::request_national_packed_grid_manifest,
+            national_phase2::request_national_packed_grid_chunk,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Mistr");

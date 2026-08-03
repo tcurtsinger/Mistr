@@ -96,7 +96,7 @@
 
 **Reason:** UI state, data sessions, and renderers must not maintain independent source or timeline authority.
 
-**Phase 1 result:** `RadarSessionCoordinator` and `SiteLevel2Session` implement this boundary around current Site behavior. No National session, control, acquisition, or renderer is present yet.
+**Implemented result:** Merged Phase 1 supplies `RadarSessionCoordinator` and `SiteLevel2Session` around current Site behavior. Phase 2 uses a non-persisting National transition only for hidden acquisition/transfer evidence; there is still no National session, control, or renderer.
 
 ### D016 — Separate source sessions and renderers
 
@@ -121,6 +121,32 @@
 **Decision:** Active playback and timeline dragging use the finest complete presentation level available for every playable National observation at the viewport. Fine selected-frame refinement occurs only after pause or scrub settle.
 
 **Reason:** Missing fine detail must not stall motion or make frames alternate visibly between coarse and detailed quality.
+
+### D020 — Strict product-specific MRMS decoding
+
+**Decision:** Phase 2 accepts only anonymous HTTPS from the fixed NOAA MRMS host, exact `MergedBaseReflectivityQC_00.50` keys, and the reviewed GRIB2/PNG/grid/scaling/status structure. Unknown structure fails closed. The normalized value is the exact two-byte unsigned raw code plus GRIB metadata; observed fixtures never define the allowed value domain.
+
+**Reason:** A bounded, reviewable adapter prevents provider errors or format drift from becoming numeric truth while still accepting valid rare codes that were absent from development data.
+
+### D021 — `PackedGrid v1` is distinct from `PackedSweep v1`
+
+**Decision:** A National frame uses one bounded big-endian manifest plus independently bounded, hashed numeric chunks carrying repeated generation/observation/content identity. It is not encoded as a polar sweep, a MapLibre source, or provider imagery. Both record types use the single existing global two-credit broker.
+
+**Reason:** Rectilinear CONUS geometry and level/chunk residency differ fundamentally from a selected-site polar scan, while shared transfer ownership prevents a hidden second queue.
+
+### D022 — Value-aware power-of-two National levels
+
+**Decision:** Overview reduction preserves the strongest valid dBZ; if no valid source cell exists it preserves missing before no coverage. Integer-code averaging and ordinary mipmapping are forbidden. Phase 2's release diagnostic uses factor 4 and 256-cell interiors with one-cell halos.
+
+**Reason:** CONUS overviews require reduction, but numeric/status truth and small storm features cannot be preserved by image averaging.
+
+### D023 — Phase 2 remains diagnostic-only
+
+**Decision:** Phase 2 may list, download, decode, generate levels, cache prepared data, and transfer `PackedGrid v1` only through hidden diagnostics. It may not install `NationalMrmsSession`, paint a National frame, publish National UI/timeline truth, or persist a National choice. A diagnostic run ends by restoring the established Site loop.
+
+**Reason:** Source acquisition and wire safety can be reviewed independently without exposing a partially implemented product or weakening the old-source-visible paint contract.
+
+**Phase 2 evidence:** The final packaged release run retained 30 exact compressed source objects in 44,094,473 bytes, decoded 30 distinct observations spanning 57.90 minutes, validated 840 factor-4 chunks, measured 96,243,964 bytes for 30 frames plus staging below the 200 MiB target, proved third-request backpressure at the shared two-credit limit, transferred the newest 28-chunk frame, and restored 20 KTLX Site residents. This is not renderer or product evidence.
 
 ## 2. Decisions required before implementation
 

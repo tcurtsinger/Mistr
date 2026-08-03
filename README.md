@@ -10,6 +10,8 @@ The map remains fully interactive while playback behaves like a bounded game loo
 
 The underlying engine has passed the historical Phase 0 through 6 feasibility gates on the primary Windows workstation, including 20-frame GPU-resident playback, bounded live Level II acquisition, strict Level III `N0S` decoding, and visible-first WebGL context recovery. Those phase records remain as engineering evidence rather than product UI.
 
+National radar remains an internal, phased milestone rather than a visible feature. Merged Phase 1 supplies the shared source coordinator. The active National Phase 2 branch adds fixed-host NOAA MRMS acquisition, strict GRIB2/PNG numeric decoding, value-aware overview generation, and `PackedGrid v1` transfer only through a hidden diagnostic. It does not include a National renderer, timeline, history product, or source control.
+
 Every launch paints the newest bundled pinned archive observation as a safe bridge without first decoding the entire diagnostic loop, then automatically acquires current live radar for the stored site or KTLX on a fresh profile. The single searchable picker exposes the 155 operational WSR-88D sites qualified against the fixed live provider, including Alaska, Hawaii, Guam, and Puerto Rico. Test, TDWR, decommissioned, and provider-absent identifiers are excluded. After current live radar paints, Mistr loads up to 19 safe preceding volumes into a chronological GPU-resident loop, then requests exact-next future volumes. Retained frames are reused, only the added frame is uploaded, and the oldest is evicted at the bound. See [Bounded Rolling Live History](docs/21_BOUNDED_ROLLING_LIVE_HISTORY.md) for the exact ownership contract, [Alpha UI and Live-Site Hardening](docs/23_ALPHA_UI_AND_SITE_HARDENING.md) for the catalog decisions, and [Visible-First Startup and Recent Backfill](docs/24_VISIBLE_FIRST_STARTUP_AND_RECENT_BACKFILL.md) for the startup correction.
 
 Reflectivity keeps the operational NOAA/NWS RGB thresholds while using a display-only weak-return visibility curve: non-positive dBZ is transparent, positive returns grow through a quiet near-linear fade to full opacity at 20 dBZ, and native measured dBZ remains available to inspection. The existing map graph keeps matte water, local streets, buildings, railways, water names, and secondary places below radar; only major routes, boundaries, and important labels remain above it. Water polygons are intentionally not outlined because their vector-tile seams change with zoom. Motorway, trunk, and primary segments share a continuous style instead of swapping visibility and weight at hard zoom boundaries. Far regional views retain coherent interstate and U.S.-highway networks while state and unnetworked routes fade in with the detailed source graph. This preserves legibility without globally lowering radar opacity, adding another provider, or claiming meteorological clutter classification. See [Radar Rendering Quality](docs/25_RADAR_RENDERING_QUALITY.md).
@@ -52,7 +54,7 @@ npm run test:alpha:sleep-wake
 
 The sleep/wake check waits for a real user-triggered Windows sleep cycle and reconnects its diagnostic channel after wake. The clean-machine command requires Windows Sandbox or an equivalent clean Windows 11 environment. See [Alpha Release Readiness](docs/22_ALPHA_RELEASE_READINESS.md) for the exact evidence and remaining unsigned-package decision.
 
-Downloaded radar data and generated diagnostics are intentionally ignored by Git. No AWS credentials are used: the fixtures are fetched from a public Unidata NEXRAD bucket.
+Downloaded radar data and generated diagnostics are intentionally ignored by Git. No AWS credentials are used: source observations come from fixed public Unidata NEXRAD and NOAA MRMS endpoints.
 
 ## Engineering validation
 
@@ -83,6 +85,18 @@ cargo run --release --locked --manifest-path src-tauri\Cargo.toml --bin mistr-wi
 ```
 
 The accepted byte layout is documented in [PackedSweep v1](docs/14_PACKED_SWEEP_V1.md), and the packaged-runtime evidence is in the [Phase 2 report](docs/phase-reports/PHASE_2_PACKED_WIRE_AND_IPC.md).
+
+### National Phase 2 acquisition and PackedGrid diagnostic
+
+Run the real release/WebView2 diagnostic with:
+
+```powershell
+npm run test:national:phase2:packaged
+```
+
+It discovers and strictly decodes the latest 30 exact CONUS `MergedBaseReflectivityQC_00.50` observations, validates each factor-4 `PackedGrid v1` working set, proves that a 30-observation extension stays below the radar memory target without changing schema or renderer model, transfers the newest manifest and all chunks through the existing global two-credit broker, and restores the unchanged Site diagnostic loop. The command exposes no normal product control. Downloaded observations and the generated report remain ignored.
+
+The small cross-language fixture and independent multi-season numeric oracle are committed under `fixtures/expected/national-phase2/`. Regenerate the oracle only in the ignored `.oracle-venv` with `npm run oracle:national`; the script downloads large NOAA samples only into `fixtures/cache/`.
 
 ### Phase 4 packaged playback gate
 

@@ -21,6 +21,7 @@
     "test:phase4:packaged": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-phase4-packaged.ps1",
     "test:phase5:packaged": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-phase5-packaged.ps1",
     "test:phase6:packaged": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-phase6-packaged.ps1",
+    "test:national:phase2:packaged": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-national-phase2-packaged.ps1",
     "test:alpha:readiness": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-alpha-readiness-packaged.ps1",
     "test:alpha:soak": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-alpha-live-soak.ps1",
     "test:alpha:installers": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-alpha-installer-validation.ps1",
@@ -32,6 +33,7 @@
     "fixture:verify:phase4": "node scripts/verify-fixtures.mjs --set phase4KtlxReflectivityLoop",
     "fixture:verify:phase6": "node scripts/verify-fixtures.mjs --set phase6N0sCorpus && node scripts/verify-fixtures.mjs --set phase6TlxIemComparison",
     "oracle:n0s": "node scripts/oracle/level3-n0s.mjs",
+    "oracle:national": ".oracle-venv\\Scripts\\python.exe scripts/oracle/mrms-national.py",
     "public:check": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-public-repo.ps1"
   },
   "dependencies": {

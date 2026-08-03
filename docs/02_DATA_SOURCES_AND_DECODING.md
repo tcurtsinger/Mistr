@@ -13,7 +13,7 @@ Primary public buckets:
 | `s3://unidata-nexrad-level3` | Selected real-time Level III products | Implemented official `N0S` storm-relative velocity path |
 | Existing NOAA/NWS `SR_BREF` WMS | Current selected-site tiled reflectivity | Visual/latency comparison and fallback only |
 | Existing IEM RIDGE `N0S` | Current selected-site tiled SRV | Product parity, latency comparison, fallback only |
-| NOAA `noaa-mrms-pds` `CONUS/MergedBaseReflectivityQC_00.50/` | Planned National CONUS base-reflectivity mosaic | Approved future numeric source; no Phase 1 acquisition or decoder |
+| NOAA `noaa-mrms-pds` `CONUS/MergedBaseReflectivityQC_00.50/` | Planned National CONUS base-reflectivity mosaic | Phase 2 diagnostic-only fixed-host acquisition, strict numeric decode, levels, and `PackedGrid v1`; not a visible product source |
 
 The current AWS Open Data registry names `unidata-nexrad-level2` as archive data, `unidata-nexrad-level2-chunks` as real-time Level II data, and `unidata-nexrad-level3` as selected real-time Level III data.
 
@@ -75,9 +75,15 @@ Mistr must not initially:
 
 Level II is per-site and Mistr will not combine sites into a mosaic. The approved future National source is NOAA MRMS `MergedBaseReflectivityQC` for CONUS: NOAA has already performed the multi-radar processing and quality control, while Mistr will validate, decode, preserve, and render the numeric grid without claiming mosaic authorship.
 
-The active Phase 1 branch adds only typed source-session coordination. It performs no MRMS listing, download, gzip expansion, GRIB2/PNG decode, normalization, caching, or transfer. Those responsibilities begin in Phase 2 under the strict fixed-host, exact-object, size-bounded, fail-closed contract in [National Radar Implementation Plan](26_NATIONAL_RADAR_IMPLEMENTATION_PLAN.md).
+Merged Phase 1 added only typed source-session coordination. The active Phase 2 branch implements the data foundation through hidden diagnostics: fixed-host inventory and object download, gzip expansion, strict GRIB2/PNG decode, exact normalization, value-aware level generation, directly indexed bounded caching, and `PackedGrid v1` transfer. It still does not create a `NationalMrmsSession`, renderer, timeline, point interrogation path, or visible National control.
 
 National's durable normalized baseline is a two-byte unsigned raw code plus declared GRIB scaling and status metadata. Development fixtures confirm correctness but never define an observed-value allowlist. Unsupported template, bit depth, scaling, packing, grid, or status metadata rejects the new observation and preserves the last painted source.
+
+The Phase 2 adapter accepts only `https://noaa-mrms-pds.s3.amazonaws.com/` and exact keys under `CONUS/MergedBaseReflectivityQC_00.50/YYYYMMDD/`. Inventory is bounded to 1,000 objects and 2 MiB per listed day; current and previous UTC days are combined only when required, deduplicated, sorted by filename/GRIB measured time, and selected newest by measurement rather than response order. Object responses are capped at 16 MiB compressed, redirects are disabled, declared and streamed sizes are checked, and HTML/XML error bodies cannot masquerade as a successful binary response.
+
+The decoder is intentionally product-specific rather than a general GRIB implementation. It requires one complete GRIB2 message with discipline 209, the reviewed identification and product fields, the exact 7,000 by 3,500 north-to-south CONUS regular latitude/longitude grid, Template 5.41 PNG packing, 16-bit non-interlaced grayscale PNG data, no bitmap, and the reviewed `R=-9990`, `E=0`, `D=1` scaling. The numeric formula is `(R + X * 2^E) / 10^D`; raw `9000` is missing and raw `0` is no coverage. Every other `u16` code is structurally valid and decoded by that metadata, including values absent from all fixtures. Format drift fails closed with a stage-specific diagnostic rather than guessing.
+
+The four-season public oracle compares all 24,500,000 cells per sample against ecCodes, records zero formula disagreements, and keeps only hashes, counts, point samples, and tiny windows in Git. The reviewed development sample additionally pins compressed, expanded-GRIB, and normalized big-endian hashes. Downloaded NOAA observations stay in ignored `fixtures/cache/` paths.
 
 ### 3.5 Source identity boundary
 
@@ -89,7 +95,7 @@ type RadarSourceKey =
   | { kind: "national"; domain: "conus" };
 ```
 
-Archive and live Level II observations for one station both satisfy the same top-level Site intent. Their exact provider source remains in observation provenance and paint truth. A later National observation will retain its MRMS product, domain, object key, hash, and measured time without being represented as a polar sweep.
+Archive and live Level II observations for one station both satisfy the same top-level Site intent. Their exact provider source remains in observation provenance and paint truth. Phase 2's `PackedGrid v1` retains the MRMS product, domain, provider, object key, content hash, measured time, grid transform, scaling/status metadata, presentation level, and chunk geometry without representing the observation as a polar sweep. That identity is diagnostic transfer truth only until a later renderer produces an authoritative National paint receipt.
 
 ## 4. Acquisition modes
 

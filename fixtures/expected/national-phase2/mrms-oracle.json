@@ -1,0 +1,496 @@
+{
+  "schemaVersion": 1,
+  "independentDecoder": "ecCodes=2.44.0",
+  "transportDecoder": "Pillow=12.3.0",
+  "contract": {
+    "formula": "(R + X * 2^E) / 10^D",
+    "referenceValue": -9990.0,
+    "binaryScaleFactor": 0,
+    "decimalScaleFactor": 1,
+    "bitDepth": 16,
+    "missingRaw": 9000,
+    "noCoverageRaw": 0,
+    "structuralRawMinimum": 0,
+    "structuralRawMaximum": 65535
+  },
+  "syntheticNeverObserved": [
+    {
+      "rawCode": 1,
+      "expectedDbz": -998.9
+    },
+    {
+      "rawCode": 65535,
+      "expectedDbz": 5554.5
+    }
+  ],
+  "malformedCases": [
+    "wrong_host",
+    "wrong_object_key",
+    "html_200_body",
+    "gzip_expansion_over_limit",
+    "wrong_grib_edition_or_discipline",
+    "section_reorder_or_trailing_bytes",
+    "wrong_product_or_grid",
+    "unsupported_packing_scaling_or_status",
+    "png_wrong_dimensions_bit_depth_or_interlace",
+    "filename_message_time_mismatch"
+  ],
+  "samples": [
+    {
+      "season": "fall",
+      "objectKey": "CONUS/MergedBaseReflectivityQC_00.50/20251015/MRMS_MergedBaseReflectivityQC_00.50_20251015-180213.grib2.gz",
+      "observationTimeUtc": "20251015-180213",
+      "compressedBytes": 505749,
+      "compressedSha256": "afd2ddafaa72d8da563fa63ce18c2e09eca4bb18a823c5c328f3064d9313f1e4",
+      "gribBytes": 545048,
+      "gribSha256": "2b2738090ef819a00d63dc77f04aa10478f2bb4ef01e89b42e4365048b09892c",
+      "pngBytes": 544869,
+      "normalizedRawBigEndianSha256": "d0d9fb1dd9193355a440105a369b446518f4bff6f82a246723f72f326851bedc",
+      "ecCodesTenthsBigEndianSha256": "82155baea260fd2f65659021536d58e825689dccd2f1ee6122a1db6e5164cbca",
+      "formulaMismatchCount": 0,
+      "counts": {
+        "valid": 350326,
+        "missing": 15880797,
+        "noCoverage": 8268877
+      },
+      "validRange": {
+        "minimumDbz": -20.5,
+        "maximumDbz": 60.5
+      },
+      "sampleCells": [
+        {
+          "index": 0,
+          "row": 0,
+          "column": 0,
+          "latitudeDegrees": 54.995,
+          "longitudeDegrees": -129.995,
+          "rawCode": 0,
+          "ecCodesDbz": -999.0
+        },
+        {
+          "index": 254,
+          "row": 0,
+          "column": 254,
+          "latitudeDegrees": 54.995,
+          "longitudeDegrees": -127.455,
+          "rawCode": 9000,
+          "ecCodesDbz": -99.0
+        },
+        {
+          "index": 6355999,
+          "row": 907,
+          "column": 6999,
+          "latitudeDegrees": 45.925,
+          "longitudeDegrees": -60.005,
+          "rawCode": 9785,
+          "ecCodesDbz": -20.5
+        },
+        {
+          "index": 8536787,
+          "row": 1219,
+          "column": 3787,
+          "latitudeDegrees": 42.805,
+          "longitudeDegrees": -92.125,
+          "rawCode": 10105,
+          "ecCodesDbz": 11.5
+        },
+        {
+          "index": 10032815,
+          "row": 1433,
+          "column": 1815,
+          "latitudeDegrees": 40.665,
+          "longitudeDegrees": -111.845,
+          "rawCode": 10595,
+          "ecCodesDbz": 60.5
+        }
+      ],
+      "goldenWindow": {
+        "row": 1431,
+        "column": 1813,
+        "width": 4,
+        "height": 4,
+        "rawCodes": [
+          10500,
+          10525,
+          10540,
+          10510,
+          10525,
+          10535,
+          10555,
+          10490,
+          10505,
+          10585,
+          10595,
+          10485,
+          10565,
+          10580,
+          10550,
+          10555
+        ]
+      },
+      "ecCodesMetadata": {
+        "edition": 2,
+        "discipline": 209,
+        "parameterCategory": 11,
+        "parameterNumber": 0,
+        "gridType": "regular_ll",
+        "Ni": 7000,
+        "Nj": 3500,
+        "latitudeOfFirstGridPointInDegrees": 54.995,
+        "longitudeOfFirstGridPointInDegrees": 230.005,
+        "latitudeOfLastGridPointInDegrees": 20.005001,
+        "longitudeOfLastGridPointInDegrees": 299.994998,
+        "iDirectionIncrementInDegrees": 0.01,
+        "jDirectionIncrementInDegrees": 0.01,
+        "scanningMode": 0,
+        "packingType": "grid_png",
+        "bitsPerValue": 16,
+        "referenceValue": -9990.0,
+        "binaryScaleFactor": 0,
+        "decimalScaleFactor": 1
+      }
+    },
+    {
+      "season": "winter",
+      "objectKey": "CONUS/MergedBaseReflectivityQC_00.50/20260115/MRMS_MergedBaseReflectivityQC_00.50_20260115-180017.grib2.gz",
+      "observationTimeUtc": "20260115-180017",
+      "compressedBytes": 1458822,
+      "compressedSha256": "012bd4e6beeb83de4617dd8988c2eb656982a95255435def80e0c76db3c62cac",
+      "gribBytes": 1513982,
+      "gribSha256": "2fc4a44d74644e9686c31c2fc389c538491a444f83a96d542a252d10d565d170",
+      "pngBytes": 1513803,
+      "normalizedRawBigEndianSha256": "c96990f9f3cb88619d49bcde9f763cd24d398cc45825616caf35abfd7f0fd1a2",
+      "ecCodesTenthsBigEndianSha256": "e5bd14467f520570824ac050c8e691d73b4f147cb7cf6c1462a9f1e5a4c8c04d",
+      "formulaMismatchCount": 0,
+      "counts": {
+        "valid": 1423805,
+        "missing": 14701965,
+        "noCoverage": 8374230
+      },
+      "validRange": {
+        "minimumDbz": -32.0,
+        "maximumDbz": 55.5
+      },
+      "sampleCells": [
+        {
+          "index": 0,
+          "row": 0,
+          "column": 0,
+          "latitudeDegrees": 54.995,
+          "longitudeDegrees": -129.995,
+          "rawCode": 0,
+          "ecCodesDbz": -999.0
+        },
+        {
+          "index": 254,
+          "row": 0,
+          "column": 254,
+          "latitudeDegrees": 54.995,
+          "longitudeDegrees": -127.455,
+          "rawCode": 9000,
+          "ecCodesDbz": -99.0
+        },
+        {
+          "index": 7794884,
+          "row": 1113,
+          "column": 3884,
+          "latitudeDegrees": 43.865,
+          "longitudeDegrees": -91.155,
+          "rawCode": 9670,
+          "ecCodesDbz": -32.0
+        },
+        {
+          "index": 6200376,
+          "row": 885,
+          "column": 5376,
+          "latitudeDegrees": 46.145,
+          "longitudeDegrees": -76.235,
+          "rawCode": 10140,
+          "ecCodesDbz": 15.0
+        },
+        {
+          "index": 21726030,
+          "row": 3103,
+          "column": 5030,
+          "latitudeDegrees": 23.965,
+          "longitudeDegrees": -79.695,
+          "rawCode": 10545,
+          "ecCodesDbz": 55.5
+        }
+      ],
+      "goldenWindow": {
+        "row": 3101,
+        "column": 5028,
+        "width": 4,
+        "height": 4,
+        "rawCodes": [
+          10385,
+          10380,
+          10330,
+          10460,
+          10400,
+          10370,
+          10320,
+          10475,
+          10385,
+          10305,
+          10545,
+          10510,
+          10330,
+          10505,
+          10530,
+          10510
+        ]
+      },
+      "ecCodesMetadata": {
+        "edition": 2,
+        "discipline": 209,
+        "parameterCategory": 11,
+        "parameterNumber": 0,
+        "gridType": "regular_ll",
+        "Ni": 7000,
+        "Nj": 3500,
+        "latitudeOfFirstGridPointInDegrees": 54.995,
+        "longitudeOfFirstGridPointInDegrees": 230.005,
+        "latitudeOfLastGridPointInDegrees": 20.005001,
+        "longitudeOfLastGridPointInDegrees": 299.994998,
+        "iDirectionIncrementInDegrees": 0.01,
+        "jDirectionIncrementInDegrees": 0.01,
+        "scanningMode": 0,
+        "packingType": "grid_png",
+        "bitsPerValue": 16,
+        "referenceValue": -9990.0,
+        "binaryScaleFactor": 0,
+        "decimalScaleFactor": 1
+      }
+    },
+    {
+      "season": "spring",
+      "objectKey": "CONUS/MergedBaseReflectivityQC_00.50/20260415/MRMS_MergedBaseReflectivityQC_00.50_20260415-180021.grib2.gz",
+      "observationTimeUtc": "20260415-180021",
+      "compressedBytes": 1274897,
+      "compressedSha256": "8ad5f15f31df7f5e3a2576af000602bab645d92193b7f2bb71a4a24773b8e4b9",
+      "gribBytes": 1322246,
+      "gribSha256": "9ecc03642cff6e0f8cbb5e17f5b13d838dab6b5b436f65da40b177fe89e92448",
+      "pngBytes": 1322067,
+      "normalizedRawBigEndianSha256": "9137196e16dc8e6e4489ac1dd65e0d5ea413bfefdc880626401775083b026406",
+      "ecCodesTenthsBigEndianSha256": "149f4189db5c55a6553985be5eccf402d11b59bc3f036cccab0a222ce6355422",
+      "formulaMismatchCount": 0,
+      "counts": {
+        "valid": 1145140,
+        "missing": 15028310,
+        "noCoverage": 8326550
+      },
+      "validRange": {
+        "minimumDbz": -18.0,
+        "maximumDbz": 61.0
+      },
+      "sampleCells": [
+        {
+          "index": 0,
+          "row": 0,
+          "column": 0,
+          "latitudeDegrees": 54.995,
+          "longitudeDegrees": -129.995,
+          "rawCode": 0,
+          "ecCodesDbz": -999.0
+        },
+        {
+          "index": 254,
+          "row": 0,
+          "column": 254,
+          "latitudeDegrees": 54.995,
+          "longitudeDegrees": -127.455,
+          "rawCode": 9000,
+          "ecCodesDbz": -99.0
+        },
+        {
+          "index": 911597,
+          "row": 130,
+          "column": 1597,
+          "latitudeDegrees": 53.695,
+          "longitudeDegrees": -114.025,
+          "rawCode": 9810,
+          "ecCodesDbz": -18.0
+        },
+        {
+          "index": 7319659,
+          "row": 1045,
+          "column": 4659,
+          "latitudeDegrees": 44.545,
+          "longitudeDegrees": -83.405,
+          "rawCode": 10095,
+          "ecCodesDbz": 10.5
+        },
+        {
+          "index": 8998565,
+          "row": 1285,
+          "column": 3565,
+          "latitudeDegrees": 42.145,
+          "longitudeDegrees": -94.345,
+          "rawCode": 10600,
+          "ecCodesDbz": 61.0
+        }
+      ],
+      "goldenWindow": {
+        "row": 1283,
+        "column": 3563,
+        "width": 4,
+        "height": 4,
+        "rawCodes": [
+          10570,
+          10525,
+          10545,
+          10565,
+          10570,
+          10590,
+          10580,
+          10565,
+          10570,
+          10595,
+          10600,
+          10565,
+          10535,
+          10565,
+          10565,
+          10540
+        ]
+      },
+      "ecCodesMetadata": {
+        "edition": 2,
+        "discipline": 209,
+        "parameterCategory": 11,
+        "parameterNumber": 0,
+        "gridType": "regular_ll",
+        "Ni": 7000,
+        "Nj": 3500,
+        "latitudeOfFirstGridPointInDegrees": 54.995,
+        "longitudeOfFirstGridPointInDegrees": 230.005,
+        "latitudeOfLastGridPointInDegrees": 20.005001,
+        "longitudeOfLastGridPointInDegrees": 299.994998,
+        "iDirectionIncrementInDegrees": 0.01,
+        "jDirectionIncrementInDegrees": 0.01,
+        "scanningMode": 0,
+        "packingType": "grid_png",
+        "bitsPerValue": 16,
+        "referenceValue": -9990.0,
+        "binaryScaleFactor": 0,
+        "decimalScaleFactor": 1
+      }
+    },
+    {
+      "season": "summer",
+      "objectKey": "CONUS/MergedBaseReflectivityQC_00.50/20260715/MRMS_MergedBaseReflectivityQC_00.50_20260715-180008.grib2.gz",
+      "observationTimeUtc": "20260715-180008",
+      "compressedBytes": 934280,
+      "compressedSha256": "41dad0a40d686c24f6aa581a2cb3e13aa1f42d3243a8dc3e834cd1245953ae55",
+      "gribBytes": 978164,
+      "gribSha256": "282ed6e5976b03b7c1c82c2b12ce3d62b52acde52c2870eeffbde6748bbad11f",
+      "pngBytes": 977985,
+      "normalizedRawBigEndianSha256": "254394b78828cc46e5fa7c3c4bb5507aa80621a3a653d970993ecf56ef260754",
+      "ecCodesTenthsBigEndianSha256": "19bbcdb5c7f7e5e2092ed0c2b8490e543b854b2bd9ab0f30a52bdffcb6737e15",
+      "formulaMismatchCount": 0,
+      "counts": {
+        "valid": 731317,
+        "missing": 15570127,
+        "noCoverage": 8198556
+      },
+      "validRange": {
+        "minimumDbz": -16.5,
+        "maximumDbz": 65.0
+      },
+      "sampleCells": [
+        {
+          "index": 0,
+          "row": 0,
+          "column": 0,
+          "latitudeDegrees": 54.995,
+          "longitudeDegrees": -129.995,
+          "rawCode": 0,
+          "ecCodesDbz": -999.0
+        },
+        {
+          "index": 254,
+          "row": 0,
+          "column": 254,
+          "latitudeDegrees": 54.995,
+          "longitudeDegrees": -127.455,
+          "rawCode": 9000,
+          "ecCodesDbz": -99.0
+        },
+        {
+          "index": 6495984,
+          "row": 927,
+          "column": 6984,
+          "latitudeDegrees": 45.725,
+          "longitudeDegrees": -60.155,
+          "rawCode": 9825,
+          "ecCodesDbz": -16.5
+        },
+        {
+          "index": 7319872,
+          "row": 1045,
+          "column": 4872,
+          "latitudeDegrees": 44.545,
+          "longitudeDegrees": -81.275,
+          "rawCode": 10095,
+          "ecCodesDbz": 10.5
+        },
+        {
+          "index": 8573160,
+          "row": 1224,
+          "column": 5160,
+          "latitudeDegrees": 42.755,
+          "longitudeDegrees": -78.395,
+          "rawCode": 10640,
+          "ecCodesDbz": 65.0
+        }
+      ],
+      "goldenWindow": {
+        "row": 1222,
+        "column": 5158,
+        "width": 4,
+        "height": 4,
+        "rawCodes": [
+          10440,
+          10535,
+          10540,
+          10445,
+          10470,
+          10455,
+          10565,
+          10565,
+          10470,
+          10560,
+          10640,
+          10575,
+          10435,
+          10600,
+          10575,
+          10565
+        ]
+      },
+      "ecCodesMetadata": {
+        "edition": 2,
+        "discipline": 209,
+        "parameterCategory": 11,
+        "parameterNumber": 0,
+        "gridType": "regular_ll",
+        "Ni": 7000,
+        "Nj": 3500,
+        "latitudeOfFirstGridPointInDegrees": 54.995,
+        "longitudeOfFirstGridPointInDegrees": 230.005,
+        "latitudeOfLastGridPointInDegrees": 20.005001,
+        "longitudeOfLastGridPointInDegrees": 299.994998,
+        "iDirectionIncrementInDegrees": 0.01,
+        "jDirectionIncrementInDegrees": 0.01,
+        "scanningMode": 0,
+        "packingType": "grid_png",
+        "bitsPerValue": 16,
+        "referenceValue": -9990.0,
+        "binaryScaleFactor": 0,
+        "decimalScaleFactor": 1
+      }
+    }
+  ]
+}

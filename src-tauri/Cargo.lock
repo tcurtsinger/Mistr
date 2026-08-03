@@ -1886,6 +1886,7 @@ dependencies = [
  "flate2",
  "nexrad-data",
  "nexrad-model",
+ "png 0.18.1",
  "proptest",
  "quick-xml",
  "reqwest",

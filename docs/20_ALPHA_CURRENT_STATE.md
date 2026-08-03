@@ -2,17 +2,17 @@
 
 **Checkpoint:** 2026-08-03
 
-**Merged baseline:** [PR #14 - Improve radar legibility and map context](https://github.com/tcurtsinger/Mistr/pull/14), merge commit `0b7b5ef`
+**Merged baseline:** [PR #15 - Add National radar session foundation](https://github.com/tcurtsinger/Mistr/pull/15), merge commit `debf49b`
 
-**Active change:** National Phase 1 foundation; Ready-for-review PR pending from `codex/mistr-national-foundation`
+**Active change:** National Phase 2 MRMS acquisition, strict decoder, levels, and `PackedGrid v1`; Ready-for-review PR pending from `codex/mistr-national-mrms-foundation`
 
-**Branch:** `codex/mistr-national-foundation`
+**Branch:** `codex/mistr-national-mrms-foundation`
 
 This document is the durable starting point for the next Mistr development session. Verify the active branch, worktree, and any future pull-request checks or threads before acting because repository state can change after this checkpoint.
 
 ## Product decision
 
-Mistr is the product. The currently exposed product remains deliberately narrow: one selected NEXRAD site, live high-resolution base reflectivity, smooth pan and zoom, and a truthful recent-observation timeline. National radar is now an approved post-Alpha milestone, but no National data path or visible source control exists yet. Velocity UI, alerts, cameras, video, notifications, broad settings, and the wider GustAVO feature set remain outside the current product.
+Mistr is the product. The currently exposed product remains deliberately narrow: one selected NEXRAD site, live high-resolution base reflectivity, smooth pan and zoom, and a truthful recent-observation timeline. National radar is an approved post-Alpha milestone. The active branch contains diagnostic-only MRMS acquisition and transfer plumbing, but no National renderer, timeline, history product, or visible source control exists yet. Velocity UI, alerts, cameras, video, notifications, broad settings, and the wider GustAVO feature set remain outside the current product.
 
 Windows is the Alpha release platform. Shared Tauri, Rust, React, TypeScript, MapLibre, and WebGL code must continue to avoid unnecessary Windows-only assumptions so later macOS work remains practical.
 
@@ -95,9 +95,11 @@ Visible-first WebGL recovery remains in force. Context loss during an uncommitte
 
 The `window.__MISTR_PHASE4__`, `window.__MISTR_PHASE5__`, and `window.__MISTR_PHASE6__` diagnostic APIs remain required by packaged evidence runners. They are not normal product controls.
 
-## Active Phase 1 foundation
+The active branch adds `window.__MISTR_NATIONAL_PHASE2__` only for release-runtime acquisition and transfer evidence. It is not a normal product API and cannot publish a National paint receipt, source label, timeline, or persisted choice.
 
-This branch adds the internal source boundary required before National acquisition work can begin:
+## Merged Phase 1 foundation and active Phase 2 data path
+
+Merged PR #15 supplies the internal source boundary required before National acquisition work:
 
 - `RadarSourceKey` is a closed union of `{ kind: "site", siteIcao }` and the future `{ kind: "national", domain: "conus" }` identity;
 - `RadarSessionCoordinator` owns requested-source intent, last authoritative painted source, monotonic source-transition generations, supersession, rollback, stale receipt rejection, and persistence after paint;
@@ -105,13 +107,46 @@ This branch adds the internal source boundary required before National acquisiti
 - the safe startup archive establishes painted Site truth without overwriting a stored live-site preference;
 - user and startup site requests persist only after a matching GPU receipt is accepted; diagnostic transitions do not persist;
 - failed or superseded transitions retain the previous painted source; and
-- no incomplete National UI, MRMS acquisition, PackedGrid wire, numeric-grid renderer, or National timeline is present.
+- no incomplete National UI, numeric-grid renderer, or National timeline was introduced.
+
+The active Phase 2 branch adds only the National data and wire foundation:
+
+- fixed anonymous HTTPS to `noaa-mrms-pds.s3.amazonaws.com`, exact current/previous UTC-day inventory, measured-time ordering, strict keys, no redirects, bounded response bodies, and rejection of HTML/XML in successful binary responses;
+- a product-specific decoder for the reviewed `MergedBaseReflectivityQC_00.50` GRIB2 Template 5.41/16-bit grayscale PNG contract, including exact product, time, 7,000 by 3,500 grid, orientation, scaling, and status checks;
+- durable exact `u16` raw codes with `R=-9990`, `E=0`, `D=1`, missing raw `9000`, and no-coverage raw `0`; every other structurally valid code is decoded by formula rather than fixture membership;
+- power-of-two numeric levels using strongest-valid, then missing, then no-coverage reduction;
+- big-endian `PackedGrid v1` manifests and independently hashed chunks with one-cell halos, strict Rust and TypeScript validation, and small cross-language fixtures;
+- a directly indexed, count- and byte-bounded prepared backend cache;
+- National manifest and chunk leases through the existing single global two-credit broker; and
+- a non-shipping 30-observation release diagnostic that simultaneously retains every immutable compressed source object, validates the unchanged schema/working-set model, and returns to the prior Site loop without National paint or persistence.
+
+Phase 2 deliberately does not add `NationalMrmsSession`, a numeric-grid WebGL renderer, exact backend point lookup, product history/timeline/playback, polling integration, visible `National`/`Site` controls, or National paint receipts. Those remain later-phase work.
 
 The existing Phase 4, 5, 6, readiness, history, UI, and map-quality diagnostic surfaces remain required and unchanged.
 
 ## Validation state
 
-The National Phase 1 foundation passes the full source and packaged regression contract on the branch checkpoint:
+### Active Phase 2 evidence
+
+The final real Windows/WebView2 release diagnostic acquired 30 distinct latest NOAA MRMS observations using 31 bounded network requests, spanning 57.90 minutes. It simultaneously retained all 30 immutable compressed source objects in 44,094,473 bytes, strictly decoded each exact 49,000,000-byte base grid, generated and wire-validated all 840 factor-4 chunks, and transferred the newest 28-chunk frame through the sole global broker. Holding two leases made a third return `credit_exhausted`; the final snapshot returned both credits.
+
+The measured factor-4 numeric payload ledger is 3,104,644 bytes per frame including halos, 65,197,524 bytes for 20 frames plus one staged frame, and 96,243,964 bytes for 30 plus staging. The 30-frame result stays below the 200 MiB target without changing `PackedGrid v1` or the numeric working-set model. It is payload-budget evidence, not a claim that a National renderer or GPU allocation exists.
+
+After the diagnostic, the release runtime restored the existing 20-frame KTLX Site loop and `nexrad_level2_archive_ii` painted-source truth.
+
+The complete Phase 2 branch validation passed:
+
+- `npm run verify`: public scan of 241 candidate files, links across 78 Markdown files, 232 frontend tests, production TypeScript/Vite build, Rust formatting, clippy with warnings denied, 121 Rust tests across the library and binaries including the cached four-season MRMS oracle, and Rust check;
+- packaged National Phase 2: 30 retained and decoded observations, 840 validated chunks, the 30-frame memory extension, complete newest-frame transfer, two-credit backpressure/release, and Site restoration described above;
+- packaged Phase 4: both 1,000-transition Native/Smooth 4K scenarios passed with 20 residents, 6.2 ms frame-time P95, zero long tasks, zero hot-path acquisition/uploads, unchanged 53,099,312-byte GPU residency, mode-switch truth, pixel evidence, rolling history, and context recovery;
+- packaged Phase 5: in-flight KAMX-to-KTLX supersession preserved the `live_sweep_failed` diagnostic code, then two chronological KTLX observations painted with two residents and direct oldest/newest scrubbing; and
+- packaged Phase 6: both release-runtime N0S, real WebGL context-recovery, minimize/restore, restart, and cold-start passes succeeded.
+
+These gates show that Phase 2 did not weaken the current selected-site product or its diagnostic APIs. They still do not constitute National rendering or product evidence.
+
+### Merged Phase 1 evidence
+
+The merged National Phase 1 foundation passed the full source and packaged regression contract on its branch checkpoint:
 
 - `npm run verify`: public scan of 225 candidate files, links across 76 Markdown files, 227 frontend tests, production TypeScript/Vite build, Rust formatting and clippy with warnings denied, 98 Rust tests across library and binaries, and Rust check;
 - packaged Phase 4: an unchanged rerun passed both 1,000-transition Native/Smooth scenarios at 3840x2160 with 20 residents, 6.2 ms frame-time P95, zero long tasks, zero hot-path acquisition/uploads, stable 53,099,312-byte GPU residency, and passing rolling-history/context-recovery evidence;
@@ -121,7 +156,7 @@ The National Phase 1 foundation passes the full source and packaged regression c
 
 An intermediate Phase 5 run exposed that wrapping a superseded provider error erased its established diagnostic code. Phase 1 now marks the original error object as superseded without replacing it, so UI callbacks can ignore stale work while packaged diagnostics retain the exact provider code. A regression test covers that ownership boundary.
 
-These results prove selected-site behavior through the coordinator refactor. They do not prove or imply any National acquisition, decoding, rendering, history, or UI behavior.
+These Phase 1 results prove selected-site behavior through the coordinator refactor. Phase 2's separate evidence proves acquisition/decoding/wire behavior only; neither result proves or implies a National renderer, product history, or UI behavior.
 
 The merged rolling-history change passed:
 
@@ -162,7 +197,7 @@ Release readiness also corrects a demonstrated installer defect: prior bundles d
 
 ## Pull-request checkpoint
 
-PR #8, rolling-history [PR #9](https://github.com/tcurtsinger/Mistr/pull/9), release-readiness [PR #10](https://github.com/tcurtsinger/Mistr/pull/10), UI/live-site hardening [PR #11](https://github.com/tcurtsinger/Mistr/pull/11), rendering quality [PR #12](https://github.com/tcurtsinger/Mistr/pull/12), radar-chrome hardening [PR #13](https://github.com/tcurtsinger/Mistr/pull/13), and radar legibility [PR #14](https://github.com/tcurtsinger/Mistr/pull/14) are merged. National Phase 1 is isolated on `codex/mistr-national-foundation`; only the repository owner merges its eventual Ready-for-review PR.
+PR #8, rolling-history [PR #9](https://github.com/tcurtsinger/Mistr/pull/9), release-readiness [PR #10](https://github.com/tcurtsinger/Mistr/pull/10), UI/live-site hardening [PR #11](https://github.com/tcurtsinger/Mistr/pull/11), rendering quality [PR #12](https://github.com/tcurtsinger/Mistr/pull/12), radar-chrome hardening [PR #13](https://github.com/tcurtsinger/Mistr/pull/13), radar legibility [PR #14](https://github.com/tcurtsinger/Mistr/pull/14), and National coordinator foundation [PR #15](https://github.com/tcurtsinger/Mistr/pull/15) are merged. National Phase 2 is isolated on `codex/mistr-national-mrms-foundation`; only the repository owner merges its eventual Ready-for-review PR.
 
 Review workflow:
 
@@ -176,7 +211,7 @@ Review workflow:
 
 ## Next work after this checkpoint
 
-Complete and review National Phase 1 only. After its Ready-for-review PR passes review, the owner merges it and separately authorizes Phase 2. Do not begin MRMS acquisition/decoding, PackedGrid, National rendering/history, or visible National controls on this branch. Microsoft Store packaging and signing remain paused.
+Complete and review National Phase 2 only. After its Ready-for-review PR passes review, the owner merges it and separately authorizes Phase 3. Do not begin the National renderer, product timeline/history/playback, exact point interrogation, or visible National controls on this branch. Microsoft Store packaging and signing remain paused.
 
 ## Public-repository safety
 

@@ -11,9 +11,21 @@ const GOLDEN_PATH = new URL(
   "../../fixtures/expected/phase-2/packed-sweep-v1.bin",
   import.meta.url,
 );
+const NATIONAL_MANIFEST_PATH = new URL(
+  "../../fixtures/expected/national-phase2/packed-grid-v1-manifest.bin",
+  import.meta.url,
+);
+const NATIONAL_CHUNK_PATH = new URL(
+  "../../fixtures/expected/national-phase2/packed-grid-v1-chunk-000.bin",
+  import.meta.url,
+);
 
 function goldenBuffer(): ArrayBuffer {
   return Uint8Array.from(readFileSync(GOLDEN_PATH)).buffer;
+}
+
+function fixtureBuffer(path: URL): ArrayBuffer {
+  return Uint8Array.from(readFileSync(path)).buffer;
 }
 
 function snapshot(generation: number, heldCredits = 0, session = 1): TransferSnapshot {
@@ -29,6 +41,64 @@ function snapshot(generation: number, heldCredits = 0, session = 1): TransferSna
 }
 
 describe("PackedSweepTransferClient", () => {
+  it("uses the existing leased-credit path for National manifests and chunks", async () => {
+    const requests: Array<[string, Record<string, unknown> | undefined]> = [];
+    let releases = 0;
+    const invoke: InvokeFunction = async <T>(command: string, arguments_?: Record<string, unknown>) => {
+      if (command === "open_phase2_transfer_session") return snapshot(0) as T;
+      if (command === "begin_phase2_generation") return snapshot(7) as T;
+      if (command === "request_national_packed_grid_manifest") {
+        requests.push([command, arguments_]);
+        return fixtureBuffer(NATIONAL_MANIFEST_PATH) as T;
+      }
+      if (command === "request_national_packed_grid_chunk") {
+        requests.push([command, arguments_]);
+        return fixtureBuffer(NATIONAL_CHUNK_PATH) as T;
+      }
+      if (command === "release_phase2_transfer_credit") {
+        releases += 1;
+        return snapshot(7) as T;
+      }
+      throw new Error(`unexpected command ${command}`);
+    };
+    const client = new PackedSweepTransferClient(invoke);
+    await client.open();
+    await client.begin(7);
+    const manifest = await client.requestNationalManifest();
+    expect(manifest.wireBytes).toBe(readFileSync(NATIONAL_MANIFEST_PATH).byteLength);
+    expect(releases).toBe(0);
+    await manifest.release();
+    const chunk = await client.requestNationalChunk(0);
+    expect(chunk.wireBytes).toBe(chunk.packed.descriptor.encodedLength);
+    await chunk.release();
+    expect(releases).toBe(2);
+    expect(requests).toEqual([
+      ["request_national_packed_grid_manifest", { session: 1, generation: 7 }],
+      ["request_national_packed_grid_chunk", { session: 1, generation: 7, chunkIndex: 0 }],
+    ]);
+  });
+
+  it("releases a National credit when strict chunk parsing fails", async () => {
+    let releases = 0;
+    const corrupt = new Uint8Array(fixtureBuffer(NATIONAL_CHUNK_PATH));
+    corrupt[corrupt.length - 1] ^= 1;
+    const invoke: InvokeFunction = async <T>(command: string) => {
+      if (command === "open_phase2_transfer_session") return snapshot(0) as T;
+      if (command === "begin_phase2_generation") return snapshot(7) as T;
+      if (command === "request_national_packed_grid_chunk") return corrupt.buffer as T;
+      if (command === "release_phase2_transfer_credit") {
+        releases += 1;
+        return snapshot(7) as T;
+      }
+      throw new Error(`unexpected command ${command}`);
+    };
+    const client = new PackedSweepTransferClient(invoke);
+    await client.open();
+    await client.begin(7);
+    await expect(client.requestNationalChunk(0)).rejects.toMatchObject({ code: "hash_mismatch" });
+    expect(releases).toBe(1);
+  });
+
   it("passes only bounded canonical inputs to the Phase 5 live command", async () => {
     const requests: Array<Record<string, unknown> | undefined> = [];
     const invoke: InvokeFunction = async <T>(command: string, arguments_?: Record<string, unknown>) => {

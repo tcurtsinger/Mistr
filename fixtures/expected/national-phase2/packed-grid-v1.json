@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "sourceObjectKey": "CONUS/MergedBaseReflectivityQC_00.50/20260803/MRMS_MergedBaseReflectivityQC_00.50_20260803-162812.grib2.gz",
+  "sourceCompressedSha256": "1826ea8b575cc59c24433ab610197f5a1d5a8d91f20c61cf698ec1d6ff697b76",
+  "generation": 7,
+  "presentationFactor": 4,
+  "manifestFile": "packed-grid-v1-manifest.bin",
+  "manifestBytes": 2376,
+  "manifestSha256": "1c22aeb8f5627e22a298878a92728d3349e807f35f4f7cd156771a5f263e3bd1",
+  "firstChunkFile": "packed-grid-v1-chunk-000.bin",
+  "firstChunkBytes": 132274,
+  "firstChunkSha256": "6f6a864360c84891b70f05ff2bc4ed0e2e741d16114d5d6fd2bbe7eed45edc9c",
+  "totalChunkCount": 28
+}

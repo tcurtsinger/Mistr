@@ -19,6 +19,7 @@ import { radarContextAnchorLayerId } from "./data/radarMapContext";
 import { RADAR_SITES } from "./data/radarSites";
 import { configureMapLibreWorker } from "./mapWorker";
 import { mapReadinessError, updateMapReadiness, type MapReadiness } from "./mapReadiness";
+import { assertChunkMatchesManifest } from "./packed-grid/packedGrid";
 import {
   PackedSweepTransferClient,
   tauriInvokeFunction,
@@ -1217,6 +1218,123 @@ export function App() {
           throw error;
         }
       };
+      globalThis.__MISTR_NATIONAL_PHASE2__ = {
+        async run() {
+          if (!client || !layer || !prepareArchiveForDiagnostics) {
+            throw new Error("National Phase 2 diagnostic is unavailable");
+          }
+          livePollingSession += 1;
+          const minimumGeneration = Math.max(
+            transferGeneration + 1,
+            layer.getSnapshot().generation + 1,
+          );
+          const transition = radarSessionCoordinatorRef.current!.beginTransition(
+            { kind: "national", domain: "conus" },
+            minimumGeneration,
+            { persistOnPaint: false },
+          );
+          const generation = transition.generation;
+          transferGeneration = generation;
+          let backpressureCode: string | undefined;
+          let transferredChunkBytes = 0;
+          let manifestBytes = 0;
+          try {
+            await client.begin(generation);
+            await startupAcquisition?.catch(() => {});
+            const preparation = await client.prepareNationalPhase2();
+            const manifestLease = await client.requestNationalManifest();
+            const manifest = manifestLease.packed;
+            manifestBytes = manifestLease.wireBytes;
+            try {
+              if (
+                manifest.generation !== BigInt(generation)
+                || manifest.objectKey !== preparation.objectKey
+                || manifest.contentSha256 !== preparation.compressedSha256
+              ) {
+                throw new Error("National manifest does not match acquisition evidence");
+              }
+            } finally {
+              await manifestLease.release();
+            }
+
+            if (manifest.chunks.length < 3) {
+              throw new Error("National diagnostic requires at least three chunks");
+            }
+            const [firstLease, secondLease] = await Promise.all([
+              client.requestNationalChunk(0),
+              client.requestNationalChunk(1),
+            ]);
+            try {
+              await client.requestNationalChunk(2).then(
+                async (unexpected) => {
+                  await unexpected.release();
+                  throw new Error("third concurrent transfer unexpectedly bypassed the two-credit limit");
+                },
+                (error: unknown) => {
+                  backpressureCode = typeof error === "object" && error !== null && "code" in error
+                    ? String(error.code)
+                    : undefined;
+                },
+              );
+            } finally {
+              await Promise.all([firstLease.release(), secondLease.release()]);
+            }
+            if (backpressureCode !== "credit_exhausted") {
+              throw new Error(`National two-credit proof returned ${backpressureCode ?? "no error"}`);
+            }
+
+            for (const descriptor of manifest.chunks) {
+              const lease = await client.requestNationalChunk(descriptor.index);
+              try {
+                assertChunkMatchesManifest(manifest, lease.packed);
+                if (lease.wireBytes !== descriptor.encodedLength) {
+                  throw new Error(`National chunk ${descriptor.index} transfer length changed`);
+                }
+                transferredChunkBytes += lease.wireBytes;
+              } finally {
+                await lease.release();
+              }
+            }
+            const transferAfter = await client.transferSnapshot();
+            if (
+              transferAfter.creditLimit !== 2
+              || transferAfter.heldCredits !== 0
+              || transferAfter.inFlightCredits !== 0
+            ) {
+              throw new Error("National diagnostic did not return both global transfer credits");
+            }
+            return {
+              schemaVersion: 1,
+              diagnosticOnly: true,
+              generation,
+              preparation,
+              manifest: {
+                generation: Number(manifest.generation),
+                observationTimeUnixMs: Number(manifest.observationTimeUnixMs),
+                objectKey: manifest.objectKey,
+                contentSha256: manifest.contentSha256,
+                width: manifest.width,
+                height: manifest.height,
+                presentationFactor: manifest.presentationFactor,
+                chunkCount: manifest.chunks.length,
+              },
+              transfers: {
+                manifestBytes,
+                transferredChunkBytes,
+                transferredChunkCount: manifest.chunks.length,
+                backpressureCode,
+                finalSnapshot: transferAfter,
+              },
+            };
+          } finally {
+            radarSessionCoordinatorRef.current!.failTransition(
+              transition,
+              new Error("National Phase 2 diagnostic completed without product paint"),
+            );
+            await prepareArchiveForDiagnostics();
+          }
+        },
+      };
       // The packaged archive is a safe first paint, not a permanent demo mode.
       // Every launch proceeds to current live radar; a stored site chooses the
       // target and a fresh profile starts with KTLX.
@@ -1256,6 +1374,7 @@ export function App() {
       if (globalThis.__MISTR_PHASE4__) delete globalThis.__MISTR_PHASE4__;
       if (globalThis.__MISTR_PHASE5__) delete globalThis.__MISTR_PHASE5__;
       if (globalThis.__MISTR_PHASE6__) delete globalThis.__MISTR_PHASE6__;
+      if (globalThis.__MISTR_NATIONAL_PHASE2__) delete globalThis.__MISTR_NATIONAL_PHASE2__;
       if (siteLevel2SessionRef.current === siteLevel2Session) siteLevel2SessionRef.current = null;
       inspectionMarkerRef.current?.remove();
       inspectionMarkerRef.current = null;
@@ -1911,5 +2030,32 @@ declare global {
     loadN0s(fixtureId?: string): Promise<Phase6Report>;
     resetContext(holdMs?: number): Promise<Phase6ContextResetReport>;
     resize(): RadarRendererSnapshot | null;
+  };
+  var __MISTR_NATIONAL_PHASE2__: undefined | {
+    run(): Promise<NationalPhase2PackagedReport>;
+  };
+}
+
+interface NationalPhase2PackagedReport {
+  schemaVersion: 1;
+  diagnosticOnly: true;
+  generation: number;
+  preparation: import("./packed-sweep/transferClient").NationalPhase2PrepareReport;
+  manifest: {
+    generation: number;
+    observationTimeUnixMs: number;
+    objectKey: string;
+    contentSha256: string;
+    width: number;
+    height: number;
+    presentationFactor: number;
+    chunkCount: number;
+  };
+  transfers: {
+    manifestBytes: number;
+    transferredChunkBytes: number;
+    transferredChunkCount: number;
+    backpressureCode?: string;
+    finalSnapshot: import("./packed-sweep/transferClient").TransferSnapshot;
   };
 }

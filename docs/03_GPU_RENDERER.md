@@ -4,7 +4,7 @@
 
 Render measured selected-site radar data inside MapLibre without representing each observation as a raster tile pyramid. The basemap remains ordinary MapLibre content; selected-site radar uses its qualified polar WebGL2 layer. The approved future National source will use a separate numeric-grid custom layer rather than pretending MRMS is a polar sweep or a MapLibre radar-tile animation.
 
-National Phase 1 changes no shaders, textures, renderer resources, memory limits, paint receipts, or context-recovery behavior. It places the existing polar renderer behind `SiteLevel2Session` and a source coordinator while keeping the current selected-site draw path intact.
+Merged National Phase 1 changed no shaders, textures, renderer resources, memory limits, paint receipts, or context-recovery behavior. Phase 2 still adds no National renderer: it creates and cross-language-validates bounded numeric overview chunks behind a diagnostic API only. The existing polar Site renderer remains the sole painted radar path.
 
 ## 2. Required rendering contract
 
@@ -134,6 +134,14 @@ Initial target budgets for one active 20-frame product loop:
 | Concurrent in-flight transfers | 2 | 3 |
 
 These are engineering bounds, not claims that every implementation will naturally meet them.
+
+### National Phase 2 working-set evidence
+
+`MrmsNumericPyramid` preserves the exact 7,000 by 3,500 two-byte base grid in Rust and builds power-of-two presentation levels. Each reduction cell selects the strongest valid dBZ raw code; if there is no valid source it selects missing before no coverage. Ordinary image mipmaps and integer-code averaging are prohibited.
+
+The diagnostic `PackedGrid v1` factor-4 level is 1,750 by 875. It is divided into 256-cell interiors with a one-cell sampling halo, producing 28 independently hashed chunks for the current fixed grid. One manifest and one bounded chunk transfer per global credit; the frontend never owns the full expanded base grid as one buffer.
+
+The packaged 30-observation extension simultaneously retains all 30 immutable compressed source objects in Rust while validating their overview working sets. It measured 3,104,644 numeric GPU payload bytes per frame including chunk halos. Twenty frames plus one staged frame measured 65,197,524 bytes; thirty plus one staged measured 96,243,964 bytes. Compressed/backend bytes are reported separately rather than counted as GPU memory. This is a schema and working-set diagnostic, not a GPU allocation or render claim: Phase 3 must still implement and measure texture allocation, time-sliced upload, complete-coverage paint receipts, rollback, and context recovery under the 200 MiB target and 256 MiB ceiling.
 
 ## 7. Geospatial placement
 

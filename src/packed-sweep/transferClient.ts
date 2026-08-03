@@ -1,4 +1,10 @@
 import { parsePackedSweep, type PackedSweep } from "./packedSweep";
+import {
+  parsePackedGridChunk,
+  parsePackedGridManifest,
+  type PackedGridChunk,
+  type PackedGridManifest,
+} from "../packed-grid/packedGrid";
 
 export interface TransferSnapshot {
   session: number;
@@ -85,6 +91,60 @@ export interface TransferTiming {
 
 export interface PackedSweepLease {
   packed: PackedSweep;
+  timing: TransferTiming;
+  release(): Promise<void>;
+}
+
+export interface NationalRetentionDiagnostic {
+  diagnosticOnly: boolean;
+  schemaVersion: number;
+  rendererModel: string;
+  presentationFactor: number;
+  normalRetainedObservations: number;
+  extensionRetainedObservations: number;
+  measuredObservationCount: number;
+  distinctObservationCount: number;
+  measuredTimelineSpanMinutes: number;
+  measuredTotalChunkCount: number;
+  allFramesWireValidated: boolean;
+  exactSourceObjectsRetained: boolean;
+  retainedCompressedBytes: number;
+  diagnosticMs: number;
+  perFrameGpuBytes: number;
+  twentyPlusStagingGpuBytes: number;
+  thirtyPlusStagingGpuBytes: number;
+  targetBytes: number;
+  hardCeilingBytes: number;
+  extensionWithinTarget: boolean;
+  schemaChangeRequired: boolean;
+  rendererModelChangeRequired: boolean;
+}
+
+export interface NationalPhase2PrepareReport {
+  diagnosticOnly: boolean;
+  generation: number;
+  objectKey: string;
+  observationTimeUnixMs: number;
+  acquisitionNetworkRequests: number;
+  acquisitionResponseBytes: number;
+  compressedBytes: number;
+  compressedSha256: string;
+  gribSha256: string;
+  normalizedSha256: string;
+  normalizedBytes: number;
+  retainedBackendBytes: number;
+  manifestBytes: number;
+  chunkCount: number;
+  chunkTransferBytes: number;
+  discoveryMs: number;
+  downloadMs: number;
+  decodeAndLevelMs: number;
+  retentionExtension: NationalRetentionDiagnostic;
+}
+
+export interface PackedGridLease<T extends PackedGridManifest | PackedGridChunk> {
+  packed: T;
+  wireBytes: number;
   timing: TransferTiming;
   release(): Promise<void>;
 }
@@ -305,6 +365,136 @@ export class PackedSweepTransferClient {
 
   async phase4ActivitySnapshot(): Promise<Phase4ActivitySnapshot> {
     return this.invoke<Phase4ActivitySnapshot>("phase4_activity_snapshot");
+  }
+
+  async transferSnapshot(): Promise<TransferSnapshot> {
+    return this.invoke<TransferSnapshot>("phase2_transfer_snapshot");
+  }
+
+  async prepareNationalPhase2(): Promise<NationalPhase2PrepareReport> {
+    this.assertSessionOpen();
+    await this.flushPendingReleaseAcks();
+    const session = this.session;
+    const generation = this.generation;
+    if (!this.active || generation === 0) {
+      throw new TransferClientError("generation_not_active", "no generation is active");
+    }
+    try {
+      const report = await this.invoke<NationalPhase2PrepareReport>(
+        "prepare_national_phase2_diagnostic",
+        { session, generation },
+      );
+      if (
+        !this.active
+        || this.session !== session
+        || this.generation !== generation
+        || report.generation !== generation
+        || !report.diagnosticOnly
+      ) {
+        throw new TransferClientError(
+          "stale_response",
+          `National preparation for generation ${generation} completed after supersession`,
+        );
+      }
+      return report;
+    } catch (error) {
+      throw normalizeInvokeError(error);
+    }
+  }
+
+  async requestNationalManifest(): Promise<PackedGridLease<PackedGridManifest>> {
+    return this.requestNationalRaw(
+      "request_national_packed_grid_manifest",
+      {},
+      async (response) => parsePackedGridManifest(response),
+    );
+  }
+
+  async requestNationalChunk(chunkIndex: number): Promise<PackedGridLease<PackedGridChunk>> {
+    if (!Number.isSafeInteger(chunkIndex) || chunkIndex < 0) {
+      throw new RangeError("chunkIndex must be a non-negative safe integer");
+    }
+    return this.requestNationalRaw(
+      "request_national_packed_grid_chunk",
+      { chunkIndex },
+      parsePackedGridChunk,
+    );
+  }
+
+  private async requestNationalRaw<T extends PackedGridManifest | PackedGridChunk>(
+    command: "request_national_packed_grid_manifest" | "request_national_packed_grid_chunk",
+    extraArguments: Record<string, unknown>,
+    parse: (response: ArrayBuffer) => Promise<T>,
+  ): Promise<PackedGridLease<T>> {
+    this.assertSessionOpen();
+    await this.flushPendingReleaseAcks();
+    const session = this.session;
+    const generation = this.generation;
+    if (!this.active || generation === 0) {
+      throw new TransferClientError("generation_not_active", "no generation is active");
+    }
+    const totalStarted = performance.now();
+    try {
+      const invokeStarted = performance.now();
+      const response = await this.invoke<ArrayBuffer>(command, {
+        session,
+        generation,
+        ...extraArguments,
+      });
+      const invokeMs = performance.now() - invokeStarted;
+      if (!this.active || this.session !== session || this.generation !== generation) {
+        await this.releaseAfterFailure(session, generation);
+        throw new TransferClientError("stale_response", "National payload was superseded");
+      }
+      if (!(response instanceof ArrayBuffer)) {
+        await this.releaseAfterFailure(session, generation);
+        throw new TransferClientError("invalid_raw_response", "National command did not return an ArrayBuffer");
+      }
+      const parseStarted = performance.now();
+      let packed: T;
+      try {
+        packed = await parse(response);
+      } catch (error) {
+        await this.releaseAfterFailure(session, generation);
+        throw error;
+      }
+      const parseMs = performance.now() - parseStarted;
+      if (
+        !this.active
+        || this.session !== session
+        || this.generation !== generation
+        || packed.generation !== BigInt(generation)
+      ) {
+        await this.releaseAfterFailure(session, generation);
+        throw new TransferClientError("stale_response", "National wire generation is stale");
+      }
+      let released = false;
+      let releasePromise: Promise<void> | null = null;
+      const releaseAck: ReleaseAck = {
+        session,
+        generation,
+        releaseId: createReleaseId(),
+      };
+      return {
+        packed,
+        wireBytes: response.byteLength,
+        timing: { invokeMs, parseMs, totalMs: performance.now() - totalStarted },
+        release: () => {
+          if (released) return Promise.resolve();
+          if (releasePromise !== null) return releasePromise;
+          releasePromise = this.acknowledgeRelease(releaseAck)
+            .then(() => {
+              released = true;
+            })
+            .finally(() => {
+              releasePromise = null;
+            });
+          return releasePromise;
+        },
+      };
+    } catch (error) {
+      throw normalizeInvokeError(error);
+    }
   }
 
   private async requestFromCommand(
