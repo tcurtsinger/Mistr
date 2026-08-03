@@ -60,14 +60,10 @@ describe("quiet operational radar map context", () => {
     const anchorIndex = layers.findIndex(
       (candidate) => candidate.id === RADAR_CONTEXT_ANCHOR_LAYER_ID,
     );
-    expect(anchorIndex).toBe(33);
+    expect(anchorIndex).toBe(30);
     expect(layers.slice(anchorIndex).map((candidate) => candidate.id)).toEqual([
-      "highway_motorway_subtle",
-      "highway_major_subtle",
-      "highway_major_casing",
-      "highway_major_inner",
-      "highway_motorway_casing",
-      "highway_motorway_inner",
+      "highway_major_context_casing",
+      "highway_major_context",
       "highway_name_other",
       "highway_name_motorway",
       "boundary_state",
@@ -83,10 +79,7 @@ describe("quiet operational radar map context", () => {
 
     const belowRadar = [
       "building",
-      "highway_path",
-      "highway_minor",
-      "highway_secondary_casing",
-      "highway_secondary_inner",
+      "highway_local_context",
       "railway",
       "highway_name_local",
       "water_name",
@@ -103,31 +96,85 @@ describe("quiet operational radar map context", () => {
       && "source-layer" in candidate
       && candidate["source-layer"] === "water"
     ))).toEqual([]);
-    expect(layer(RADAR_CONTEXT_ANCHOR_LAYER_ID).id).toBe("highway_motorway_subtle");
+    expect(layer(RADAR_CONTEXT_ANCHOR_LAYER_ID).id)
+      .toBe("highway_major_context_casing");
   });
 
-  it("delays regional road density and keeps local streets below radar", () => {
-    expect(layer("highway_motorway_subtle")).toMatchObject({ maxzoom: 9 });
-    expect(paint("highway_motorway_subtle")["line-color"])
-      .toBe("rgba(178,188,198,0.30)");
-    expect(layer("highway_major_subtle")).toMatchObject({ minzoom: 8, maxzoom: 11 });
-    expect(filter("highway_major_subtle"))
-      .toEqual(lineClassFilter(["primary", "trunk"]));
-    expect(paint("highway_major_subtle")["line-color"])
-      .toBe("rgba(174,184,194,0.26)");
+  it("uses continuous road treatments instead of hard zoom-band swaps", () => {
+    const majorClasses = ["motorway", "trunk", "primary"];
+    const localClasses = [
+      "secondary",
+      "tertiary",
+      "minor",
+      "service",
+      "track",
+      "path",
+    ];
 
-    expect(filter("highway_major_casing"))
-      .toEqual(lineClassFilter(["primary", "trunk"]));
-    expect(paint("highway_major_casing")["line-color"])
-      .toBe("rgba(184,194,204,0.32)");
-    expect(filter("highway_secondary_casing"))
-      .toEqual(lineClassFilter(["secondary", "tertiary"]));
-    expect(paint("highway_secondary_casing")["line-color"])
-      .toBe("rgba(132,142,152,0.26)");
-    expect(paint("highway_minor")["line-color"])
-      .toBe("rgba(124,134,144,0.22)");
-    expect(paint("highway_path")["line-color"])
-      .toBe("rgba(118,128,138,0.16)");
+    for (const id of ["highway_major_context_casing", "highway_major_context"]) {
+      expect(layer(id)).not.toHaveProperty("minzoom");
+      expect(layer(id)).not.toHaveProperty("maxzoom");
+      expect(filter(id)).toEqual(lineClassFilter(majorClasses));
+    }
+    expect(paint("highway_major_context_casing")).toMatchObject({
+      "line-color": "rgba(4,5,6,0.72)",
+      "line-width": [
+        "interpolate",
+        ["linear"],
+        ["zoom"],
+        4,
+        1.1,
+        6,
+        1.25,
+        8,
+        1.45,
+        10,
+        1.75,
+        12,
+        2.2,
+        16,
+        3.6,
+        20,
+        6,
+      ],
+    });
+    expect(paint("highway_major_context")["line-color"])
+      .toBe("rgba(190,200,210,0.34)");
+
+    expect(layer("highway_local_context")).not.toHaveProperty("minzoom");
+    expect(layer("highway_local_context")).not.toHaveProperty("maxzoom");
+    expect(filter("highway_local_context")).toEqual(lineClassFilter(localClasses));
+    expect(paint("highway_local_context")).toMatchObject({
+      "line-color": "rgba(124,134,144,0.22)",
+      "line-opacity": [
+        "interpolate",
+        ["linear"],
+        ["zoom"],
+        6,
+        0,
+        8,
+        0.35,
+        10,
+        0.65,
+        12,
+        1,
+      ],
+    });
+
+    for (const retiredId of [
+      "highway_motorway_subtle",
+      "highway_major_subtle",
+      "highway_major_casing",
+      "highway_major_inner",
+      "highway_motorway_casing",
+      "highway_motorway_inner",
+      "highway_path",
+      "highway_minor",
+      "highway_secondary_casing",
+      "highway_secondary_inner",
+    ]) {
+      expect(layers.map((candidate) => candidate.id)).not.toContain(retiredId);
+    }
   });
 
   it("restricts bright road labels to major classes and subdues local labels below radar", () => {

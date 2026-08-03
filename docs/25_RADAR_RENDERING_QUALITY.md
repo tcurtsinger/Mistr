@@ -56,7 +56,7 @@ Palette anchors may interpolate color and alpha for presentation, but each looku
 
 ## 5. Operational map context
 
-Radar is inserted at the explicit `highway_motorway_subtle` boundary in the bundled style rather than below the map's first symbol. That boundary creates two intentional graphs without a second provider or global radar-opacity reduction.
+Radar is inserted at the explicit `highway_major_context_casing` boundary in the bundled style rather than below the map's first symbol. That boundary creates two intentional graphs without a second provider or global radar-opacity reduction.
 
 The base plane keeps land, water, parks, and wooded areas within a narrow matte-charcoal range. Water remains recognizable without becoming a large bright field. Mistr deliberately does not outline the `water` source-layer polygons: the [OpenMapTiles water schema](https://openmaptiles.org/schema/#water) explains that these polygons are split for rendering and that their generated boundaries can prevent reliable border styling. Removing the outline prevents Lake Mead, rivers, reservoirs, ocean partitions, and tile-generalized shorelines from becoming bold seams that disappear and return while zooming. Important cities remain the strongest neutral labels; state labels use natural case and quieter contrast so administrative text does not compete with precipitation.
 
@@ -68,11 +68,11 @@ Below radar:
 
 Above radar:
 
-- motorways and primary/trunk roads only, with regional density disclosed progressively and restrained dual contrast at detailed zooms;
+- motorways and primary/trunk roads only, filtered together and rendered through one continuous dark-support/neutral-center treatment rather than class-specific zoom bands;
 - country and state boundaries; and
 - motorway/major-route identifiers plus important city, state, and country labels.
 
-The above-radar set is deliberately small. Its lines remain recognizable when sought but cannot become a pale wireframe or fragment the storm into equally salient road geometry. Important cities outrank route lines, missing point-icon sprites are not required, and minor context remains useful on the unobscured map beneath the radar.
+The above-radar set is deliberately small. Its lines remain recognizable when sought but cannot become a pale wireframe or fragment the storm into equally salient road geometry. The [OpenMapTiles transportation schema](https://openmaptiles.org/schema/#transportation) can substitute generalized major-highway data at lower zooms and derives road classes from source hierarchy. Mistr therefore gives motorway, trunk, and primary segments the same continuously interpolated paint treatment; a route cannot disappear or become suddenly bold merely because its tile classification crosses one of those classes. Local road classes share a gradual below-radar opacity curve rather than a hard layer threshold. Important cities outrank route lines, missing point-icon sprites are not required, and minor context remains useful on the unobscured map beneath the radar.
 
 ## 6. Spatial display modes
 
@@ -126,7 +126,7 @@ The combined packaged Windows/WebView2 matrix must cover direct scrub, resident 
 
 ### Current Alpha evidence
 
-The release WebView2 renderer with the quiet weak-return curve and explicit map-context boundary passed separate `Native` and `Smooth` 1,000-transition resident-playback scenarios at 3840x2160 with zero long tasks, zero hot-path acquisition, and zero hot-path frame uploads. Frame-time P95 was 6.1 ms in Native and 6.2 ms in Smooth. Switching modes changed neither observation/receipt truth nor the 53,099,312-byte resident GPU set and caused no upload. Automated isolated-pixel evidence found substantial signal in both modes, a 53.7% changed-pixel ratio, and 33.0% background retained in common; generated overview and close-zoom captures show weak texture receding while positive structure remains visible. Runtime coexistence placed matte water and local context through `place_town` below radar and began the essential above-radar graph at `highway_motorway_subtle`.
+The release WebView2 renderer with the quiet weak-return curve and explicit map-context boundary passed separate `Native` and `Smooth` 1,000-transition resident-playback scenarios at 3840x2160 with zero long tasks, zero hot-path acquisition, and zero hot-path frame uploads. Frame-time P95 was 6.1 ms in both modes. Switching modes changed neither observation/receipt truth nor the 53,099,312-byte resident GPU set and caused no upload. Automated isolated-pixel evidence found substantial signal in both modes, a 53.7% changed-pixel ratio, and 33.0% background retained in common; generated overview and close-zoom captures show weak texture receding while positive structure remains visible. Runtime coexistence placed matte water and local context through `place_town` below radar and began the essential above-radar graph at `highway_major_context_casing`.
 
 A packaged live KOKX observation at `2026-08-03T04:18:59Z` reproduced the owner's Long Island/Northeast operating scene. The prior pale negative-dBZ disk was absent, coherent positive precipitation remained visible from weak blue/cyan through operational green/yellow bands, important cities and major routes remained readable, and the former bright road mesh no longer fragmented the storm. The downloaded volume and screenshots remain ignored local validation artifacts.
 
