@@ -4,7 +4,7 @@
 
 **Merged baseline:** [PR #12 — Improve radar rendering quality](https://github.com/tcurtsinger/Mistr/pull/12), merge commit `2c7f30d`
 
-**Active change:** Owner-led radar-chrome hardening; no pull request exists yet.
+**Active change:** [PR #13 - Harden the radar chrome](https://github.com/tcurtsinger/Mistr/pull/13)
 
 **Branch:** `codex/mistr-ui-runtime-hardening`
 
@@ -132,7 +132,7 @@ Release readiness also corrects a demonstrated installer defect: prior bundles d
 
 ## Pull-request checkpoint
 
-PR #8, rolling-history [PR #9](https://github.com/tcurtsinger/Mistr/pull/9), release-readiness [PR #10](https://github.com/tcurtsinger/Mistr/pull/10), UI/live-site hardening [PR #11](https://github.com/tcurtsinger/Mistr/pull/11), and rendering quality [PR #12](https://github.com/tcurtsinger/Mistr/pull/12) are merged. `main` and the active `codex/mistr-ui-runtime-hardening` branch share merged baseline `2c7f30d`; the active owner-led chrome change has no pull request yet. Only the repository owner merges a future pull request.
+PR #8, rolling-history [PR #9](https://github.com/tcurtsinger/Mistr/pull/9), release-readiness [PR #10](https://github.com/tcurtsinger/Mistr/pull/10), UI/live-site hardening [PR #11](https://github.com/tcurtsinger/Mistr/pull/11), and rendering quality [PR #12](https://github.com/tcurtsinger/Mistr/pull/12) are merged. Radar-chrome hardening [PR #13](https://github.com/tcurtsinger/Mistr/pull/13) is **ready for review**, not a draft, from `codex/mistr-ui-runtime-hardening` on merged baseline `2c7f30d`. Only the repository owner merges.
 
 Review workflow:
 
