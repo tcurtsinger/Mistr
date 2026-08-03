@@ -28,7 +28,14 @@ try {
   const viewports = [];
   for (const [width, height] of [[3_840, 2_160], [1_100, 700], [1_024, 640]]) {
     await setWindowBounds(windowId, width, height);
-    viewports.push(await captureViewport());
+    for (const displayMode of ["smooth", "native"]) {
+      await evaluate(`window.__MISTR_PHASE4__.setDisplayMode('${displayMode}')`);
+      await delay(100);
+      viewports.push({
+        ...await captureViewport(),
+        displayMode,
+      });
+    }
   }
 
   await setWindowBounds(windowId, 1_100, 700);
@@ -129,6 +136,34 @@ async function exerciseKeyboard() {
     returnName:document.activeElement?.getAttribute('aria-label') || document.activeElement?.textContent?.replace(/\\s+/g,' ').trim()
   }))()`);
 
+  await evaluate("window.__MISTR_PHASE4__.setDisplayMode('smooth')");
+  await evaluate("document.querySelector('.context-selector--view').click()");
+  await delay(100);
+  const view = await evaluate(`(()=>( {
+    focus:document.activeElement?.getAttribute('aria-label') || document.activeElement?.textContent?.replace(/\\s+/g,' ').trim(),
+    focusVisible:document.activeElement?.matches(':focus-visible') ?? false,
+    openPanels:document.querySelectorAll('.tool-panel').length
+  }))()`);
+  await pressKey("ArrowDown", "ArrowDown", 40);
+  const viewArrowFocus = await evaluate("document.activeElement?.textContent?.replace(/\\s+/g,' ').trim()");
+  await pressEnter();
+  await delay(100);
+  const viewSelectedMode = await evaluate("window.__MISTR_PHASE4__.report().renderer.displayMode");
+  await evaluate("document.querySelector('.context-selector--view').click()");
+  await delay(100);
+  await pressKey("Escape", "Escape", 27);
+  await delay(100);
+  const viewClosed = await evaluate(`(()=>( {
+    closed:document.querySelectorAll('.tool-panel').length===0,
+    returnName:document.activeElement?.getAttribute('aria-label') || document.activeElement?.textContent?.replace(/\\s+/g,' ').trim()
+  }))()`);
+  await evaluate("document.querySelector('.context-selector--view').click()");
+  await delay(100);
+  await pressKey("ArrowUp", "ArrowUp", 38);
+  await pressEnter();
+  await delay(100);
+  const viewRestoredMode = await evaluate("window.__MISTR_PHASE4__.report().renderer.displayMode");
+
   const sliderBefore = Number(await evaluate("document.querySelector('.timeline input').value"));
   const sliderMaximum = Number(await evaluate("document.querySelector('.timeline input').max"));
   const valueTextBefore = await evaluate("document.querySelector('.timeline input').getAttribute('aria-valuetext')");
@@ -148,6 +183,14 @@ async function exerciseKeyboard() {
     contextFocusVisible: context.focusVisible,
     contextEscapeClosed: contextClosed.closed,
     contextEscapeReturn: contextClosed.returnName,
+    viewInitialFocus: view.focus,
+    viewFocusVisible: view.focusVisible,
+    viewOpenPanelCount: view.openPanels,
+    viewArrowFocus,
+    viewSelectedMode,
+    viewEscapeClosed: viewClosed.closed,
+    viewEscapeReturn: viewClosed.returnName,
+    viewRestoredMode,
     playbackBarStable: sameRect(playbackBefore, playbackOpen),
     sliderBefore,
     sliderAfter,
@@ -165,42 +208,56 @@ async function captureAccessibility() {
   return evaluate(`(()=>{
     const map=document.querySelector('.maplibregl-canvas');
     const context=document.querySelector('.context-selector');
+    const view=document.querySelector('.context-selector--view');
     return {
       unnamedInteractive:${JSON.stringify(unnamedInteractive)},
       mapTabIndex:map?.tabIndex ?? null,
       mapAccessibleName:map?.getAttribute('aria-label') || document.querySelector('.map-surface')?.getAttribute('aria-label'),
-      contextHasPopup:context?.getAttribute('aria-haspopup') ?? null
+      contextHasPopup:context?.getAttribute('aria-haspopup') ?? null,
+      viewHasPopup:view?.getAttribute('aria-haspopup') ?? null,
+      viewAccessibleName:view?.getAttribute('aria-label') ?? null
     };
   })()`);
 }
 
 async function captureForcedColors() {
   await call("Emulation.setEmulatedMedia", { features: [{ name: "forced-colors", value: "active" }] });
-  const documentNode = await call("DOM.getDocument");
-  assertProtocolResult(documentNode, "DOM.getDocument");
-  const buttonNode = await call("DOM.querySelector", {
-    nodeId: documentNode.result.root.nodeId,
-    selector: ".edge-trigger",
-  });
-  assertProtocolResult(buttonNode, "DOM.querySelector");
-  await call("CSS.forcePseudoState", {
-    nodeId: buttonNode.result.nodeId,
-    forcedPseudoClasses: ["focus", "focus-visible"],
-  });
-  const result = await evaluate(`(()=>{
-    const button=document.querySelector('.edge-trigger');
-    const style=getComputedStyle(button);
-    return {
-      matches:matchMedia('(forced-colors: active)').matches,
-      outlineStyle:style.outlineStyle,
-      outlineWidth:style.outlineWidth,
-      focusOutlineVisible:style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) >= 2
-    };
-  })()`);
-  await call("CSS.forcePseudoState", {
-    nodeId: buttonNode.result.nodeId,
-    forcedPseudoClasses: [],
-  });
+  const modes = [];
+  for (const displayMode of ["native", "smooth"]) {
+    await evaluate(`window.__MISTR_PHASE4__.setDisplayMode('${displayMode}')`);
+    await delay(100);
+    const documentNode = await call("DOM.getDocument");
+    assertProtocolResult(documentNode, "DOM.getDocument");
+    const buttonNode = await call("DOM.querySelector", {
+      nodeId: documentNode.result.root.nodeId,
+      selector: ".context-selector--view",
+    });
+    assertProtocolResult(buttonNode, "DOM.querySelector");
+    await call("CSS.forcePseudoState", {
+      nodeId: buttonNode.result.nodeId,
+      forcedPseudoClasses: ["focus", "focus-visible"],
+    });
+    modes.push(await evaluate(`(()=>{
+      const button=document.querySelector('.context-selector--view');
+      const style=getComputedStyle(button);
+      return {
+        displayMode:${JSON.stringify(displayMode)},
+        accessibleName:button?.getAttribute('aria-label') ?? null,
+        outlineStyle:style.outlineStyle,
+        outlineWidth:style.outlineWidth,
+        focusOutlineVisible:style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) >= 2
+      };
+    })()`));
+    await call("CSS.forcePseudoState", {
+      nodeId: buttonNode.result.nodeId,
+      forcedPseudoClasses: [],
+    });
+  }
+  const result = {
+    matches: await evaluate("matchMedia('(forced-colors: active)').matches"),
+    modes,
+    focusOutlineVisibleBoth: modes.every(mode => mode.focusOutlineVisible),
+  };
   await call("Emulation.setEmulatedMedia", { features: [] });
   return result;
 }
@@ -245,6 +302,20 @@ async function pressKey(key, code, virtualKeyCode) {
       code,
       windowsVirtualKeyCode: virtualKeyCode,
       nativeVirtualKeyCode: virtualKeyCode,
+    });
+    assertProtocolResult(response, "Input.dispatchKeyEvent");
+  }
+}
+
+async function pressEnter() {
+  for (const type of ["keyDown", "keyUp"]) {
+    const response = await call("Input.dispatchKeyEvent", {
+      type,
+      key: "Enter",
+      code: "Enter",
+      windowsVirtualKeyCode: 13,
+      nativeVirtualKeyCode: 13,
+      ...(type === "keyDown" ? { text: "\r", unmodifiedText: "\r" } : {}),
     });
     assertProtocolResult(response, "Input.dispatchKeyEvent");
   }

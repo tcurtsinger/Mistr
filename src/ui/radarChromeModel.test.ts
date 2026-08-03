@@ -5,9 +5,11 @@ import {
   liveFailureLabel,
   userFacingRadarError,
   normalizeRadarSite,
+  normalizeRadarDisplayMode,
   paintedFrameIndex,
   playbackErrorAfterRendererStatus,
   playbackPresentation,
+  radarDisplayModeLabel,
   radarInitializationLabel,
   rendererFailureMessage,
   timelinePosition,
@@ -20,6 +22,15 @@ describe("radar chrome model", () => {
     expect(normalizeRadarSite("KOUN")).toBe("KTLX");
     expect(normalizeRadarSite("TLX")).toBe("KTLX");
     expect(normalizeRadarSite("../../secret")).toBe("KTLX");
+  });
+
+  it("uses concise product labels for each radar display mode", () => {
+    expect(normalizeRadarDisplayMode("native")).toBe("native");
+    expect(normalizeRadarDisplayMode("smooth")).toBe("smooth");
+    expect(normalizeRadarDisplayMode("invalid")).toBe("smooth");
+    expect(normalizeRadarDisplayMode(null)).toBe("smooth");
+    expect(radarDisplayModeLabel("smooth")).toBe("Smooth");
+    expect(radarDisplayModeLabel("native")).toBe("Native");
   });
 
   it("follows the last painted observation rather than the requested selection", () => {

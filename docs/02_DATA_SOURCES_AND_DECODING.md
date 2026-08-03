@@ -41,8 +41,18 @@ Requirements:
 - Preserve measured data codes and documented scale/offset.
 - Preserve missing, below-threshold, and range-folded states.
 - Record the actual elevation angle and measurement time.
-- Do not blur measured gates merely to make the image appear smoother.
+- Keep decoded data separate from presentation: any spatially filtered display must use the same observation and leave native interrogation unchanged.
 - Compare against the current NOAA/NWS `SR_BREF` image and an independent Level II decoder, recognizing that provider quality control or styling may create visual differences.
+
+For a valid Level II reflectivity code, the canonical conversion is exact:
+
+```text
+dBZ = (rawCode - offset) / scale
+```
+
+Mistr does not round the result before palette lookup or point interrogation. Status is authoritative: below-threshold is transparent, range-folded remains an explicit categorical state, and an unknown or missing status never becomes a valid return. All valid codes, including weak clear-air returns, use the fully opaque NOAA/NWS operational `SR_BREF` reflectivity ramp rather than disappearing behind a hard display cutoff or being visually shifted into a warmer severity band.
+
+The `Smooth` display mode may filter the spatial presentation inside a single measured observation. `Native` uses exact nearest-gate sampling. Neither mode changes normalized bytes, scale/offset metadata, scan time, freshness, playback truth, or the native dBZ returned for a map inspection. The complete boundary and acceptance contract is [Radar Rendering Quality](25_RADAR_RENDERING_QUALITY.md).
 
 ### 3.2 Velocity
 

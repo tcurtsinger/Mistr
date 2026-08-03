@@ -34,13 +34,75 @@ uniform vec2 u_radar_lon_lat_radians;
 uniform float u_first_gate_center_m;
 uniform float u_gate_spacing_m;
 uniform int u_gate_count;
+uniform int u_radial_count;
 uniform int u_azimuth_lookup_size;
+uniform int u_smooth_display;
 uniform vec4 u_range_folded_color;
 in vec2 v_mercator;
 out vec4 frag_color;
 
 float wrapLongitude(float value) {
   return mod(value + PI, TWO_PI) - PI;
+}
+
+float signedAngleDifference(float value, float reference) {
+  return mod(value - reference + PI, TWO_PI) - PI;
+}
+
+vec4 validGateColor(int radialIndex, int gateIndex, out float valid) {
+  if (
+    radialIndex < 0 || radialIndex >= u_radial_count
+    || gateIndex < 0 || gateIndex >= u_gate_count
+  ) {
+    valid = 0.0;
+    return vec4(0.0);
+  }
+  uint status = texelFetch(u_statuses, ivec2(gateIndex, radialIndex), 0).r;
+  if (status != uint(0)) {
+    // Missing/below-threshold and range-folded cells never contribute to a
+    // smoothed value. The authoritative center cell handles range folding
+    // explicitly before smoothing, so smoothing cannot bridge either mask.
+    valid = 0.0;
+    return vec4(0.0);
+  }
+  uint rawCode = texelFetch(u_raw_codes, ivec2(gateIndex, radialIndex), 0).r;
+  valid = 1.0;
+  return texelFetch(u_palette, ivec2(int(rawCode), 0), 0);
+}
+
+vec4 smoothValidColor(
+  int radialIndex,
+  int neighborRadialIndex,
+  float radialWeight,
+  float gateCoordinate
+) {
+  int lowerGate = int(floor(gateCoordinate));
+  int upperGate = lowerGate + 1;
+  float gateWeight = fract(gateCoordinate);
+  float lowerWeight = 1.0 - gateWeight;
+  float upperWeight = gateWeight;
+  float currentWeight = 1.0 - radialWeight;
+
+  float valid00;
+  float valid01;
+  float valid10;
+  float valid11;
+  vec4 color00 = validGateColor(radialIndex, lowerGate, valid00);
+  vec4 color01 = validGateColor(radialIndex, upperGate, valid01);
+  vec4 color10 = validGateColor(neighborRadialIndex, lowerGate, valid10);
+  vec4 color11 = validGateColor(neighborRadialIndex, upperGate, valid11);
+  float weight00 = currentWeight * lowerWeight * valid00;
+  float weight01 = currentWeight * upperWeight * valid01;
+  float weight10 = radialWeight * lowerWeight * valid10;
+  float weight11 = radialWeight * upperWeight * valid11;
+  float totalWeight = weight00 + weight01 + weight10 + weight11;
+  if (totalWeight <= 0.0) return vec4(0.0);
+  return (
+    color00 * weight00
+    + color01 * weight01
+    + color10 * weight10
+    + color11 * weight11
+  ) / totalWeight;
 }
 
 void main() {
@@ -74,7 +136,7 @@ void main() {
   vec3 radialMetadata = texelFetch(u_radial_metadata, ivec2(radialIndex, 0), 0).rgb;
   float bearingDifference = abs(bearing - radialMetadata.r);
   bearingDifference = min(bearingDifference, TWO_PI - bearingDifference);
-  if (bearingDifference > radialMetadata.g) discard;
+  if (u_smooth_display == 0 && bearingDifference > radialMetadata.g) discard;
   float elevation = radialMetadata.b;
   float groundAngle = groundRangeM / EFFECTIVE_EARTH_RADIUS_M;
   float beamDenominator = cos(elevation + groundAngle);
@@ -90,6 +152,39 @@ void main() {
   if (status == uint(1)) discard;
   if (status == uint(2)) {
     frag_color = u_range_folded_color;
+    return;
+  }
+  if (u_smooth_display == 1) {
+    float signedDifference = signedAngleDifference(bearing, radialMetadata.r);
+    int neighborRadialIndex = signedDifference >= 0.0
+      ? (radialIndex + 1) % u_radial_count
+      : (radialIndex + u_radial_count - 1) % u_radial_count;
+    vec3 neighborMetadata = texelFetch(
+      u_radial_metadata,
+      ivec2(neighborRadialIndex, 0),
+      0
+    ).rgb;
+    float centerSeparation = abs(
+      signedAngleDifference(neighborMetadata.r, radialMetadata.r)
+    );
+    // Native beam widths and encoded centers can differ by a few hundredths
+    // of a degree, which would expose false hairline seams between otherwise
+    // consecutive measurements. Close those normal seams, but reject a gap
+    // large enough to represent a genuinely missing radial.
+    float coverage = radialMetadata.g + neighborMetadata.g;
+    bool safelyAdjacent = centerSeparation > 0.0
+      && centerSeparation <= coverage * 1.5 + 0.000001;
+    if (!safelyAdjacent && bearingDifference > radialMetadata.g) discard;
+    float radialWeight = safelyAdjacent
+      ? clamp(abs(signedDifference) / centerSeparation, 0.0, 1.0)
+      : 0.0;
+    frag_color = smoothValidColor(
+      radialIndex,
+      neighborRadialIndex,
+      radialWeight,
+      gateCoordinate
+    );
+    if (frag_color.a <= 0.0) discard;
     return;
   }
   uint rawCode = texelFetch(u_raw_codes, ivec2(gateIndex, radialIndex), 0).r;
@@ -171,6 +266,7 @@ export interface RadarRendererSnapshot {
   lastPaintedObservationId?: string;
   generation: number;
   selectionSequence: number;
+  displayMode: RadarDisplayMode;
   residentObservationIds: string[];
   contextEpoch: number;
   recovery: RadarRecoverySnapshot;
@@ -182,6 +278,8 @@ export interface RadarRendererSnapshot {
   shaderLog: string[];
   error?: string;
 }
+
+export type RadarDisplayMode = "smooth" | "native";
 
 export type RadarRecoveryPhase =
   | "ready"
@@ -204,6 +302,7 @@ export interface RadarRecoverySnapshot {
 export interface RadarCustomLayerOptions {
   onSnapshot(snapshot: RadarRendererSnapshot): void;
   recoveryBeforeLayerId?: string;
+  displayMode?: RadarDisplayMode;
 }
 
 interface Uniforms {
@@ -216,7 +315,9 @@ interface Uniforms {
   firstGateCenter: WebGLUniformLocation;
   gateSpacing: WebGLUniformLocation;
   gateCount: WebGLUniformLocation;
+  radialCount: WebGLUniformLocation;
   lookupSize: WebGLUniformLocation;
+  smoothDisplay: WebGLUniformLocation;
   radialMetadata: WebGLUniformLocation;
   rangeFoldedColor: WebGLUniformLocation;
 }
@@ -294,6 +395,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
   private selectedObservationId: string;
   private selectionSequence = 1;
   private selectedAt = 0;
+  private displayMode: RadarDisplayMode;
   private peakGpuResourceBytes = 0;
   private frameUploadCount = 0;
   private frameUploadBytes = 0;
@@ -303,6 +405,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
   private textureValidation: RadarTextureValidation | undefined;
   private shaderLog: string[] = [];
   private runtimeError: string | undefined;
+  private runtimeErrorRecoverableByNative = false;
   private recoveryPhase: RadarRecoveryPhase = "ready";
   private recoveryStartedAtUnixMs: number | undefined;
   private recoveryCompletedAtUnixMs: number | undefined;
@@ -321,6 +424,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
     validateResidentModels(models);
     this.models = models;
     this.selectedObservationId = models[0].observationId;
+    this.displayMode = validateRadarDisplayMode(options.displayMode ?? "smooth");
   }
 
   private models: RadarSweepCpuModel[];
@@ -333,6 +437,95 @@ export class RadarCustomLayer implements CustomLayerInterface {
       throw new RadarRendererError(`selected observation ${this.selectedObservationId} is unknown`);
     }
     return model;
+  }
+
+  getDisplayMode(): RadarDisplayMode {
+    return this.displayMode;
+  }
+
+  setDisplayMode(displayMode: RadarDisplayMode): void {
+    const nextMode = validateRadarDisplayMode(displayMode);
+    if (nextMode === this.displayMode) return;
+    this.displayMode = nextMode;
+    this.map?.triggerRepaint();
+    // The mode changes only how the already-selected observation is shaded.
+    // It neither invalidates nor replaces the authoritative observation paint
+    // receipt, including while a frame replacement or context recovery is in
+    // flight. Report the existing lifecycle truth rather than regressing a
+    // painted renderer to the generic "ready" state.
+    this.emit(
+      this.runtimeError
+        ? "error"
+        : this.recoveryPhase !== "ready"
+          ? "recovering"
+          : this.paintReceipt
+            ? "painted"
+            : this.program
+              ? "ready"
+              : "initializing",
+      this.runtimeError,
+    );
+  }
+
+  retryFailedSmoothDrawInNative(): RadarSelectionRequest | null {
+    if (
+      this.displayMode !== "smooth"
+      || !this.runtimeError
+      || !this.runtimeErrorRecoverableByNative
+      || this.recoveryPhase !== "ready"
+      || !this.program
+      || !this.vao
+      || !this.uniforms
+      || !this.gl
+      || this.gl.isContextLost()
+      || this.pendingPaint
+    ) {
+      return null;
+    }
+
+    // Smooth and Native share the same resident measurements and GPU
+    // resources. The playback controller owns the retry so it can accept the
+    // resulting paint receipt and keep timeline truth synchronized. Any
+    // persistent failure is caught again; context, fence, upload, and recovery
+    // errors never enter this path.
+    this.displayMode = "native";
+    this.runtimeError = undefined;
+    this.runtimeErrorRecoverableByNative = false;
+    this.map?.triggerRepaint();
+    this.emit(
+      this.paintReceipt
+        ? "painted"
+        : this.program
+          ? "ready"
+          : "initializing",
+    );
+    return {
+      generation: generationNumber(this.model),
+      observationId: this.selectedObservationId,
+      selectionSequence: this.selectionSequence,
+      requestedAtUnixMs: Date.now(),
+    };
+  }
+
+  private handleDrawFailure(error: unknown, retryInNative: boolean): boolean {
+    this.runtimeError = error instanceof Error ? error.message : String(error);
+    this.runtimeErrorRecoverableByNative = retryInNative;
+    const controllerOwnsRetry = this.paintWaiters.has(this.selectionSequence);
+    if (
+      retryInNative
+      && !controllerOwnsRetry
+      && this.retryFailedSmoothDrawInNative()
+    ) {
+      // A mode-only repaint keeps the same selection sequence, so there is
+      // no playback promise to own rollback. Preserve the already-painted
+      // Native pixels and schedule one bounded Native redraw here instead.
+      // Startup, play, and scrub paints retain controller ownership so their
+      // matching receipt remains the only authority for timeline changes.
+      return true;
+    }
+    this.rejectPaintWaiter(this.selectionSequence, this.runtimeError);
+    this.emit("error", this.runtimeError);
+    return false;
   }
 
   onAdd(map: MapLibreMap, gl: WebGL2RenderingContext): void {
@@ -391,6 +584,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
     const model = frame.model;
     const started = performance.now();
     const state = captureGlState(gl);
+    let retryInNative = false;
     try {
       gl.disable(gl.DEPTH_TEST);
       gl.disable(gl.STENCIL_TEST);
@@ -419,7 +613,10 @@ export class RadarCustomLayer implements CustomLayerInterface {
       gl.uniform1f(this.uniforms.firstGateCenter, model.firstGateCenterM);
       gl.uniform1f(this.uniforms.gateSpacing, model.gateSpacingM);
       gl.uniform1i(this.uniforms.gateCount, model.gateCount);
+      gl.uniform1i(this.uniforms.radialCount, model.radialCount);
       gl.uniform1i(this.uniforms.lookupSize, model.azimuthLookup.length);
+      const smoothDisplay = shouldSmoothRadarDisplay(this.displayMode, model.product);
+      gl.uniform1i(this.uniforms.smoothDisplay, smoothDisplay ? 1 : 0);
       const alpha = RANGE_FOLDED_COLOR[3] / 255;
       gl.uniform4f(
         this.uniforms.rangeFoldedColor,
@@ -428,7 +625,12 @@ export class RadarCustomLayer implements CustomLayerInterface {
         RANGE_FOLDED_COLOR[2] / 255 * alpha,
         alpha,
       );
-      gl.drawArrays(gl.TRIANGLES, 0, 6);
+      try {
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+      } catch (error) {
+        retryInNative = smoothDisplay;
+        throw error;
+      }
       this.drawCount += 1;
       if (
         this.paintReceipt?.selectionSequence !== this.selectionSequence
@@ -450,9 +652,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
         this.map?.triggerRepaint();
       }
     } catch (error) {
-      this.runtimeError = error instanceof Error ? error.message : String(error);
-      this.rejectPaintWaiter(this.selectionSequence, this.runtimeError);
-      this.emit("error", this.runtimeError);
+      if (this.handleDrawFailure(error, retryInNative)) return;
       throw error;
     } finally {
       restoreGlState(gl, state);
@@ -670,6 +870,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
     this.selectedAt = performance.now();
     this.textureValidation = pendingFrames.get(this.selectedObservationId)?.textureValidation;
     this.runtimeError = undefined;
+    this.runtimeErrorRecoverableByNative = false;
     this.map?.triggerRepaint();
     this.emit("ready");
   }
@@ -777,6 +978,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
     }
     this.textureValidation = nextFrames.get(this.selectedObservationId)?.textureValidation;
     this.runtimeError = undefined;
+    this.runtimeErrorRecoverableByNative = false;
     this.emit("ready");
   }
 
@@ -835,6 +1037,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
     this.switchLatencySamples = replacement.previousSwitchLatencySamples;
     this.pendingReplacement = null;
     this.runtimeError = undefined;
+    this.runtimeErrorRecoverableByNative = false;
 
     if (!this.quadBuffer) throw new RadarRendererError("renderer quad buffer is unavailable");
     const previousArrayBuffer = gl.getParameter(gl.ARRAY_BUFFER_BINDING) as WebGLBuffer | null;
@@ -925,6 +1128,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
     }
     if (result === gl.WAIT_FAILED) {
       this.runtimeError = "GPU completion fence failed";
+      this.runtimeErrorRecoverableByNative = false;
       this.emit("error", this.runtimeError);
       gl.deleteSync(pending.sync);
       this.pendingPaint = null;
@@ -1021,6 +1225,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
     this.recoveryVisiblePainted = false;
     this.paintReceipt = undefined;
     this.runtimeError = undefined;
+    this.runtimeErrorRecoverableByNative = false;
     this.textureValidation = undefined;
     if (abandonedReplacementSequence !== undefined) {
       this.rejectPaintWaiter(
@@ -1240,6 +1445,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
 
   private failRenderer(error: unknown) {
     this.runtimeError = error instanceof Error ? error.message : String(error);
+    this.runtimeErrorRecoverableByNative = false;
     for (const sequence of [...this.paintWaiters.keys()]) {
       this.rejectPaintWaiter(sequence, this.runtimeError);
     }
@@ -1258,6 +1464,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
       lastPaintedObservationId: this.paintReceipt?.observationId,
       generation: generationNumber(this.model),
       selectionSequence: this.selectionSequence,
+      displayMode: this.displayMode,
       residentObservationIds: [...this.frameResources.keys()],
       contextEpoch: this.contextEpoch,
       recovery: this.recoverySnapshot(),
@@ -1800,10 +2007,27 @@ function resolveUniforms(gl: WebGL2RenderingContext, program: WebGLProgram): Uni
     firstGateCenter: requireUniform(gl, program, "u_first_gate_center_m"),
     gateSpacing: requireUniform(gl, program, "u_gate_spacing_m"),
     gateCount: requireUniform(gl, program, "u_gate_count"),
+    radialCount: requireUniform(gl, program, "u_radial_count"),
     lookupSize: requireUniform(gl, program, "u_azimuth_lookup_size"),
+    smoothDisplay: requireUniform(gl, program, "u_smooth_display"),
     radialMetadata: requireUniform(gl, program, "u_radial_metadata"),
     rangeFoldedColor: requireUniform(gl, program, "u_range_folded_color"),
   };
+}
+
+function validateRadarDisplayMode(value: string): RadarDisplayMode {
+  if (value !== "smooth" && value !== "native") {
+    throw new TypeError("radar display mode must be Smooth or Native");
+  }
+  return value;
+}
+
+export function shouldSmoothRadarDisplay(
+  displayMode: RadarDisplayMode,
+  product: RadarSweepCpuModel["product"],
+): boolean {
+  validateRadarDisplayMode(displayMode);
+  return displayMode === "smooth" && product === "reflectivity";
 }
 
 function requireUniform(

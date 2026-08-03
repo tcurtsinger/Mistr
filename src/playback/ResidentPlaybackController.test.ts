@@ -13,6 +13,8 @@ class FakeLayer {
   private paintedSequence = 1;
   private generation = 7;
   private paintedGeneration = 7;
+  private displayMode: RadarRendererSnapshot["displayMode"] = "smooth";
+  private smoothRetryAvailable = false;
   private residentObservationIds = ["frame-a", "frame-b", "frame-c"];
   private pending: { complete(): void; fail(error: Error): void } | null = null;
   private recoveryPhase: RadarRendererSnapshot["recovery"]["phase"] = "ready";
@@ -35,6 +37,7 @@ class FakeLayer {
       lastPaintedObservationId: this.painted,
       generation: this.generation,
       selectionSequence: this.sequence,
+      displayMode: this.displayMode,
       residentObservationIds: this.residentObservationIds,
       contextEpoch: 3,
       recovery: {
@@ -69,6 +72,18 @@ class FakeLayer {
     this.selected = observationId;
     this.sequence += 1;
     return this.beginPendingPaint();
+  }
+
+  retryFailedSmoothDrawInNative() {
+    if (!this.smoothRetryAvailable || this.displayMode !== "smooth") return null;
+    this.smoothRetryAvailable = false;
+    this.displayMode = "native";
+    return {
+      generation: this.generation,
+      observationId: this.selected,
+      selectionSequence: this.sequence,
+      requestedAtUnixMs: Date.now(),
+    };
   }
 
   private beginPendingPaint(): Promise<RadarPaintReceipt> {
@@ -157,6 +172,17 @@ class FakeLayer {
     this.pending?.fail(error);
   }
 
+  failSmoothPaint(error = new Error("Smooth paint failed")) {
+    this.smoothRetryAvailable = true;
+    this.pending?.fail(error);
+  }
+
+  requireInitialPaint() {
+    this.painted = undefined;
+    this.paintedSequence = 0;
+    this.paintedGeneration = 0;
+  }
+
   loseContextDuringReplacement() {
     if (!this.replacement) throw new Error("replacement is not pending");
     const prior = this.replacement;
@@ -216,6 +242,56 @@ describe("resident playback truth", () => {
 
     layer.completePaint();
     await pending;
+    expect(controller.snapshot()).toMatchObject({
+      selectedObservationId: "frame-b",
+      lastPaintedObservationId: "frame-b",
+      playheadObservedAtUnixMs: 200,
+      transitionCount: 1,
+    });
+  });
+
+  it("falls back to Native during the first paint without abandoning startup", async () => {
+    const layer = new FakeLayer();
+    layer.requireInitialPaint();
+    const controller = new ResidentPlaybackController(layer, frames());
+
+    const initialPaint = controller.establishInitialPaint();
+    await Promise.resolve();
+    layer.failSmoothPaint();
+    await vi.waitFor(() => expect(layer.getSnapshot().displayMode).toBe("native"));
+
+    expect(controller.snapshot()).toMatchObject({
+      selectedObservationId: "frame-a",
+      lastPaintedObservationId: undefined,
+      holdReason: "AWAITING_GPU_PAINT",
+    });
+    layer.completePaint();
+    await expect(initialPaint).resolves.toMatchObject({ observationId: "frame-a" });
+    expect(controller.snapshot()).toMatchObject({
+      lastPaintedObservationId: "frame-a",
+      playheadObservedAtUnixMs: 100,
+      transitionCount: 0,
+    });
+  });
+
+  it("accepts the Native retry receipt after a failed Smooth scrub", async () => {
+    const layer = new FakeLayer();
+    const controller = new ResidentPlaybackController(layer, frames());
+    await controller.establishInitialPaint();
+
+    const scrub = controller.scrub(1);
+    await Promise.resolve();
+    layer.failSmoothPaint();
+    await vi.waitFor(() => expect(layer.getSnapshot().displayMode).toBe("native"));
+
+    expect(controller.snapshot()).toMatchObject({
+      selectedObservationId: "frame-b",
+      lastPaintedObservationId: "frame-a",
+      playheadObservedAtUnixMs: 100,
+      holdReason: "AWAITING_GPU_PAINT",
+    });
+    layer.completePaint();
+    await expect(scrub).resolves.toMatchObject({ observationId: "frame-b" });
     expect(controller.snapshot()).toMatchObject({
       selectedObservationId: "frame-b",
       lastPaintedObservationId: "frame-b",

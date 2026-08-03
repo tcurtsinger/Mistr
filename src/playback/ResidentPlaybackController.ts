@@ -43,6 +43,7 @@ export class ResidentPlaybackController {
       | "getSnapshot"
       | "hasPendingResidentFrameReplacement"
       | "replaceResidentFrames"
+      | "retryFailedSmoothDrawInNative"
       | "rollbackResidentFrameReplacement"
       | "selectAndWait"
       | "updateResidentHistory"
@@ -64,7 +65,9 @@ export class ResidentPlaybackController {
     this.assertActive();
     if (this.operation) throw new Error("a frame selection is already awaiting paint");
     const snapshot = this.layer.getSnapshot();
-    const operation = this.layer.waitForPaint(snapshot.selectionSequence);
+    const operation = this.withNativeFallback(
+      this.layer.waitForPaint(snapshot.selectionSequence),
+    );
     this.operation = operation;
     this.emit();
     try {
@@ -380,7 +383,7 @@ export class ResidentPlaybackController {
       this.assertActive();
     }
     const priorSelectionSequence = this.layer.getSnapshot().selectionSequence;
-    const operation = this.layer.selectAndWait(observationId);
+    const operation = this.withNativeFallback(this.layer.selectAndWait(observationId));
     this.operation = operation;
     this.emit();
     try {
@@ -409,6 +412,24 @@ export class ResidentPlaybackController {
       if (completesCycle) this.completedCycles += 1;
     }
     this.emit();
+  }
+
+  private async withNativeFallback(
+    smoothPaint: Promise<RadarPaintReceipt>,
+  ): Promise<RadarPaintReceipt> {
+    try {
+      return await smoothPaint;
+    } catch (smoothError) {
+      const retry = this.layer.retryFailedSmoothDrawInNative();
+      if (!retry) throw smoothError;
+      try {
+        return await this.layer.waitForPaint(retry.selectionSequence);
+      } catch (nativeError) {
+        throw new Error(
+          `Smooth GPU paint failed (${errorMessage(smoothError)}) and Native retry failed (${errorMessage(nativeError)})`,
+        );
+      }
+    }
   }
 
   private assertReceipt(receipt: RadarPaintReceipt) {

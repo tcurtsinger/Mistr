@@ -224,6 +224,40 @@ button { color: inherit; }
   width: min(360px, calc(100vw - 32px));
   transform: translateX(-50%);
 }
+.tool-panel--view {
+  top: 47px;
+  right: 0;
+  left: auto;
+  width: 148px;
+  padding: 6px;
+  overflow: hidden;
+}
+.tool-panel--view button {
+  width: 100%;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--day);
+  font: 500 13px/1 "Barlow Semi Condensed", "Segoe UI", sans-serif;
+  letter-spacing: 0.02em;
+  text-align: left;
+  cursor: pointer;
+}
+.tool-panel--view button:hover,
+.tool-panel--view button[aria-checked="true"] {
+  background: linear-gradient(90deg, rgba(10, 43, 255, 0.2), rgba(210, 75, 255, 0.12));
+}
+.tool-panel--view button:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px rgba(255, 215, 230, 0.82);
+}
+.tool-panel--view .check-icon { width: 16px; height: 16px; }
 
 .panel-header { padding: 18px 20px 14px; }
 .panel-header h2 {

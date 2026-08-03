@@ -28,6 +28,7 @@ try {
   assertProtocolResult(resize, "Browser.setWindowBounds");
   await delay(1_500);
 
+  await evaluate("window.__MISTR_PHASE4__.setDisplayMode('native')");
   const cancellation = await evaluate(`(async()=>{
     const errorCode = error => error && typeof error === "object" && "code" in error
       ? error.code
@@ -44,8 +45,10 @@ try {
       currentVolumeIndex:current.evidence?.safe?.volumeIndex,
       currentVolumeStartedAtUnixMs:current.evidence?.safe?.volumeStartedAtUnixMs,
       currentFrameUploadCount:current.renderer?.metrics?.frameUploadCount,
+      displayMode:current.renderer?.displayMode,
     };
   })()`, true, 240_000);
+  await evaluate("window.__MISTR_PHASE4__.setDisplayMode('smooth')");
   const rolling = await evaluate(`(async()=>{
     const next = await window.__MISTR_PHASE5__.acquire("KTLX", true, 900);
     const oldest = await window.__MISTR_PHASE4__.scrub(0);
@@ -58,6 +61,7 @@ try {
       renderer:next.renderer,
       oldestScrubObservationId:oldest.observationId,
       newestScrubObservationId:newest.observationId,
+      displayMode:next.renderer?.displayMode,
     };
   })()`, true, 960_000);
   const report = await evaluate("window.__MISTR_PHASE5__.report()");

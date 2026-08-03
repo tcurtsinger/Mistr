@@ -28,13 +28,13 @@ describe("Phase 4 packaged acceptance validation", () => {
   ])("rejects the report-level %s failure", (expectedFailure, mutate) => {
     const report = passingReport();
     mutate(report);
-    expect(validatePhase4Acceptance(report, passingScenarios(), passingBounds(), 1_000, 2))
+    expect(validatePhase4Acceptance(report, passingScenarios(), passingBounds(), 1_000, 2, passingDisplayModeEvidence(), passingPixelEvidence()))
       .toContain(expectedFailure);
   });
 
   it("requires both configured runs and their stabilized heap samples", () => {
     const scenarios = passingScenarios().slice(0, 1);
-    expect(validatePhase4Acceptance(passingReport(), scenarios, passingBounds(), 1_000, 2))
+    expect(validatePhase4Acceptance(passingReport(), scenarios, passingBounds(), 1_000, 2, passingDisplayModeEvidence(), passingPixelEvidence()))
       .toEqual(expect.arrayContaining(["stability_run_count", "stabilized_heap_unavailable"]));
   });
 
@@ -42,7 +42,7 @@ describe("Phase 4 packaged acceptance validation", () => {
     const scenarios = passingScenarios();
     scenarios[0].switchTiming.p95Ms = 33.4;
 
-    expect(validatePhase4Acceptance(passingReport(), scenarios, passingBounds(), 1_000, 2))
+    expect(validatePhase4Acceptance(passingReport(), scenarios, passingBounds(), 1_000, 2, passingDisplayModeEvidence(), passingPixelEvidence()))
       .toContain("run_1_switch_p95");
   });
 
@@ -50,8 +50,41 @@ describe("Phase 4 packaged acceptance validation", () => {
     const scenarios = passingScenarios();
     scenarios[1].rollingHistory.passed = false;
 
-    expect(validatePhase4Acceptance(passingReport(), scenarios, passingBounds(), 1_000, 2))
+    expect(validatePhase4Acceptance(passingReport(), scenarios, passingBounds(), 1_000, 2, passingDisplayModeEvidence(), passingPixelEvidence()))
       .toContain("run_2_rolling_history");
+  });
+
+  it("requires both display modes to preserve paint truth without uploads", () => {
+    const evidence = passingDisplayModeEvidence();
+    evidence.frameUploadCountDelta = 1;
+    evidence.passed = false;
+
+    expect(validatePhase4Acceptance(
+      passingReport(),
+      passingScenarios(),
+      passingBounds(),
+      1_000,
+      2,
+      evidence,
+      passingPixelEvidence(),
+    )).toContain("display_modes");
+  });
+
+  it("requires nonblank and visibly distinct radar pixels", () => {
+    const evidence = passingPixelEvidence();
+    evidence.changedPixels = 0;
+    evidence.changedRatio = 0;
+    evidence.passed = false;
+
+    expect(validatePhase4Acceptance(
+      passingReport(),
+      passingScenarios(),
+      passingBounds(),
+      1_000,
+      2,
+      passingDisplayModeEvidence(),
+      evidence,
+    )).toContain("display_pixels");
   });
 });
 
@@ -74,7 +107,8 @@ function passingReport() {
 }
 
 function passingScenarios() {
-  return [80_000_000, 81_000_000].map((stabilizedHeapBytes) => ({
+  return [80_000_000, 81_000_000].map((stabilizedHeapBytes, index) => ({
+    displayMode: index === 0 ? "native" : "smooth",
     requestedTransitions: 1_000,
     completedTransitions: 1_000,
     receiptTruthPassed: true,
@@ -101,4 +135,36 @@ function passingScenarios() {
 
 function passingBounds() {
   return { width: 3_840, height: 2_160 };
+}
+
+function passingDisplayModeEvidence() {
+  return {
+    nativeMode: "native",
+    smoothMode: "smooth",
+    nativeStatus: "painted",
+    smoothStatus: "painted",
+    observationTruthUnchanged: true,
+    frameUploadCountDelta: 0,
+    frameUploadBytesDelta: 0,
+    gpuResourceBytesBefore: 53_099_312,
+    gpuResourceBytesAfter: 53_099_312,
+    passed: true,
+  };
+}
+
+function passingPixelEvidence() {
+  return {
+    width: 1_280,
+    height: 960,
+    pixelCount: 1_228_800,
+    nativeSignalPixels: 450_000,
+    smoothSignalPixels: 520_000,
+    changedPixels: 300_000,
+    commonBackgroundPixels: 500_000,
+    nativeSignalRatio: 0.366,
+    smoothSignalRatio: 0.423,
+    changedRatio: 0.244,
+    commonBackgroundRatio: 0.407,
+    passed: true,
+  };
 }

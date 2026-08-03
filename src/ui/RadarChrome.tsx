@@ -1,7 +1,15 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import { filterRadarSites, type RadarSiteOption } from "../data/radarSites";
 import type { GateInterrogation } from "../radar-renderer/cpuModel";
+import type { RadarDisplayMode } from "../radar-renderer/RadarCustomLayer";
 import {
+  radarDisplayModeLabel,
   timelinePosition,
   type FreshnessPresentation,
   type LiveHistoryStatus,
@@ -10,6 +18,8 @@ import {
 export interface RadarChromeProps {
   appVersion: string;
   displayedAtUnixMs?: number;
+  displayMode: RadarDisplayMode;
+  displayModeReady: boolean;
   dismissPanelsSignal: number;
   frameCount: number;
   frameIndex: number;
@@ -20,6 +30,7 @@ export interface RadarChromeProps {
   inspectionSelected: boolean;
   mapStatus: string;
   onRecenter(): void;
+  onSelectDisplayMode(mode: RadarDisplayMode): void;
   onScrub(index: number): void;
   onSelectSite(site: string): void;
   onTogglePlayback(): void;
@@ -34,11 +45,13 @@ export interface RadarChromeProps {
   sites: readonly RadarSiteOption[];
 }
 
-type OpenPanel = "menu" | "context-sites" | "about" | null;
+type OpenPanel = "menu" | "context-sites" | "context-view" | "about" | null;
 
 export function RadarChrome({
   appVersion,
   displayedAtUnixMs,
+  displayMode,
+  displayModeReady,
   dismissPanelsSignal,
   frameCount,
   frameIndex,
@@ -49,6 +62,7 @@ export function RadarChrome({
   inspectionSelected,
   mapStatus,
   onRecenter,
+  onSelectDisplayMode,
   onScrub,
   onSelectSite,
   onTogglePlayback,
@@ -64,13 +78,16 @@ export function RadarChrome({
 }: RadarChromeProps) {
   const [openPanel, setOpenPanel] = useState<OpenPanel>(null);
   const menuTriggerRef = useRef<HTMLButtonElement>(null);
-  const contextTriggerRef = useRef<HTMLButtonElement>(null);
-  const panelOriginRef = useRef<"menu" | "context">("menu");
+  const siteTriggerRef = useRef<HTMLButtonElement>(null);
+  const viewTriggerRef = useRef<HTMLButtonElement>(null);
+  const panelOriginRef = useRef<"menu" | "site" | "view">("menu");
 
   const closePanel = useCallback((restoreFocus = true) => {
-    const returnTarget = panelOriginRef.current === "context"
-      ? contextTriggerRef.current
-      : menuTriggerRef.current;
+    const returnTarget = panelOriginRef.current === "site"
+      ? siteTriggerRef.current
+      : panelOriginRef.current === "view"
+        ? viewTriggerRef.current
+        : menuTriggerRef.current;
     setOpenPanel(null);
     if (restoreFocus) {
       globalThis.requestAnimationFrame(() => returnTarget?.focus());
@@ -96,10 +113,16 @@ export function RadarChrome({
     if (!openPanel) return;
     const panelId = openPanel === "context-sites"
       ? "mistr-context-site-panel"
+      : openPanel === "context-view"
+        ? "mistr-context-view-panel"
       : "mistr-tool-panel";
     const frame = globalThis.requestAnimationFrame(() => {
-      document.getElementById(panelId)
-        ?.querySelector<HTMLElement>("input:not(:disabled), button:not(:disabled)")
+      const panel = document.getElementById(panelId);
+      const selectedView = openPanel === "context-view"
+        ? panel?.querySelector<HTMLElement>('[role="menuitemradio"][aria-checked="true"]')
+        : null;
+      (selectedView
+        ?? panel?.querySelector<HTMLElement>("input:not(:disabled), button:not(:disabled)"))
         ?.focus();
     });
     return () => globalThis.cancelAnimationFrame(frame);
@@ -107,6 +130,10 @@ export function RadarChrome({
 
   const selectSite = (site: string) => {
     onSelectSite(site);
+    closePanel();
+  };
+  const selectDisplayMode = (mode: RadarDisplayMode) => {
+    onSelectDisplayMode(mode);
     closePanel();
   };
   const timestamp = formatScanTimestamp(displayedAtUnixMs);
@@ -148,17 +175,47 @@ export function RadarChrome({
           onClick={() => {
             if (openPanel === "context-sites") closePanel();
             else {
-              panelOriginRef.current = "context";
+              panelOriginRef.current = "site";
               setOpenPanel("context-sites");
             }
           }}
-          ref={contextTriggerRef}
+          ref={siteTriggerRef}
           type="button"
         >
           <span className="context-selector__label">SITE</span>
           <strong>{selectedSite}</strong>
           <ChevronIcon />
         </button>
+        <span aria-hidden="true" className="instrument-divider" />
+        <button
+          aria-controls="mistr-context-view-panel"
+          aria-expanded={openPanel === "context-view"}
+          aria-haspopup="menu"
+          aria-label={`Radar display: ${radarDisplayModeLabel(displayMode)}`}
+          className="context-selector context-selector--view"
+          disabled={!displayModeReady}
+          onClick={() => {
+            if (openPanel === "context-view") closePanel();
+            else {
+              panelOriginRef.current = "view";
+              setOpenPanel("context-view");
+            }
+          }}
+          ref={viewTriggerRef}
+          type="button"
+        >
+          <span className="context-selector__label">VIEW</span>
+          <strong>{radarDisplayModeLabel(displayMode)}</strong>
+          <ChevronIcon />
+        </button>
+
+        {openPanel === "context-view" ? (
+          <ViewPanel
+            currentMode={displayMode}
+            id="mistr-context-view-panel"
+            onSelect={selectDisplayMode}
+          />
+        ) : null}
       </nav>
 
       {openPanel === "context-sites" ? (
@@ -285,6 +342,66 @@ export function RadarChrome({
           ? `Preparing radar. ${preparingLabel}.`
           : `${playbackLabel}. Radar ${freshness.kind}. ${sampleAnnouncement}`}
       </p>
+    </div>
+  );
+}
+
+const DISPLAY_MODES: readonly RadarDisplayMode[] = ["smooth", "native"];
+
+function ViewPanel({
+  currentMode,
+  id,
+  onSelect,
+}: {
+  currentMode: RadarDisplayMode;
+  id: string;
+  onSelect(mode: RadarDisplayMode): void;
+}) {
+  const moveFocus = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const options = Array.from(
+      event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]'),
+    );
+    if (options.length === 0) return;
+    const currentIndex = Math.max(0, options.indexOf(document.activeElement as HTMLButtonElement));
+    let nextIndex: number | null = null;
+    if (event.key === "ArrowDown" || event.key === "ArrowRight") {
+      nextIndex = (currentIndex + 1) % options.length;
+    } else if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
+      nextIndex = (currentIndex - 1 + options.length) % options.length;
+    } else if (event.key === "Home") {
+      nextIndex = 0;
+    } else if (event.key === "End") {
+      nextIndex = options.length - 1;
+    }
+    if (nextIndex === null) return;
+    event.preventDefault();
+    options[nextIndex].focus();
+  };
+
+  return (
+    <div
+      aria-label="Radar view"
+      className="tool-panel tool-panel--view"
+      id={id}
+      onKeyDown={moveFocus}
+      role="menu"
+    >
+      {DISPLAY_MODES.map((mode) => {
+        const selected = mode === currentMode;
+        return (
+          <button
+            aria-checked={selected}
+            key={mode}
+            onClick={() => onSelect(mode)}
+            role="menuitemradio"
+            tabIndex={selected ? 0 : -1}
+            type="button"
+          >
+            <span>{radarDisplayModeLabel(mode)}</span>
+            {selected ? <CheckIcon /> : null}
+          </button>
+        );
+      })}
     </div>
   );
 }

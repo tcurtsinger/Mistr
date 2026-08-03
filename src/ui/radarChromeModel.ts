@@ -1,4 +1,5 @@
 import { isSupportedRadarSite } from "../data/radarSites";
+import type { RadarDisplayMode } from "../radar-renderer/RadarCustomLayer";
 
 export interface TimelineFrame {
   observationId: string;
@@ -25,6 +26,14 @@ export interface RendererStatusLike {
 }
 
 export type LiveHistoryStatus = "loading" | "partial" | "full";
+
+export function normalizeRadarDisplayMode(value: string | null | undefined): RadarDisplayMode {
+  return value === "native" ? "native" : "smooth";
+}
+
+export function radarDisplayModeLabel(mode: RadarDisplayMode): "Smooth" | "Native" {
+  return mode === "smooth" ? "Smooth" : "Native";
+}
 
 export function normalizeRadarSite(value: string | null | undefined, fallback = "KTLX"): string {
   const normalized = value?.trim().toUpperCase() ?? "";

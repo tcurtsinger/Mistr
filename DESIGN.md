@@ -146,7 +146,9 @@ The palette passes from black night through cobalt and rose into pale dawn, but 
 
 ## Layout
 
-The map fills the window. In Alpha, the top-center context bar contains Mistr identity and the one active control that changes the radar being viewed: site. Base reflectivity at the lowest usable tilt is fixed Alpha scope, so it is explained in About rather than presented as inert control-like chrome. Future product, elevation, or bounded display selectors appear only when those choices actually exist.
+The map fills the window. In Alpha, the top-center context bar contains Mistr identity, the canonical site selector, and one real two-state spatial-display choice. Its compact visible labels are exactly `Smooth` and `Native`, with `Smooth` as the default. Base reflectivity at the lowest usable tilt is fixed Alpha scope, so product and elevation remain facts explained in About rather than inert control-like chrome.
+
+`Smooth` filters the spatial presentation of one measured observation. It does not interpolate between scan times, generate a frame, change decoded gates, or change the dBZ returned by inspection. `Native` shows the exact polar gates with nearest sampling. Changing this display choice therefore leaves the selected observation, site, measured time, freshness, playback position, and painted-frame receipt unchanged.
 
 The site shown in radar context follows the observation that actually painted. While a different site is being acquired, the freshness region names that pending site; the top context does not claim the switch before GPU publication succeeds.
 
@@ -154,10 +156,10 @@ One small trigger sits near the left edge for global application tools. It may o
 
 The bottom-center playback bar remains stable regardless of panel state. It contains play/pause, direct scan scrubbing, displayed scan time, freshness, playback position/state, and the active dBZ sample. It never shrinks or shifts when a side panel opens.
 
-On compact desktop windows, labels collapse before controls. The context bar may reduce its visible labels, while the playback timeline retains the largest flexible share. Displayed time, freshness, and an active dBZ sample remain visible. The map is never converted into a dashboard grid.
+On compact desktop windows, secondary identity and explanatory labels collapse before controls. The site and exact `Smooth`/`Native` choice remain identifiable, while the playback timeline retains the largest flexible share. Displayed time, freshness, and an active dBZ sample remain visible. The map is never converted into a dashboard grid.
 
 ### Spatial Rules
-- **Top changes what:** the selected radar site in Alpha; future radar choices only after they become real capabilities.
+- **Top changes what and how it is drawn:** the selected radar site and the real `Smooth`/`Native` spatial display choice in Alpha; product and elevation controls appear only after they become real capabilities.
 - **Left changes the application:** infrequent global tools and settings.
 - **Right explains alerts:** absent until alerts are a real product capability.
 - **Bottom controls when:** playback, measured time, freshness, and inspection value.
@@ -179,9 +181,10 @@ Chrome is content-sized rather than viewport-filling. The context and playback b
 ### Radar Context Bar
 - Compact and centered near the top edge.
 - Wraps its contents closely rather than claiming unnecessary horizontal or vertical space.
-- Contains Mistr identity plus the single canonical site selector in Alpha.
+- Contains Mistr identity, the single canonical site selector, and the `Smooth`/`Native` spatial display choice in Alpha.
 - Opens a searchable list of all provider-qualified operational WSR-88D sites, including Alaska, Hawaii, Guam, and Puerto Rico. Test, decommissioned, TDWR, and provider-absent sites are omitted.
 - Uses text, chevrons, and conventional segmented states rather than an icon toolbar.
+- Keeps `Smooth` and `Native` visibly distinct and gives the control an accessible name such as `Radar display: Smooth`. The label describes presentation only, never a new or intermediate observation.
 
 ### Menu Trigger and Panel
 - One small left-edge trigger with a clear accessible name.

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildReflectivityPalette,
   buildStormRelativeVelocityPalette,
+  colorForReflectivity,
   paletteColor,
   RANGE_FOLDED_COLOR,
   TRANSPARENT_COLOR,
@@ -28,6 +29,39 @@ describe("reflectivity palette", () => {
     ]);
   });
 
+  it("keeps every valid reflectivity code operationally opaque without a low-return cutoff", () => {
+    const palette = buildReflectivityPalette(2, 66);
+
+    for (let rawCode = 2; rawCode < 256; rawCode += 1) {
+      expect(palette[rawCode * 4 + 3]).toBe(255);
+    }
+  });
+
+  it("maps the exact unrounded code-to-dBZ value before color interpolation", () => {
+    const scale = 4;
+    const offset = 62;
+    const rawCode = 72; // 2.5 dBZ, deliberately between palette anchors.
+    const exactDbz = (rawCode - offset) / scale;
+
+    expect(paletteColor("reflectivity", rawCode, 0, scale, offset))
+      .toEqual(colorForReflectivity(exactDbz));
+    expect(colorForReflectivity(exactDbz)).not.toEqual(colorForReflectivity(2));
+    expect(colorForReflectivity(exactDbz)).not.toEqual(colorForReflectivity(3));
+  });
+
+  it("pins the NOAA operational SR_BREF anchor colors and interpolates between them", () => {
+    expect(colorForReflectivity(-32)).toEqual([145, 137, 105, 255]);
+    expect(colorForReflectivity(0)).toEqual([123, 136, 174, 255]);
+    expect(colorForReflectivity(20)).toEqual([48, 214, 91, 255]);
+    expect(colorForReflectivity(30)).toEqual([10, 115, 12, 255]);
+    expect(colorForReflectivity(40)).toEqual([244, 202, 23, 255]);
+    expect(colorForReflectivity(50)).toEqual([208, 8, 8, 255]);
+    expect(colorForReflectivity(60)).toEqual([241, 185, 253, 255]);
+    expect(colorForReflectivity(70)).toEqual([130, 0, 231, 255]);
+    expect(colorForReflectivity(80)).toEqual([130, 0, 231, 255]);
+    expect(colorForReflectivity(2.5)).toEqual([103, 121, 169, 255]);
+  });
+
   it("keeps N0S categories separate from reflectivity scaling", () => {
     const palette = buildStormRelativeVelocityPalette();
     expect(paletteColor("storm_relative_velocity", 0, 1, 1, 0)).toEqual(TRANSPARENT_COLOR);
@@ -39,5 +73,6 @@ describe("reflectivity palette", () => {
 
   it("rejects invalid scale metadata", () => {
     expect(() => buildReflectivityPalette(0, 66)).toThrow("positive scale");
+    expect(() => colorForReflectivity(Number.NaN)).toThrow("finite dBZ");
   });
 });
