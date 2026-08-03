@@ -62,7 +62,6 @@ describe("quiet operational radar map context", () => {
     );
     expect(anchorIndex).toBe(33);
     expect(layers.slice(anchorIndex).map((candidate) => candidate.id)).toEqual([
-      "mistr-coastline-context",
       "highway_motorway_subtle",
       "highway_major_subtle",
       "highway_major_casing",
@@ -98,33 +97,13 @@ describe("quiet operational radar map context", () => {
     }
   });
 
-  it("draws restrained coastline context from the existing water source", () => {
-    expect(layer("mistr-coastline-context")).toMatchObject({
-      type: "line",
-      source: "openmaptiles",
-      "source-layer": "water",
-      filter: [
-        "all",
-        ["match", ["geometry-type"], ["MultiPolygon", "Polygon"], true, false],
-        ["!=", ["get", "brunnel"], "tunnel"],
-      ],
-      paint: {
-        "line-color": "rgb(184,194,204)",
-        "line-opacity": [
-          "interpolate",
-          ["linear"],
-          ["zoom"],
-          4,
-          0.28,
-          8,
-          0.32,
-          12,
-          0.36,
-          16,
-          0.4,
-        ],
-      },
-    });
+  it("never outlines split water polygons as persistent context", () => {
+    expect(layers.filter((candidate) => (
+      candidate.type === "line"
+      && "source-layer" in candidate
+      && candidate["source-layer"] === "water"
+    ))).toEqual([]);
+    expect(layer(RADAR_CONTEXT_ANCHOR_LAYER_ID).id).toBe("highway_motorway_subtle");
   });
 
   it("delays regional road density and keeps local streets below radar", () => {

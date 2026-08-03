@@ -1,4 +1,4 @@
-export const RADAR_CONTEXT_ANCHOR_LAYER_ID = "mistr-coastline-context";
+export const RADAR_CONTEXT_ANCHOR_LAYER_ID = "highway_motorway_subtle";
 
 export interface RadarMapStyleLayer {
   id: string;

@@ -56,9 +56,9 @@ Palette anchors may interpolate color and alpha for presentation, but each looku
 
 ## 5. Operational map context
 
-Radar is inserted at the explicit `mistr-coastline-context` boundary in the bundled style rather than below the map's first symbol. That boundary creates two intentional graphs without a second provider or global radar-opacity reduction.
+Radar is inserted at the explicit `highway_motorway_subtle` boundary in the bundled style rather than below the map's first symbol. That boundary creates two intentional graphs without a second provider or global radar-opacity reduction.
 
-The base plane keeps land, water, parks, and wooded areas within a narrow matte-charcoal range. Water remains recognizable without becoming a large bright field, and the separate restrained coastline carries the geographic edge. Important cities remain the strongest neutral labels; state labels use natural case and quieter contrast so administrative text does not compete with precipitation.
+The base plane keeps land, water, parks, and wooded areas within a narrow matte-charcoal range. Water remains recognizable without becoming a large bright field. Mistr deliberately does not outline the `water` source-layer polygons: the [OpenMapTiles water schema](https://openmaptiles.org/schema/#water) explains that these polygons are split for rendering and that their generated boundaries can prevent reliable border styling. Removing the outline prevents Lake Mead, rivers, reservoirs, ocean partitions, and tile-generalized shorelines from becoming bold seams that disappear and return while zooming. Important cities remain the strongest neutral labels; state labels use natural case and quieter contrast so administrative text does not compete with precipitation.
 
 Below radar:
 
@@ -68,7 +68,6 @@ Below radar:
 
 Above radar:
 
-- a cool neutral coastline/water outline reusing the existing `openmaptiles` water source;
 - motorways and primary/trunk roads only, with regional density disclosed progressively and restrained dual contrast at detailed zooms;
 - country and state boundaries; and
 - motorway/major-route identifiers plus important city, state, and country labels.
@@ -120,14 +119,14 @@ Source-level evidence must prove:
 5. uploaded palette bytes remain correctly premultiplied for WebGL;
 6. `Smooth` and `Native` use the same observation and point interrogation result;
 7. filtering cannot create data across invalid/status boundaries or the azimuth seam;
-8. the explicit context boundary keeps local detail below radar while coastline, major-route, boundary, and important-label context remains above it using only the existing map source graph; and
+8. the explicit context boundary keeps water and local detail below radar without split-polygon outlines while major-route, boundary, and important-label context remains above it using only the existing map source graph; and
 9. the visible labels and accessible control name expose the active mode without implying a new observation or meteorological clutter classification.
 
 The combined packaged Windows/WebView2 matrix must cover direct scrub, resident playback, site switching, 4K pan/zoom, context loss/restoration, and compact/forced-colors inspection across both modes. Renderer-sensitive playback, recovery, responsive-layout, and accessibility paths exercise both modes directly; mode-independent acquisition ownership remains covered once per live workflow. The existing long-task, hot-path I/O/upload, GPU-memory, and painted-receipt gates do not relax for visual quality.
 
 ### Current Alpha evidence
 
-The release WebView2 renderer with the quiet weak-return curve and explicit map-context boundary passed separate `Native` and `Smooth` 1,000-transition resident-playback scenarios at 3840x2160 with zero long tasks, zero hot-path acquisition, and zero hot-path frame uploads. Frame-time P95 was 6.1 ms in Native and 6.2 ms in Smooth. Switching modes changed neither observation/receipt truth nor the 53,099,312-byte resident GPU set and caused no upload. Automated isolated-pixel evidence found substantial signal in both modes, a 53.7% changed-pixel ratio, and 33.0% background retained in common; generated overview and close-zoom captures show weak texture receding while positive structure remains visible. Runtime coexistence placed local context through `place_town` below radar and began the essential above-radar graph at `mistr-coastline-context`.
+The release WebView2 renderer with the quiet weak-return curve and explicit map-context boundary passed separate `Native` and `Smooth` 1,000-transition resident-playback scenarios at 3840x2160 with zero long tasks, zero hot-path acquisition, and zero hot-path frame uploads. Frame-time P95 was 6.1 ms in Native and 6.2 ms in Smooth. Switching modes changed neither observation/receipt truth nor the 53,099,312-byte resident GPU set and caused no upload. Automated isolated-pixel evidence found substantial signal in both modes, a 53.7% changed-pixel ratio, and 33.0% background retained in common; generated overview and close-zoom captures show weak texture receding while positive structure remains visible. Runtime coexistence placed matte water and local context through `place_town` below radar and began the essential above-radar graph at `highway_motorway_subtle`.
 
 A packaged live KOKX observation at `2026-08-03T04:18:59Z` reproduced the owner's Long Island/Northeast operating scene. The prior pale negative-dBZ disk was absent, coherent positive precipitation remained visible from weak blue/cyan through operational green/yellow bands, important cities and major routes remained readable, and the former bright road mesh no longer fragmented the storm. The downloaded volume and screenshots remain ignored local validation artifacts.
 
