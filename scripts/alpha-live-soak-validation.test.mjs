@@ -20,7 +20,7 @@ function validReport(targetFrames = 4) {
     },
     siteSwitch: {
       pendingTopSite: "KTLX",
-      pendingFreshness: "UPDATING KINX",
+      pendingNotice: "Showing KTLX archive radar while KINX live radar loads.",
       finalTopSite: "KTLX",
     },
     historyEvents: buildIds.map((observationId, index) => ({
@@ -29,7 +29,9 @@ function validReport(targetFrames = 4) {
       observationId,
       volumeIndex: ((1 - index + 999 * 2) % 999) + 1,
       volumeStartedAtUnixMs: 1_800_000_000_000 - index * 300_000,
+      notice: "Current KTLX radar is ready. Loading recent scans.",
     })),
+    historyLoadingNotice: "Current KTLX radar is ready. Loading recent scans.",
     preRecoveryFrameUploadDelta: targetFrames,
     final: {
       evidence: { observationId: ids.at(-1) },
@@ -49,9 +51,16 @@ function validReport(targetFrames = 4) {
         residentObservationIds: ids,
         metrics: { residentFrameCount: targetFrames, gpuResourceBytes: 10_000_000 },
       },
-      timelineText: targetFrames < 20
-        ? `${targetFrames} / ${targetFrames} · RECENT ${targetFrames}/20`
-        : "20 / 20",
+      timelineText: `${targetFrames} / ${targetFrames}`,
+      sliderMaximum: targetFrames - 1,
+      sliderValue: targetFrames - 1,
+      sliderValueText: `Frame ${targetFrames} of ${targetFrames}. 2026-08-02 16:41:01 CDT. Latest live scan, observed 1 minute ago.`,
+      frameAge: {
+        text: "01:40",
+        accessibleName: "Latest live scan, observed 1 minute 40 seconds ago.",
+        kind: "current",
+      },
+      frameAgeCapturedAtUnixMs: observedAtUnixMs.at(-1) + 100_000,
       bodyText: "LIVE RADAR",
     },
     scrub: { oldestObservationId: ids[0], newestObservationId: ids.at(-1) },
@@ -80,12 +89,12 @@ describe("Alpha live soak validation", () => {
     expect(validateAlphaLiveSoak(report, 4)).toEqual([]);
   });
 
-  it("accepts full capacity only after the partial-history suffix is removed", () => {
+  it("accepts full capacity with a matching visible and accessible timeline", () => {
     expect(validateAlphaLiveSoak(validReport(20), 20)).toEqual([]);
     const mislabeled = validReport(20);
-    mislabeled.final.timelineText = "20 / 20 · RECENT 20/20";
+    mislabeled.final.sliderValueText = "Frame 19 of 20";
     expect(validateAlphaLiveSoak(mislabeled, 20))
-      .toContain("full live history still has a partial-history suffix");
+      .toContain("timeline accessible value does not match the painted newest frame");
   });
 
   it.each([
@@ -98,7 +107,10 @@ describe("Alpha live soak validation", () => {
     ["upload", (report) => { report.preRecoveryFrameUploadDelta = 5; }],
     ["scrub", (report) => { report.scrub.oldestObservationId = "observation-1"; }],
     ["recovery", (report) => { report.recovery.after.residentObservationIds = ["observation-1"]; }],
-    ["UI truth", (report) => { report.final.timelineText = "4 / 4"; }],
+    ["UI truth", (report) => { report.final.timelineText = "3 / 4"; }],
+    ["pending notice", (report) => { report.siteSwitch.pendingNotice = "Loading KINX"; }],
+    ["loading notice", (report) => { report.historyLoadingNotice = null; }],
+    ["age color", (report) => { report.final.frameAge.kind = "historical"; }],
   ])("rejects %s regression", (_name, mutate) => {
     const report = validReport();
     mutate(report);

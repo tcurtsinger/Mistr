@@ -1,6 +1,6 @@
 ---
 name: Mistr
-description: A full-screen stormlight radar instrument organized into four disciplined control zones.
+description: A full-screen stormlight radar instrument organized around a compact top toolbar and bottom playback control.
 colors:
   night: "#050506"
   stage-black: "#080B12"
@@ -11,7 +11,7 @@ colors:
   dawn-wash: "#FFD7E6"
   day-white: "#F4F7FA"
   quiet-text: "#8F96A8"
-  fresh: "#73E6B2"
+  recent-live: "#73E6B2"
   scan-cyan: "#4BDCFF"
 typography:
   display:
@@ -61,13 +61,8 @@ components:
     backgroundColor: "{colors.instrument-black}"
     textColor: "{colors.day-white}"
     rounded: "{rounded.instrument}"
-    height: "40px"
-    padding: "4px 6px"
-  edge-trigger:
-    backgroundColor: "{colors.instrument-black}"
-    textColor: "{colors.day-white}"
-    rounded: "{rounded.instrument}"
-    size: "40px"
+    height: "42px"
+    padding: "3px 5px"
   playback-bar:
     backgroundColor: "{colors.instrument-black}"
     textColor: "{colors.day-white}"
@@ -89,12 +84,12 @@ components:
 
 Mistr treats the radar as the stage and its small control instruments as a disciplined lighting rig. Matte night surfaces, measured cobalt-to-rose-to-dawn edge light, quiet condensed typography, and precise timecode create atmosphere without turning the application into a science-fiction dashboard. The map remains full-screen and weather remains visually sovereign.
 
-The interface uses four stable spatial zones: radar context at the top center, global tools at the left edge, future alerts at the right edge, and time at the bottom center. These zones remain intentionally sparse. A temporary panel may grow from a side trigger, but panels never become movable windows or a collection of independent bubbles.
+The interface uses two stable spatial zones: radar tools at the top center and observation time at the bottom center. These zones remain intentionally sparse. A temporary site or view panel may grow from its toolbar control, but panels never become movable windows or a collection of independent bubbles.
 
 **Key Characteristics:**
 - Full-screen radar with no permanent rail and no full-width chrome.
-- Compact top-center context bar for site and radar-product controls only.
-- One left-edge menu trigger and a reserved future right-edge alert trigger.
+- Compact top-center icon-led toolbar for site, recenter, and radar-view controls.
+- No left application menu or placeholder alert trigger in Alpha.
 - Stable bottom-center playback bar that never shifts when panels open.
 - Matte black optical glass with a narrow, bounded stormlight spectrum.
 
@@ -117,7 +112,7 @@ The palette passes from black night through cobalt and rose into pale dawn, but 
 - **Instrument Black** (`rgba(8, 11, 18, 0.88)`): bounded optical-glass controls.
 - **Day White** (`#F4F7FA`): primary operational text.
 - **Quiet Text** (`#8F96A8`): inactive controls and secondary labels.
-- **Fresh** (`#73E6B2`): freshness confirmation paired with words and elapsed time.
+- **Recent Live** (`#73E6B2`): the numeric age of the newest painted live scan while it remains recent. Historical, archive, and old latest-live ages use Day White; the number itself and accessible text keep color from carrying truth alone.
 
 ### Named Rules
 
@@ -138,7 +133,7 @@ The palette passes from black night through cobalt and rose into pale dawn, but 
 - **Title:** Panel titles, site identifiers, and important state names.
 - **Body:** Instructions, recovery information, and settings explanations.
 - **Label:** Short uppercase cue labels with measured tracking.
-- **Numeric:** Scan time, freshness age, dBZ, and playback position with tabular figures.
+- **Numeric:** Displayed scan time, frame age, and dBZ with tabular figures.
 
 ### Named Rules
 
@@ -146,66 +141,61 @@ The palette passes from black night through cobalt and rose into pale dawn, but 
 
 ## Layout
 
-The map fills the window. In Alpha, the top-center context bar contains Mistr identity, the canonical site selector, and one real two-state spatial-display choice. Its compact visible labels are exactly `Smooth` and `Native`, with `Smooth` as the default. Base reflectivity at the lowest usable tilt is fixed Alpha scope, so product and elevation remain facts explained in About rather than inert control-like chrome.
+The map fills the window. In Alpha, the top-center toolbar contains Mistr identity followed by a site icon that opens the canonical searchable site picker, a direct recenter icon, and an eye icon that opens the real two-state radar-view popup. The popup's visible labels are exactly `Smooth` and `Native`, with `Smooth` as the default, and the eye control exposes the tooltip `Radar View`. Base reflectivity at the lowest usable tilt is fixed Alpha scope, so product and elevation remain documented facts rather than inert control-like chrome.
 
-`Smooth` filters the spatial presentation of one measured observation. It does not interpolate between scan times, generate a frame, change decoded gates, or change the dBZ returned by inspection. `Native` shows the exact polar gates with nearest sampling. Changing this display choice therefore leaves the selected observation, site, measured time, freshness, playback position, and painted-frame receipt unchanged.
+`Smooth` filters the spatial presentation of one measured observation. It does not interpolate between scan times, generate a frame, change decoded gates, or change the dBZ returned by inspection. `Native` shows the exact polar gates with nearest sampling. Changing this display choice therefore leaves the selected observation, site, measured time, numeric age, playback position, and painted-frame receipt unchanged.
 
-The site shown in radar context follows the observation that actually painted. While a different site is being acquired, the freshness region names that pending site; the top context does not claim the switch before GPU publication succeeds.
+The site control's accessible name and tooltip follow the observation that actually painted. While a different site is being acquired, a compact visible acquisition indicator and notice name both the radar that remains displayed and the pending site; the toolbar never claims the switch before GPU publication succeeds.
 
-One small trigger sits near the left edge for global application tools. It may open a compact menu over the map without changing the map viewport. A future alert trigger occupies the mirrored right-edge zone only after alerts exist. Its panel follows the same rules. Side panels stop above the playback bar, scroll internally, and never appear simultaneously.
+There is no left-edge application menu or About panel in Alpha. Recenter is a direct toolbar command, and Mistr does not reserve visible controls for capabilities that do not yet exist. The site and view panels overlay the map, stay anchored to their originating icons, and never appear simultaneously.
 
-The bottom-center playback bar remains stable regardless of panel state. It contains play/pause, direct scan scrubbing, displayed scan time, freshness, playback position/state, and the active dBZ sample. It never shrinks or shifts when a side panel opens.
+The bottom-center playback bar remains stable regardless of panel state. During normal operation it contains play/pause, direct scan scrubbing, the displayed scan timestamp, numeric frame age, and the active dBZ sample. It does not display the words `Fresh`, `Stale`, `Playing`, `Paused`, or `Newest`. Exceptional preparation, loading, graphics recovery, and error notices temporarily use this established region without pretending normal playback truth.
 
-On compact desktop windows, secondary identity and explanatory labels collapse before controls. The site and exact `Smooth`/`Native` choice remain identifiable, while the playback timeline retains the largest flexible share. Displayed time, freshness, and an active dBZ sample remain visible. The map is never converted into a dashboard grid.
+On compact desktop windows, the icon-led toolbar retains its controls and accessible tooltips while the playback timeline keeps the largest flexible share. Displayed time, numeric age, and an active dBZ sample remain visible. The map is never converted into a dashboard grid.
 
 ### Spatial Rules
-- **Top changes what and how it is drawn:** the selected radar site and the real `Smooth`/`Native` spatial display choice in Alpha; product and elevation controls appear only after they become real capabilities.
-- **Left changes the application:** infrequent global tools and settings.
-- **Right explains alerts:** absent until alerts are a real product capability.
-- **Bottom controls when:** playback, measured time, freshness, and inspection value.
+- **Top changes where and how radar is drawn:** site selection, recenter, and the real `Smooth`/`Native` spatial display choice in Alpha; other controls appear only after they become real capabilities.
+- **Sides stay clear:** no application menu, placeholder alert control, or control chain competes with radar.
+- **Bottom controls when:** playback, measured time, numeric age, and inspection value.
 
 ## Elevation & Depth
 
-The map is the base plane. Persistent controls use bounded optical glass, a subtle black shadow, and one spectral edge reflection. Temporary side panels grow from their trigger and use matte stage black with structural dividers. Nothing else receives card elevation.
+The map is the base plane. Persistent controls use bounded optical glass, a subtle black shadow, and one spectral edge reflection. Temporary toolbar panels grow from their trigger and use matte stage black with structural dividers. Nothing else receives card elevation.
 
-**The One Panel Rule.** At most one temporary side panel is open. It overlays the map without resizing or recentering it.
+**The One Panel Rule.** At most one temporary toolbar panel is open. It overlays the map without resizing or recentering it.
 
 ## Shapes
 
-Persistent instruments use one continuous rounded silhouette apiece. Internal groups are separated by spacing and hairlines rather than nested capsules. Side panels use restrained corners only where they detach from the window edge. Avoid bubble chains, circular button stacks, exaggerated pills, and decorative hardware geometry.
+Persistent instruments use one continuous rounded silhouette apiece. Internal groups are separated by spacing and hairlines rather than nested capsules. Toolbar panels use restrained corners where they detach from their anchor. Avoid bubble chains, circular button stacks, exaggerated pills, and decorative hardware geometry.
 
-Chrome is content-sized rather than viewport-filling. The context and playback bars remain only as long and thick as their operational contents require. Temporary panels use a plain structural border without a decorative vertical accent rail.
+Chrome is content-sized rather than viewport-filling. The toolbar and playback bar remain only as long and thick as their operational contents require. Temporary panels use a plain structural border without a decorative vertical accent rail.
 
 ## Components
 
-### Radar Context Bar
+### Radar Toolbar
 - Compact and centered near the top edge.
 - Wraps its contents closely rather than claiming unnecessary horizontal or vertical space.
-- Contains Mistr identity, the single canonical site selector, and the `Smooth`/`Native` spatial display choice in Alpha.
+- Uses an icon-led, extensible sequence: `Mistr | site icon, recenter icon | eye icon`.
+- The site icon opens the single canonical searchable site browser; it has a meaningful accessible name that includes the painted site and a tooltip such as `Radar Site · KTLX`.
 - Opens a searchable list of all provider-qualified operational WSR-88D sites, including Alaska, Hawaii, Guam, and Puerto Rico. Test, decommissioned, TDWR, and provider-absent sites are omitted.
-- Uses text, chevrons, and conventional segmented states rather than an icon toolbar.
-- Keeps `Smooth` and `Native` visibly distinct and gives the control an accessible name such as `Radar display: Smooth`. The label describes presentation only, never a new or intermediate observation.
+- Recenter is a direct icon command with a meaningful accessible name rather than a menu row.
+- The eye icon uses the tooltip `Radar View`, gives its selected mode in its accessible name, and opens a popup containing only the visible labels `Smooth` and `Native`. These describe presentation only, never a new or intermediate observation.
+- Icon controls keep at least a 40 by 40 CSS-pixel target, visible keyboard focus, and non-native tooltips that appear on hover or focus without becoming the only source of essential truth.
 
-### Menu Trigger and Panel
-- One small left-edge trigger with a clear accessible name.
-- Opens a compact, grouped menu over the map without resizing it.
-- When open, close is a conventional small control in the panel's upper-right corner rather than an attached exterior tab.
-- The panel uses a quiet border and no decorative vertical accent rail.
-- Alpha content remains short: recenter and help/about. The site browser is not duplicated here.
-- The panel stops above the playback bar and scrolls internally if future content exceeds its bound.
-
-### Alert Trigger and Panel
-- Does not appear in radar-only Alpha.
-- When alerts become real, one right-edge trigger exposes a dedicated alert stream.
-- It cannot share content with the global menu or open beside another panel.
+### Toolbar Panels
+- Site search opens focused on its search field; view opens focused on the selected `Smooth` or `Native` option.
+- Escape, selection, outside interaction, or reopening the trigger dismisses the panel and returns focus appropriately.
+- Only one toolbar panel is open; it overlays the map without moving the map or bottom bar.
+- The view popup supports conventional radio-menu keyboard behavior. The searchable site browser remains a nonmodal dialog rather than a long menu.
 
 ### Playback Bar
 - One continuous glass instrument centered near the bottom.
-- Bounded to the width needed by time, transport, timeline, freshness, and inspection truth rather than spanning most of a wide viewport.
+- Bounded to the width needed by time, transport, timeline, age, and inspection truth rather than spanning most of a wide viewport.
 - Contains play/pause and a directly clickable/draggable scan timeline; no dedicated visible previous/next buttons.
-- Always exposes displayed scan time, freshness in words and elapsed time, and playback position/state.
+- During normal operation, exposes the displayed scan timestamp and numeric frame age without visible `Fresh`, `Stale`, `Playing`, `Paused`, or `Newest` labels. Play/pause remains clear through the familiar transport icon and accessible name.
+- The age is green only for the recent newest painted live scan. A historical or archive scan, and a latest-live scan older than the accepted recency threshold, uses white. The exact number and accessible label preserve truth without relying on color alone.
 - A focused timeline may respond to arrow keys one observation at a time.
-- While safe preceding observations are loading, playback position remains visible and the timeline metadata adds `LOADING RECENT n/20`. If the provider cannot supply another predecessor, the settled partial set says `RECENT n/20`; a one-frame set says `WAITING FOR NEXT SCAN`. Background history work does not replace freshness age or disable already-resident playback.
+- While safe preceding observations load, already-resident transport remains available. Loading or one-frame waiting uses a compact exceptional notice rather than permanent normal-state metadata, and background history work never replaces numeric age or disables usable resident playback.
 
 ### Inspection Reticle
 - Appears after a deliberate map click.
@@ -219,29 +209,29 @@ Chrome is content-sized rather than viewport-filling. The context and playback b
 - User pan and zoom remain unconstrained after the initial fit.
 
 ### Status and Recovery
-- Loading, partial history, stale/retrying, graphics recovery, and failure states use established regions in the context or playback bar.
+- Preparation, partial-history loading, site acquisition, graphics recovery, and failures use established notice or playback regions rather than adding permanent status words to the normal bar.
 - Before the first painted scan, the playback area becomes a dedicated preparation state with plain-language progress. It does not show `0 / 0`, `PAUSED`, an active-looking timeline, or an inspection prompt.
-- While a new site loads, a compact notice names both the radar that remains displayed and the pending live site; existing resident playback remains available until the atomic replacement begins.
+- While a new site loads, the site icon shows a restrained acquisition indicator and a compact notice names both the radar that remains displayed and the pending live site; existing resident playback remains available until the atomic replacement begins.
 - The last trustworthy painted observation remains visible whenever safe.
-- A failed first live acquisition names the unavailable site; a recoverable background failure says `RETRYING SITE` rather than implying that valid painted radar disappeared.
-- Opening a temporary panel moves keyboard focus into its first action. Escape, selection, or explicit close returns focus to the trigger that opened it.
+- A failed first live acquisition names the unavailable site; a recoverable background failure states that the painted radar remains displayed while retry proceeds.
+- Opening a temporary panel moves keyboard focus into its first action. Escape, selection, or trigger reactivation returns focus to the control that opened it.
 - Windows forced-colors mode uses a system-color outline rather than relying on chrome glow or box shadow for focus.
 
 ## Do's and Don'ts
 
 ### Do
 - **Do** let radar remain the largest, brightest, and most information-dense element.
-- **Do** preserve one stable responsibility for each of the four spatial zones.
-- **Do** keep the playback bar stationary when a menu opens.
-- **Do** keep transient menus short, grouped, and mutually exclusive.
+- **Do** preserve one stable responsibility for the top toolbar and bottom playback zones.
+- **Do** keep the playback bar stationary when a toolbar panel opens.
+- **Do** keep the site and view panels focused, anchored, and mutually exclusive.
 - **Do** use the stormlight spectrum as a continuous edge reflection or focus transition.
 - **Do** preserve familiar play, pause, timeline, zoom, and selector affordances.
 
 ### Don't
-- **Don't** turn the top context bar into general navigation or a feature catalog.
-- **Don't** add chains of side buttons; each side has at most one trigger.
-- **Don't** show an alert trigger before alerts exist.
-- **Don't** resize or recenter the map when a side panel opens.
+- **Don't** add toolbar icons for capabilities that do not yet exist.
+- **Don't** restore a left application menu or reserve side controls for future features.
+- **Don't** resize or recenter the map when a toolbar panel opens.
+- **Don't** add visible `Fresh`, `Stale`, `Playing`, `Paused`, or `Newest` labels to the normal playback bar.
 - **Don't** split the playback bar into unrelated pills or move it around panel state.
 - **Don't** overlay gradients, blur, or glow on radar data.
 - **Don't** expose prototype phases, benchmarks, fixture controls, or engineering diagnostics in the normal surface.

@@ -1,8 +1,8 @@
 /**
- * THESIS: Radar is the stage; four disciplined control zones replace prototype panels and dashboard chrome.
+ * THESIS: Radar is the stage; a compact tool strip and measured-time instrument keep it sovereign.
  * OWN-WORLD: Matte night, bounded smoked glass, sparse cue type, and one cobalt-to-rose-to-dawn edge light.
  * STORY: Choose what radar to inspect at the top, inspect the map directly, and control measured time at the bottom.
- * FIRST VIEWPORT: Full-screen radar, compact top context bar, one left menu trigger, and a stable bottom playback bar.
+ * FIRST VIEWPORT: Full-screen radar, one icon-led top tool strip, and a stable bottom playback bar.
  * FORM: Stormlight Cyclorama catalog challenger; splice-strip scan staging; seed d88dac67. The generated comps guide hierarchy, not literal pixels.
  */
 import { useEffect, useRef, useState } from "react";
@@ -77,8 +77,7 @@ import {
 import { SiteRequestTracker } from "./live/siteRequestTracker";
 import { RadarChrome } from "./ui/RadarChrome";
 import {
-  freshnessPresentation,
-  liveFailureLabel,
+  frameAgePresentation,
   userFacingRadarError,
   normalizeRadarDisplayMode,
   normalizeRadarSite,
@@ -1173,7 +1172,7 @@ export function App() {
   const frameIndex = paintedFrameIndex(timelineFrames, playback);
   const displayedAtUnixMs = playback?.playheadObservedAtUnixMs
     ?? phase5.display.lastComplete?.observedAtUnixMs;
-  const playbackLabel = playbackPresentation(
+  const playbackStatus = playbackPresentation(
     playback,
     frameIndex,
     timelineFrames.length,
@@ -1185,32 +1184,14 @@ export function App() {
     : null;
   const mapError = mapReadinessError(mapState);
   const radarUnavailableError = initializationError ?? rendererError;
-  const freshnessSource = radarUnavailableError || siteRequestError || playbackError
-    ? "error"
-    : phase5.display.kind === "acquiring"
-      ? "updating"
-      : phase5.display.kind === "degraded"
-        ? "error"
-        : paintedSourceKind === "nexrad_level3_n0s"
-          || (
-            paintedSourceKind === "nexrad_level2_archive_ii"
-            && timelineFrames.length === 1
-          )
-          ? "archive_frame"
-          : phase5.display.kind === "painted" || phase5.display.kind === "refreshing"
-            ? "live"
-          : displayedAtUnixMs === undefined
-            ? "waiting"
-            : "archive";
-  const freshness = freshnessPresentation(freshnessSource, displayedAtUnixMs, nowUnixMs);
-  if (freshnessSource === "updating") {
-    freshness.label = `UPDATING ${requestedSite ?? selectedSite}`;
-  } else if (phase5.display.kind === "degraded") {
-    const failedSite = phase5.display.requestedSite;
-    const retrying = phase5.display.lastComplete?.source === "nexrad_level2_chunks"
-      && phase5.display.lastComplete.site === failedSite;
-    freshness.label = liveFailureLabel(failedSite, retrying);
-  }
+  const displayedFrameIsLatestLive = paintedSourceKind === "nexrad_level2_chunks"
+    && timelineFrames.length > 0
+    && frameIndex === timelineFrames.length - 1;
+  const frameAge = frameAgePresentation(
+    displayedAtUnixMs,
+    nowUnixMs,
+    displayedFrameIsLatestLive,
+  );
   const liveFailureSite = phase5.display.kind === "degraded"
     ? phase5.display.requestedSite
     : undefined;
@@ -1241,6 +1222,17 @@ export function App() {
     : undefined;
   const displayedSite = phase5.display.lastComplete?.site ?? selectedSite;
   const displayedSource = paintedSourceKind === "nexrad_level2_chunks" ? "live radar" : "archive radar";
+  const playbackNotice = playbackStatus === "RECOVERING"
+    ? {
+        kind: "info" as const,
+        message: "Restoring the radar display. The last completed scan remains selected.",
+      }
+    : playbackStatus === "LOADING SCAN"
+      ? {
+          kind: "info" as const,
+          message: "Loading the selected radar scan.",
+        }
+      : undefined;
   const radarNotice = userFacingError
     ? { kind: "error" as const, message: userFacingError }
     : pendingSite
@@ -1248,7 +1240,7 @@ export function App() {
           kind: "info" as const,
           message: `Showing ${displayedSite} ${displayedSource} while ${pendingSite} live radar loads.`,
         }
-      : mapError
+      : playbackNotice ?? (mapError
         ? {
             kind: "info" as const,
             message: "Basemap unavailable. Radar remains available.",
@@ -1258,7 +1250,7 @@ export function App() {
               kind: "info" as const,
               message: `Current ${displayedSite} radar is ready. Loading recent scans.`,
             }
-          : undefined;
+          : undefined);
 
   const togglePlayback = () => {
     const controller = playbackControllerRef.current;
@@ -1346,35 +1338,31 @@ export function App() {
     <main className="app-shell">
       <div ref={mapContainer} className="map-surface" aria-label="Mistr map" />
       <RadarChrome
-        appVersion={runtime.appVersion}
         displayedAtUnixMs={displayedAtUnixMs}
         displayMode={displayMode}
         displayModeReady={phase4.kind === "complete" && Boolean(radarLayerRef.current)}
         dismissPanelsSignal={dismissPanelsSignal}
+        frameAge={frameAge}
         frameCount={timelineFrames.length}
         frameIndex={frameIndex}
-        historyCapacity={paintedSourceKind === "nexrad_level2_chunks"
-          ? MAX_LIVE_HISTORY_FRAMES
-          : undefined}
-        liveHistoryStatus={liveHistoryStatus}
-        freshness={freshness}
         interrogation={interrogation}
         inspectionSelected={inspectionSelected}
-        mapStatus={mapState}
         onRecenter={recenterRadar}
         onSelectDisplayMode={selectDisplayMode}
         onScrub={queueScrub}
         onSelectSite={selectSite}
         onTogglePlayback={togglePlayback}
-        playbackLabel={radarUnavailableError ? "RADAR UNAVAILABLE" : playbackLabel}
         playbackReady={Boolean(playbackControllerRef.current)
           && phase4.kind === "complete"
           && !rendererError
           && !playback?.residentReplacementPending}
         playing={playback?.playing ?? false}
+        playbackStatus={radarUnavailableError ? "RADAR UNAVAILABLE" : playbackStatus}
         preparingFailed={preparingFailed}
         preparingLabel={preparingLabel}
         radarNotice={radarNotice}
+        recenterReady={displayedAtUnixMs !== undefined}
+        requestedSite={requestedSite ?? undefined}
         selectedSite={selectedSite}
         siteSelectionReady={siteSelectionReady}
         sites={RADAR_SITES}

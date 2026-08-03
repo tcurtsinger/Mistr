@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   formatAge,
-  freshnessPresentation,
+  formatAccessibleAge,
+  frameAgePresentation,
   liveFailureLabel,
   userFacingRadarError,
   normalizeRadarSite,
@@ -109,15 +110,38 @@ describe("radar chrome model", () => {
     expect(radarInitializationLabel(undefined)).toBe("READYING DISPLAY");
   });
 
-  it("keeps archive, acquisition, failure, and live freshness explicit", () => {
-    expect(freshnessPresentation("archive", 0, 100_000).label).toBe("ARCHIVE LOOP");
-    expect(freshnessPresentation("archive_frame", 0, 100_000).label).toBe("ARCHIVE FRAME");
-    expect(freshnessPresentation("updating", undefined, 100_000).label).toBe("UPDATING LIVE");
-    expect(freshnessPresentation("error", undefined, 100_000).label).toBe("RADAR ERROR");
-    expect(freshnessPresentation("live", 60_000, 100_000)).toEqual({
-      kind: "fresh",
-      label: "FRESH · 00:40",
+  it("highlights only a recent latest live scan", () => {
+    expect(frameAgePresentation(60_000, 100_000, true)).toEqual({
+      accessibleLabel: "Latest live scan, observed 40 seconds ago.",
+      kind: "current",
+      label: "00:40",
     });
+    expect(frameAgePresentation(60_000, 100_000, false)).toEqual({
+      accessibleLabel: "Historical scan, observed 40 seconds ago.",
+      kind: "historical",
+      label: "00:40",
+    });
+  });
+
+  it("keeps an old latest scan and archive or scrubbed scans neutral", () => {
+    expect(frameAgePresentation(0, 600_000, true).kind).toBe("historical");
+    expect(frameAgePresentation(0, 600_000, true).label).toBe("10:00");
+    expect(frameAgePresentation(90_000, 100_000, false).kind).toBe("historical");
+    expect(frameAgePresentation(undefined, 100_000, false)).toEqual({
+      accessibleLabel: "Displayed scan age unavailable.",
+      kind: "historical",
+      label: "--:--",
+    });
+  });
+
+  it("does not expose freshness or playback adjectives in the age label", () => {
+    for (const presentation of [
+      frameAgePresentation(60_000, 100_000, true),
+      frameAgePresentation(60_000, 100_000, false),
+      frameAgePresentation(0, 700_000, true),
+    ]) {
+      expect(presentation.label).not.toMatch(/FRESH|STALE|PAUSED|NEWEST|PLAYING/);
+    }
   });
 
   it("distinguishes a retrying live refresh from an unavailable first acquisition", () => {
@@ -155,5 +179,13 @@ describe("radar chrome model", () => {
     expect(formatAge(59)).toBe("00:59");
     expect(formatAge(3_661)).toBe("1h 01m");
     expect(formatAge(172_800)).toBe("2d");
+    expect(formatAccessibleAge(1)).toBe("1 second");
+    expect(formatAccessibleAge(61)).toBe("1 minute 1 second");
+    expect(formatAccessibleAge(3_661)).toBe("1 hour 1 minute");
+    expect(formatAccessibleAge(172_800)).toBe("2 days");
+  });
+
+  it("clamps future-clock skew to zero age", () => {
+    expect(frameAgePresentation(101_000, 100_000, true).label).toBe("00:00");
   });
 });

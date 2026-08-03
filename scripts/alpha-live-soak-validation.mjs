@@ -6,7 +6,12 @@ export function validateAlphaLiveSoak(report, targetFrames) {
   requireGate(failures, report?.startup?.diskReads === 1, "normal startup performed more than one archive disk read before live radar");
   requireGate(failures, !/RADAR UNAVAILABLE/i.test(report?.startup?.bodyText ?? ""), "normal startup exposed radar unavailable");
   requireGate(failures, report?.siteSwitch?.pendingTopSite === "KTLX", "requested KINX was claimed before it painted");
-  requireGate(failures, report?.siteSwitch?.pendingFreshness === "UPDATING KINX", "pending site was not named in freshness");
+  requireGate(
+    failures,
+    report?.siteSwitch?.pendingNotice?.includes("Showing KTLX")
+      && report.siteSwitch.pendingNotice.includes("while KINX live radar loads."),
+    "pending notice does not name both painted and requested sites",
+  );
   requireGate(failures, report?.siteSwitch?.finalTopSite === "KTLX", "superseding KTLX did not own final site truth");
   requireGate(failures, (report?.historyEvents?.length ?? 0) >= 1, "soak did not observe live-history growth");
   requireGate(failures, report?.final?.history?.residentCount === targetFrames, "final live history count is wrong");
@@ -50,6 +55,11 @@ export function validateAlphaLiveSoak(report, targetFrames) {
       requireGate(failures, event.observationId !== previous.observationId, `history event ${index + 1} duplicated an observation`);
     }
   }
+  requireGate(
+    failures,
+    report?.historyLoadingNotice?.includes("Loading recent scans."),
+    "live-history growth never exposed its loading notice",
+  );
 
   const expectedUploadDelta = targetFrames;
   requireGate(failures, report?.preRecoveryFrameUploadDelta === expectedUploadDelta, "live residency did not upload exactly one frame per observation");
@@ -59,13 +69,27 @@ export function validateAlphaLiveSoak(report, targetFrames) {
   requireGate(failures, report?.recovery?.recovery?.phase === "ready", "live history context recovery did not complete");
   requireGate(failures, sameMembers(report?.recovery?.before?.residentObservationIds, report?.recovery?.after?.residentObservationIds), "context recovery changed live residency");
   requireGate(failures, report?.recovery?.after?.lastPaintedObservationId === report?.scrub?.newestObservationId, "context recovery did not repaint the visible newest frame");
-  if (targetFrames < 20) {
-    requireGate(failures, report?.final?.timelineText?.includes(`RECENT ${targetFrames}/20`), "partial live history is not labeled in the timeline");
-    requireGate(failures, !report?.final?.timelineText?.includes("LOADING RECENT"), "stopped partial history still claims to be loading");
-  } else {
-    requireGate(failures, report?.final?.timelineText?.includes("20 / 20"), "full live history position is not labeled in the timeline");
-    requireGate(failures, !report?.final?.timelineText?.includes("RECENT 20/20"), "full live history still has a partial-history suffix");
-  }
+  requireGate(failures, report?.final?.timelineText === `${targetFrames} / ${targetFrames}`, "visible timeline position does not match resident history");
+  requireGate(failures, report?.final?.sliderMaximum === targetFrames - 1, "timeline maximum does not match resident history");
+  requireGate(failures, report?.final?.sliderValue === targetFrames - 1, "timeline does not finish on the painted newest frame");
+  requireGate(
+    failures,
+    report?.final?.sliderValueText?.startsWith(`Frame ${targetFrames} of ${targetFrames}.`),
+    "timeline accessible value does not match the painted newest frame",
+  );
+  const newestObservedAt = report?.final?.history?.observedAtUnixMs?.at(-1);
+  const ageCapturedAt = report?.final?.frameAgeCapturedAtUnixMs;
+  const expectedAgeKind = Number.isFinite(newestObservedAt) && Number.isFinite(ageCapturedAt)
+    && Math.floor(Math.max(0, ageCapturedAt - newestObservedAt) / 1_000) < 600
+    ? "current"
+    : "historical";
+  requireGate(failures, report?.final?.frameAge?.kind === expectedAgeKind, "frame age color state disagrees with measured newest-scan age");
+  requireGate(
+    failures,
+    report?.final?.frameAge?.accessibleName?.startsWith("Latest live scan,"),
+    "newest live frame age lacks non-color accessible semantics",
+  );
+  requireGate(failures, !/\b(?:FRESH|STALE|PAUSED|NEWEST)\b/i.test(report?.final?.timelineText ?? ""), "timeline exposes removed status noise");
   requireGate(failures, !/\bINCOMPLETE\b/i.test(report?.final?.bodyText ?? ""), "UI labels an incomplete observation");
   requireGate(failures, report?.fatalErrors?.length === 0, "soak encountered a fatal product error");
   return failures;

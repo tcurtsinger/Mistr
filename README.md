@@ -6,7 +6,7 @@ The map remains fully interactive while playback behaves like a bounded game loo
 
 ## Status
 
-**Alpha selected-site radar.** The normal interface is radar-first: choose a NEXRAD site, inspect reflectivity, play or scrub its bounded recent-observation loop, and see the time and freshness of the frame that actually painted. Windows is the Alpha release platform; the shared Tauri application remains compatible with a later macOS build.
+**Alpha selected-site radar.** The normal interface is radar-first: choose a NEXRAD site, inspect reflectivity, play or scrub its bounded recent-observation loop, and see the measured time and numeric age of the frame that actually painted. Windows is the Alpha release platform; the shared Tauri application remains compatible with a later macOS build.
 
 The underlying engine has passed the historical Phase 0 through 6 feasibility gates on the primary Windows workstation, including 20-frame GPU-resident playback, bounded live Level II acquisition, strict Level III `N0S` decoding, and visible-first WebGL context recovery. Those phase records remain as engineering evidence rather than product UI.
 

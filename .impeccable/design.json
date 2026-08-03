@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-08-02T16:30:00Z",
+  "generatedAt": "2026-08-03T01:28:19Z",
   "title": "Design System: Mistr",
   "extensions": {
     "colorMeta": {
@@ -10,14 +10,14 @@
       "rose-gather": { "role": "secondary", "displayName": "Rose Gather", "canonical": "#D24BFF", "tonalRamp": ["#66207F", "#D24BFF", "#E6A2FF"] },
       "rose-light": { "role": "secondary", "displayName": "Rose Light", "canonical": "#FF7BAE", "tonalRamp": ["#8F3659", "#FF7BAE", "#FFB8D1"] },
       "dawn-wash": { "role": "secondary", "displayName": "Dawn Wash", "canonical": "#FFD7E6", "tonalRamp": ["#8C747D", "#FFD7E6", "#FFF0F5"] },
-      "fresh": { "role": "tertiary", "displayName": "Fresh", "canonical": "#73E6B2", "tonalRamp": ["#2A7557", "#73E6B2", "#B8F5D8"] },
+      "recent-live": { "role": "tertiary", "displayName": "Recent Live Age", "canonical": "#73E6B2", "tonalRamp": ["#2A7557", "#73E6B2", "#B8F5D8"] },
       "scan-cyan": { "role": "tertiary", "displayName": "Scan Cyan", "canonical": "#4BDCFF", "tonalRamp": ["#0A5F78", "#4BDCFF", "#BCEFFF"] }
     },
     "typographyMeta": {
       "display": { "displayName": "Instrument Display", "purpose": "Mistr identity and concise panel titles without novelty letterforms." },
       "body": { "displayName": "Operational Body", "purpose": "Readable interface and recovery copy." },
       "label": { "displayName": "Cue Label", "purpose": "Short uppercase equipment labels." },
-      "numeric": { "displayName": "Measured Readout", "purpose": "Tabular time, freshness, position, and dBZ values." }
+      "numeric": { "displayName": "Measured Readout", "purpose": "Tabular displayed time, numeric frame age, and dBZ values." }
     },
     "shadows": [
       { "name": "instrument", "value": "0 12px 36px rgba(0, 0, 0, 0.44)", "purpose": "Separates the compact control instruments from the map." },
@@ -25,7 +25,7 @@
     ],
     "motion": [
       { "name": "instrument-state", "value": "180ms cubic-bezier(0.22, 1, 0.36, 1)", "purpose": "Focus and selection changes." },
-      { "name": "panel-reveal", "value": "220ms cubic-bezier(0.22, 1, 0.36, 1)", "purpose": "Compact side-panel entrance and exit." }
+      { "name": "panel-reveal", "value": "220ms cubic-bezier(0.22, 1, 0.36, 1)", "purpose": "Compact toolbar-panel entrance and exit." }
     ],
     "breakpoints": [
       { "name": "compact-desktop", "value": "1100px" },
@@ -34,49 +34,41 @@
   },
   "components": [
     {
-      "name": "Radar Context Bar",
-      "kind": "nav",
-      "refersTo": "context-bar",
-      "description": "The compact top-center identity and canonical searchable site selector.",
-      "html": "<nav class=\"ds-context\"><strong>Mistr</strong><button>SITE KTLX</button></nav>",
-      "css": ".ds-context{height:40px;padding:4px 6px;border-radius:12px;background:rgba(8,11,18,.88);color:#F4F7FA;border:1px solid rgba(255,255,255,.16);box-shadow:0 10px 28px rgba(0,0,0,.44);backdrop-filter:blur(14px);display:flex;align-items:center;gap:4px}.ds-context strong{font:600 14px 'Barlow Semi Condensed',sans-serif;letter-spacing:.08em;padding:0 9px}.ds-context button{height:30px;padding:0 10px;border:0;border-left:1px solid rgba(255,255,255,.1);background:transparent;color:#F4F7FA;font:600 11px 'Barlow Semi Condensed',sans-serif;letter-spacing:.08em}.ds-context button:hover,.ds-context button:focus-visible{background:rgba(255,255,255,.055);outline:none}"
-    },
-    {
-      "name": "Menu Trigger",
-      "kind": "button",
-      "refersTo": "edge-trigger",
-      "description": "The single small trigger for global application tools.",
-      "html": "<button class=\"ds-menu-trigger\" aria-label=\"Open Mistr menu\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M5 7h14M5 12h14M5 17h14\"/></svg></button>",
-      "css": ".ds-menu-trigger{width:40px;height:40px;border-radius:12px;border:1px solid rgba(255,255,255,.16);background:rgba(8,11,18,.88);color:#F4F7FA;box-shadow:0 10px 28px rgba(0,0,0,.44);backdrop-filter:blur(14px)}.ds-menu-trigger svg{width:18px;fill:none;stroke:currentColor;stroke-width:1.5}.ds-menu-trigger:hover,.ds-menu-trigger:focus-visible{background:rgba(15,18,29,.94);outline:none}"
-    },
-    {
-      "name": "Compact Tool Menu",
+      "name": "Radar Toolbar",
       "kind": "custom",
-      "description": "A compact grouped temporary menu with a conventional internal close control and no decorative accent rail.",
-      "html": "<aside class=\"ds-tool-menu\"><header><strong>Menu</strong><button aria-label=\"Close Mistr menu\">&times;</button></header><button>Recenter radar</button><button>About Mistr</button></aside>",
-      "css": ".ds-tool-menu{width:286px;padding:14px;border-radius:14px;background:rgba(8,11,18,.98);color:#F4F7FA;border:1px solid rgba(255,255,255,.14);box-shadow:0 18px 44px rgba(0,0,0,.54)}.ds-tool-menu header{display:flex;align-items:center;justify-content:space-between}.ds-tool-menu strong{font:600 16px 'Barlow Semi Condensed',sans-serif;letter-spacing:.035em}.ds-tool-menu button{width:100%;min-height:50px;padding:8px;border:0;border-top:1px solid rgba(255,255,255,.08);background:transparent;color:#F4F7FA;text-align:left;font:500 13px 'Barlow Semi Condensed',sans-serif}.ds-tool-menu button:hover,.ds-tool-menu button:focus-visible{background:rgba(255,255,255,.055);outline:none}"
+      "refersTo": "context-bar",
+      "description": "The icon-led top-center sequence Mistr, radar site, recenter, and radar view.",
+      "html": "<nav class=\"ds-toolbar\" aria-label=\"Radar tools\"><strong>Mistr</strong><button aria-label=\"Choose radar site. KTLX is displayed.\"><svg aria-hidden=\"true\"></svg></button><button aria-label=\"Recenter radar on KTLX\"><svg aria-hidden=\"true\"></svg></button><button aria-label=\"Radar view. Smooth selected.\" aria-describedby=\"radar-view-tip\"><svg aria-hidden=\"true\"></svg></button><span role=\"tooltip\" id=\"radar-view-tip\">Radar View</span></nav>",
+      "css": ".ds-toolbar{min-height:42px;padding:3px 5px;border-radius:12px;background:rgba(8,11,18,.88);color:#F4F7FA;border:1px solid rgba(255,255,255,.16);box-shadow:0 10px 28px rgba(0,0,0,.44);backdrop-filter:blur(14px);display:flex;align-items:center}.ds-toolbar strong{font:600 14px 'Barlow Semi Condensed',sans-serif;letter-spacing:.08em;padding:0 10px}.ds-toolbar button{width:36px;height:36px;border:0;border-left:1px solid rgba(255,255,255,.1);background:transparent;color:#F4F7FA}.ds-toolbar button:hover,.ds-toolbar button:focus-visible{background:rgba(255,255,255,.055);outline:2px solid #FFD7E6;outline-offset:-3px}.ds-toolbar [role=tooltip]{position:absolute;transform:translateY(34px);padding:5px 8px;border-radius:6px;background:#080B12;color:#F4F7FA;font:500 12px 'Barlow Semi Condensed',sans-serif}"
     },
     {
       "name": "Radar Site Browser",
       "kind": "custom",
       "description": "The single searchable browser for all 155 provider-qualified operational WSR-88D sites.",
-      "html": "<aside class=\"ds-site-browser\"><header><strong>Radar sites</strong><small>155 WSR-88D STATIONS</small></header><input type=\"search\" aria-label=\"Search radar sites\" placeholder=\"Search ID or place\"><button>KTLX <small>Oklahoma City, OK</small></button></aside>",
+      "html": "<aside class=\"ds-site-browser\" role=\"dialog\" aria-label=\"Choose radar site\"><header><strong>Radar sites</strong><small>155 WSR-88D STATIONS</small></header><input type=\"search\" aria-label=\"Search radar sites\" placeholder=\"Search ID or place\"><button aria-current=\"true\">KTLX <small>Oklahoma City, OK</small></button></aside>",
       "css": ".ds-site-browser{width:360px;max-height:calc(100vh - 154px);overflow:auto;padding:14px;border-radius:14px;background:rgba(8,11,18,.98);color:#F4F7FA;border:1px solid rgba(255,255,255,.14);box-shadow:0 18px 44px rgba(0,0,0,.54)}.ds-site-browser header{display:grid;gap:4px}.ds-site-browser input{height:36px;margin:12px 0 8px;padding:0 12px;border:1px solid rgba(255,255,255,.14);border-radius:9px;background:#050506;color:#F4F7FA}.ds-site-browser button{width:100%;min-height:50px;border:0;border-top:1px solid rgba(255,255,255,.08);background:transparent;color:#F4F7FA;text-align:left}"
+    },
+    {
+      "name": "Radar View Menu",
+      "kind": "custom",
+      "description": "The eye control's compact radio menu with only the two real spatial presentation modes.",
+      "html": "<div class=\"ds-view-menu\" role=\"menu\" aria-label=\"Radar view\"><button role=\"menuitemradio\" aria-checked=\"true\">Smooth</button><button role=\"menuitemradio\" aria-checked=\"false\">Native</button></div>",
+      "css": ".ds-view-menu{width:132px;padding:6px;border-radius:10px;background:#080B12;color:#F4F7FA;border:1px solid rgba(255,255,255,.14);box-shadow:0 20px 50px rgba(0,0,0,.52)}.ds-view-menu button{width:100%;min-height:36px;border:0;border-radius:6px;background:transparent;color:inherit;text-align:left;padding:0 10px;font:600 13px 'Barlow Semi Condensed',sans-serif}.ds-view-menu button:hover,.ds-view-menu button:focus-visible{background:rgba(255,255,255,.055);outline:2px solid #FFD7E6}"
     },
     {
       "name": "Playback Bar",
       "kind": "custom",
       "refersTo": "playback-bar",
       "description": "The stable bottom-center control for observation time and playback truth.",
-      "html": "<section class=\"ds-playback\"><button aria-label=\"Play radar loop\">&#9654;</button><input aria-label=\"Displayed scan\" type=\"range\"><output>12:29:26 CDT · PAUSED · FRESH 00:41</output></section>",
-      "css": ".ds-playback{width:min(960px,calc(100vw - 96px));min-height:44px;padding:4px 9px;border-radius:14px;background:rgba(8,11,18,.88);color:#F4F7FA;border:1px solid rgba(255,255,255,.16);box-shadow:0 10px 28px rgba(0,0,0,.44);backdrop-filter:blur(14px);display:flex;align-items:center;gap:10px}.ds-playback:before{content:'';position:absolute;inset:0;border-radius:inherit;padding:1px;background:linear-gradient(90deg,#0A2BFF,#D24BFF,#FFD7E6);opacity:.48;pointer-events:none}.ds-playback input{flex:1;accent-color:#D24BFF}.ds-playback button{background:rgba(6,25,36,.82);color:#4BDCFF;border:1px solid rgba(71,211,255,.46);border-radius:50%;width:34px;height:34px}.ds-playback button:focus-visible{outline:2px solid #FFD7E6;outline-offset:2px}"
+      "html": "<section class=\"ds-playback\"><output aria-label=\"Displayed scan August 2, 2026 at 12:29:26 CDT\">12:29:26 CDT</output><button aria-label=\"Play radar loop\">&#9654;</button><input aria-label=\"Displayed scan\" type=\"range\"><output class=\"ds-age ds-age--recent\" aria-label=\"Latest live scan, observed 41 seconds ago\">00:41</output><output>32.5 dBZ</output></section>",
+      "css": ".ds-playback{width:min(820px,calc(100vw - 64px));min-height:44px;padding:4px 9px;border-radius:14px;background:rgba(8,11,18,.88);color:#F4F7FA;border:1px solid rgba(255,255,255,.16);box-shadow:0 10px 28px rgba(0,0,0,.44);backdrop-filter:blur(14px);display:flex;align-items:center;gap:10px}.ds-playback:before{content:'';position:absolute;inset:0;border-radius:inherit;padding:1px;background:linear-gradient(90deg,#0A2BFF,#D24BFF,#FFD7E6);opacity:.48;pointer-events:none}.ds-playback input{flex:1;accent-color:#D24BFF}.ds-playback button{background:rgba(6,25,36,.82);color:#4BDCFF;border:1px solid rgba(71,211,255,.46);border-radius:50%;width:34px;height:34px}.ds-playback button:focus-visible{outline:2px solid #FFD7E6;outline-offset:2px}.ds-age{color:#F4F7FA}.ds-age--recent{color:#73E6B2}"
     },
     {
       "name": "Measured Readout",
       "kind": "custom",
-      "description": "A textual and numeric state block for observation truth.",
-      "html": "<output class=\"ds-readout\"><span>DISPLAYED SCAN</span><strong>12:29:26 CDT</strong><small>FRESH · 00:41</small></output>",
-      "css": ".ds-readout{display:grid;grid-template-columns:auto auto;gap:3px 10px;color:#F4F7FA;font:500 13px Recursive,'Cascadia Mono',monospace}.ds-readout span{grid-column:1/-1;color:#8F96A8;font:500 10px 'Barlow Condensed',sans-serif;letter-spacing:.16em}.ds-readout small{color:#73E6B2;font:500 11px 'Barlow Condensed',sans-serif;letter-spacing:.08em}"
+      "description": "Displayed scan timestamp and numeric frame age without normal-state status words.",
+      "html": "<output class=\"ds-readout\"><strong>12:29:26 CDT</strong><small aria-label=\"Latest live scan, observed 41 seconds ago\">00:41</small></output>",
+      "css": ".ds-readout{display:flex;align-items:center;gap:10px;color:#F4F7FA;font:500 13px Recursive,'Cascadia Mono',monospace}.ds-readout small{color:#73E6B2;font:500 12px Recursive,'Cascadia Mono',monospace}.ds-readout--historical small{color:#F4F7FA}"
     },
     {
       "name": "Inspection Reticle",
@@ -88,14 +80,14 @@
   ],
   "narrative": {
     "northStar": "Stormlight Cyclorama",
-    "overview": "The radar is the stage. Four disciplined control zones frame it: radar context at the top, global tools at left, future alerts at right, and observation time at the bottom.",
-    "keyCharacteristics": ["full-screen radar", "compact top context bar", "one side trigger per edge", "stable bottom playback bar", "bounded spectral light"],
+    "overview": "The radar is the stage. Two disciplined control zones frame it: an icon-led radar toolbar at the top and observation time at the bottom.",
+    "keyCharacteristics": ["full-screen radar", "compact icon-led top toolbar", "no side application menu", "stable bottom playback bar", "bounded spectral light"],
     "rules": [
       { "name": "The Weather Separation Rule", "body": "Cyclorama color never overlays radar pixels or imitates weather severity.", "section": "colors" },
-      { "name": "The One Panel Rule", "body": "Only one side panel may be open and it never resizes the map.", "section": "elevation" },
+      { "name": "The One Panel Rule", "body": "Only one toolbar panel may be open and it never resizes the map.", "section": "elevation" },
       { "name": "The Instrument Type Rule", "body": "Typography earns character through proportion, weight, and spacing rather than novelty letterforms.", "section": "typography" }
     ],
-    "dos": ["Keep each spatial zone responsible for one class of task.", "Keep the playback bar stationary.", "Keep the canonical site browser searchable.", "Keep temporary menus short and grouped."],
-    "donts": ["Do not build a permanent sidebar.", "Do not duplicate the site picker.", "Do not present fixed product or tilt facts as controls.", "Do not add chains of side buttons.", "Do not show alerts before alerts exist.", "Do not wash radar with decorative color."]
+    "dos": ["Keep the top toolbar responsible for site, recenter, and radar view.", "Keep the playback bar stationary.", "Keep the canonical site browser searchable.", "Keep site and view panels anchored and mutually exclusive."],
+    "donts": ["Do not build a permanent sidebar or left application menu.", "Do not duplicate the site picker.", "Do not present fixed product or tilt facts as controls.", "Do not add speculative toolbar icons.", "Do not show alerts before alerts exist.", "Do not add normal-state Fresh, Stale, Playing, Paused, or Newest text.", "Do not wash radar with decorative color."]
   }
 }

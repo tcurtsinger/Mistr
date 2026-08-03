@@ -1,8 +1,11 @@
 import {
+  forwardRef,
   useCallback,
   useEffect,
+  useId,
   useRef,
   useState,
+  type ButtonHTMLAttributes,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { filterRadarSites, type RadarSiteOption } from "../data/radarSites";
@@ -11,83 +14,78 @@ import type { RadarDisplayMode } from "../radar-renderer/RadarCustomLayer";
 import {
   radarDisplayModeLabel,
   timelinePosition,
-  type FreshnessPresentation,
-  type LiveHistoryStatus,
+  type FrameAgePresentation,
 } from "./radarChromeModel";
 
 export interface RadarChromeProps {
-  appVersion: string;
   displayedAtUnixMs?: number;
   displayMode: RadarDisplayMode;
   displayModeReady: boolean;
   dismissPanelsSignal: number;
+  frameAge: FrameAgePresentation;
   frameCount: number;
   frameIndex: number;
-  historyCapacity?: number;
-  liveHistoryStatus?: LiveHistoryStatus;
-  freshness: FreshnessPresentation;
   interrogation: GateInterrogation | null;
   inspectionSelected: boolean;
-  mapStatus: string;
   onRecenter(): void;
   onSelectDisplayMode(mode: RadarDisplayMode): void;
   onScrub(index: number): void;
   onSelectSite(site: string): void;
   onTogglePlayback(): void;
-  playbackLabel: string;
   playbackReady: boolean;
+  playbackStatus: string;
   playing: boolean;
   preparingFailed?: boolean;
   preparingLabel?: string;
   radarNotice?: { kind: "info" | "error"; message: string };
+  recenterReady: boolean;
+  requestedSite?: string;
   selectedSite: string;
   siteSelectionReady: boolean;
   sites: readonly RadarSiteOption[];
 }
 
-type OpenPanel = "menu" | "context-sites" | "context-view" | "about" | null;
+type OpenPanel = "context-sites" | "context-view" | null;
+type ToolbarTool = "site" | "recenter" | "view";
 
 export function RadarChrome({
-  appVersion,
   displayedAtUnixMs,
   displayMode,
   displayModeReady,
   dismissPanelsSignal,
+  frameAge,
   frameCount,
   frameIndex,
-  historyCapacity,
-  liveHistoryStatus,
-  freshness,
   interrogation,
   inspectionSelected,
-  mapStatus,
   onRecenter,
   onSelectDisplayMode,
   onScrub,
   onSelectSite,
   onTogglePlayback,
-  playbackLabel,
   playbackReady,
+  playbackStatus,
   playing,
   preparingFailed,
   preparingLabel,
   radarNotice,
+  recenterReady,
+  requestedSite,
   selectedSite,
   siteSelectionReady,
   sites,
 }: RadarChromeProps) {
   const [openPanel, setOpenPanel] = useState<OpenPanel>(null);
-  const menuTriggerRef = useRef<HTMLButtonElement>(null);
+  const [toolbarTabStop, setToolbarTabStop] = useState<ToolbarTool>("site");
   const siteTriggerRef = useRef<HTMLButtonElement>(null);
+  const recenterTriggerRef = useRef<HTMLButtonElement>(null);
   const viewTriggerRef = useRef<HTMLButtonElement>(null);
-  const panelOriginRef = useRef<"menu" | "site" | "view">("menu");
+  const panelOriginRef = useRef<"site" | "view">("site");
 
   const closePanel = useCallback((restoreFocus = true) => {
     const returnTarget = panelOriginRef.current === "site"
       ? siteTriggerRef.current
-      : panelOriginRef.current === "view"
-        ? viewTriggerRef.current
-        : menuTriggerRef.current;
+      : viewTriggerRef.current;
     setOpenPanel(null);
     if (restoreFocus) {
       globalThis.requestAnimationFrame(() => returnTarget?.focus());
@@ -113,9 +111,7 @@ export function RadarChrome({
     if (!openPanel) return;
     const panelId = openPanel === "context-sites"
       ? "mistr-context-site-panel"
-      : openPanel === "context-view"
-        ? "mistr-context-view-panel"
-      : "mistr-tool-panel";
+      : "mistr-context-view-panel";
     const frame = globalThis.requestAnimationFrame(() => {
       const panel = document.getElementById(panelId);
       const selectedView = openPanel === "context-view"
@@ -127,6 +123,40 @@ export function RadarChrome({
     });
     return () => globalThis.cancelAnimationFrame(frame);
   }, [openPanel]);
+
+  const moveToolbarFocus = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!(event.target instanceof HTMLButtonElement) || !event.target.matches(".context-tool")) {
+      return;
+    }
+    const orderedTools: Array<[ToolbarTool, HTMLButtonElement | null]> = [
+      ["site", siteTriggerRef.current],
+      ["recenter", recenterTriggerRef.current],
+      ["view", viewTriggerRef.current],
+    ];
+    const availableTools = orderedTools.filter((entry): entry is [ToolbarTool, HTMLButtonElement] => (
+      Boolean(entry[1]) && !entry[1]?.disabled
+    ));
+    if (availableTools.length === 0) return;
+    const currentIndex = Math.max(
+      0,
+      availableTools.findIndex(([, button]) => button === event.target),
+    );
+    let nextIndex: number | null = null;
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+      nextIndex = (currentIndex + 1) % availableTools.length;
+    } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+      nextIndex = (currentIndex - 1 + availableTools.length) % availableTools.length;
+    } else if (event.key === "Home") {
+      nextIndex = 0;
+    } else if (event.key === "End") {
+      nextIndex = availableTools.length - 1;
+    }
+    if (nextIndex === null) return;
+    event.preventDefault();
+    const [nextTool, nextButton] = availableTools[nextIndex];
+    setToolbarTabStop(nextTool);
+    nextButton.focus();
+  };
 
   const selectSite = (site: string) => {
     onSelectSite(site);
@@ -142,35 +172,34 @@ export function RadarChrome({
     ?? (inspectionSelected ? "OUTSIDE RADAR COVERAGE" : "CLICK TO INSPECT");
   const sampleAnnouncement = sample
     ?? (inspectionSelected ? "Outside radar coverage." : "No radar point selected.");
-  const menuPanelOpen = openPanel === "menu" || openPanel === "about";
+  const availableToolbarTools: ToolbarTool[] = [
+    ...(siteSelectionReady ? ["site" as const] : []),
+    ...(recenterReady ? ["recenter" as const] : []),
+    ...(displayModeReady ? ["view" as const] : []),
+  ];
+  const effectiveToolbarTabStop = availableToolbarTools.includes(toolbarTabStop)
+    ? toolbarTabStop
+    : availableToolbarTools[0];
 
   return (
     <div className="radar-chrome">
-      <button
-        aria-controls="mistr-tool-panel"
-        aria-expanded={menuPanelOpen}
-        aria-label={menuPanelOpen ? "Close Mistr menu" : "Open Mistr menu"}
-        className={`edge-trigger${menuPanelOpen ? " edge-trigger--active" : ""}`}
-        onClick={() => {
-          if (menuPanelOpen) closePanel();
-          else {
-            panelOriginRef.current = "menu";
-            setOpenPanel("menu");
-          }
-        }}
-        ref={menuTriggerRef}
-        type="button"
+      <div
+        aria-label="Radar tools"
+        className="context-bar"
+        onKeyDown={moveToolbarFocus}
+        role="toolbar"
       >
-        <MenuIcon open={menuPanelOpen} />
-      </button>
-
-      <nav aria-label="Radar context" className="context-bar">
         <span className="mistr-wordmark" aria-label="Mistr">Mistr</span>
         <span aria-hidden="true" className="instrument-divider" />
-        <button
+        <IconToolButton
           aria-controls="mistr-context-site-panel"
           aria-expanded={openPanel === "context-sites"}
-          className="context-selector"
+          aria-haspopup="dialog"
+          aria-label={`Choose radar site. ${selectedSite} is displayed.${requestedSite ? ` Updating ${requestedSite}.` : ""}`}
+          className="context-tool context-tool--site"
+          data-control="radar-sites"
+          data-displayed-site={selectedSite}
+          data-requested-site={requestedSite}
           disabled={!siteSelectionReady}
           onClick={() => {
             if (openPanel === "context-sites") closePanel();
@@ -179,20 +208,41 @@ export function RadarChrome({
               setOpenPanel("context-sites");
             }
           }}
+          onFocus={() => setToolbarTabStop("site")}
           ref={siteTriggerRef}
+          tabIndex={effectiveToolbarTabStop === "site" ? 0 : -1}
+          tooltip={`Radar Site · ${selectedSite}`}
+          tooltipSuppressed={openPanel === "context-sites"}
           type="button"
         >
-          <span className="context-selector__label">SITE</span>
-          <strong>{selectedSite}</strong>
-          <ChevronIcon />
-        </button>
+          <RadarSiteIcon />
+          {requestedSite ? <span aria-hidden="true" className="site-activity" /> : null}
+        </IconToolButton>
+        <IconToolButton
+          aria-label={`Recenter radar on ${selectedSite}`}
+          className="context-tool context-tool--recenter"
+          data-control="recenter-radar"
+          disabled={!recenterReady}
+          onClick={() => {
+            setOpenPanel(null);
+            onRecenter();
+          }}
+          onFocus={() => setToolbarTabStop("recenter")}
+          ref={recenterTriggerRef}
+          tabIndex={effectiveToolbarTabStop === "recenter" ? 0 : -1}
+          tooltip="Recenter Radar"
+          type="button"
+        >
+          <RecenterIcon />
+        </IconToolButton>
         <span aria-hidden="true" className="instrument-divider" />
-        <button
+        <IconToolButton
           aria-controls="mistr-context-view-panel"
           aria-expanded={openPanel === "context-view"}
           aria-haspopup="menu"
-          aria-label={`Radar display: ${radarDisplayModeLabel(displayMode)}`}
-          className="context-selector context-selector--view"
+          aria-label={`Radar view. ${radarDisplayModeLabel(displayMode)} selected.`}
+          className="context-tool context-tool--view"
+          data-control="radar-view"
           disabled={!displayModeReady}
           onClick={() => {
             if (openPanel === "context-view") closePanel();
@@ -201,13 +251,15 @@ export function RadarChrome({
               setOpenPanel("context-view");
             }
           }}
+          onFocus={() => setToolbarTabStop("view")}
           ref={viewTriggerRef}
+          tabIndex={effectiveToolbarTabStop === "view" ? 0 : -1}
+          tooltip="Radar View"
+          tooltipSuppressed={openPanel === "context-view"}
           type="button"
         >
-          <span className="context-selector__label">VIEW</span>
-          <strong>{radarDisplayModeLabel(displayMode)}</strong>
-          <ChevronIcon />
-        </button>
+          <EyeIcon />
+        </IconToolButton>
 
         {openPanel === "context-view" ? (
           <ViewPanel
@@ -216,53 +268,17 @@ export function RadarChrome({
             onSelect={selectDisplayMode}
           />
         ) : null}
-      </nav>
+      </div>
 
       {openPanel === "context-sites" ? (
         <SitePanel
-          className="tool-panel--context"
+          className="tool-panel--site"
           currentSite={selectedSite}
           id="mistr-context-site-panel"
           onSelect={selectSite}
           selectionReady={siteSelectionReady}
           sites={sites}
         />
-      ) : null}
-
-      {openPanel === "menu" ? (
-        <aside aria-label="Mistr menu" className="tool-panel tool-panel--left" id="mistr-tool-panel">
-          <PanelHeader eyebrow="Menu" supporting={`${selectedSite} · CURRENT RADAR`} />
-          <div className="menu-group">
-            <p>MAP</p>
-            <button onClick={() => { onRecenter(); closePanel(); }} type="button">
-              <RecenterIcon />
-              <span><strong>Recenter radar</strong><small>Return to {selectedSite}</small></span>
-            </button>
-          </div>
-          <div className="menu-group">
-            <p>APPLICATION</p>
-            <button onClick={() => setOpenPanel("about")} type="button">
-              <InfoIcon />
-              <span><strong>About Mistr</strong><small>Version and data sources</small></span>
-              <ChevronIcon direction="right" />
-            </button>
-          </div>
-        </aside>
-      ) : null}
-
-      {openPanel === "about" ? (
-        <aside aria-label="About Mistr" className="tool-panel tool-panel--left" id="mistr-tool-panel">
-          <PanelBack onClick={() => setOpenPanel("menu")} />
-          <PanelHeader eyebrow="About Mistr" supporting={`VERSION ${appVersion}`} />
-          <div className="about-copy">
-            <p>A focused desktop instrument for inspecting measured NEXRAD radar.</p>
-            <p>Radar data is provided through public NOAA NEXRAD distribution on AWS Open Data and Unidata infrastructure. No NOAA endorsement is implied.</p>
-            <dl>
-              <div><dt>MAP</dt><dd>{mapStatus}</dd></div>
-              <div><dt>RADAR</dt><dd>BASE REFLECTIVITY · LOWEST TILT</dd></div>
-            </dl>
-          </div>
-        </aside>
       ) : null}
 
       {preparingLabel ? (
@@ -296,7 +312,7 @@ export function RadarChrome({
         <div className="timeline">
           <input
             aria-label="Displayed radar scan"
-            aria-valuetext={`${Math.min(frameIndex + 1, frameCount)} of ${frameCount || 0}, ${timestamp.accessible}`}
+            aria-valuetext={`Frame ${Math.min(frameIndex + 1, frameCount)} of ${frameCount || 0}. ${timestamp.accessible}. ${frameAge.accessibleLabel}`}
             disabled={!playbackReady || frameCount < 2}
             max={Math.max(0, frameCount - 1)}
             min="0"
@@ -310,15 +326,16 @@ export function RadarChrome({
             <span>{timelinePosition(
               frameIndex,
               frameCount,
-              historyCapacity,
-              liveHistoryStatus,
             )}</span>
-            <strong>{playbackLabel}</strong>
           </div>
         </div>
         <span aria-hidden="true" className="instrument-divider" />
-        <output className={`freshness freshness--${freshness.kind}`}>
-          {freshness.label}
+        <output
+          aria-label={frameAge.accessibleLabel}
+          className={`frame-age frame-age--${frameAge.kind}`}
+          data-frame-age-kind={frameAge.kind}
+        >
+          {frameAge.label}
         </output>
         <output className={`sample-readout${sample ? " sample-readout--active" : ""}`}>
           {sampleDisplay}
@@ -340,11 +357,89 @@ export function RadarChrome({
           ? ""
           : preparingLabel
           ? `Preparing radar. ${preparingLabel}.`
-          : `${playbackLabel}. Radar ${freshness.kind}. ${sampleAnnouncement}`}
+          : `${playbackStatus}. ${sampleAnnouncement}`}
       </p>
     </div>
   );
 }
+
+interface IconToolButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+  tooltip: string;
+  tooltipSuppressed?: boolean;
+}
+
+const IconToolButton = forwardRef<HTMLButtonElement, IconToolButtonProps>(function IconToolButton({
+  children,
+  onBlur,
+  onClick,
+  onFocus,
+  onKeyDown,
+  tooltip,
+  tooltipSuppressed = false,
+  ...buttonProps
+}, ref) {
+  const tooltipId = useId();
+  const hoverTimerRef = useRef<ReturnType<typeof globalThis.setTimeout> | null>(null);
+  const [tooltipVisible, setTooltipVisible] = useState(false);
+
+  const clearHoverTimer = useCallback(() => {
+    if (hoverTimerRef.current !== null) {
+      globalThis.clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = null;
+    }
+  }, []);
+  const hideTooltip = useCallback(() => {
+    clearHoverTimer();
+    setTooltipVisible(false);
+  }, [clearHoverTimer]);
+
+  useEffect(() => hideTooltip, [hideTooltip]);
+  useEffect(() => {
+    if (tooltipSuppressed) hideTooltip();
+  }, [hideTooltip, tooltipSuppressed]);
+
+  return (
+    <span
+      className="context-tool-anchor"
+      onPointerEnter={(event) => {
+        if (event.pointerType !== "mouse" || tooltipSuppressed) return;
+        clearHoverTimer();
+        hoverTimerRef.current = globalThis.setTimeout(() => {
+          setTooltipVisible(true);
+          hoverTimerRef.current = null;
+        }, 400);
+      }}
+      onPointerLeave={hideTooltip}
+    >
+      <button
+        {...buttonProps}
+        aria-describedby={tooltipVisible ? tooltipId : undefined}
+        onBlur={(event) => {
+          hideTooltip();
+          onBlur?.(event);
+        }}
+        onClick={(event) => {
+          hideTooltip();
+          onClick?.(event);
+        }}
+        onFocus={(event) => {
+          if (!tooltipSuppressed) setTooltipVisible(true);
+          onFocus?.(event);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") hideTooltip();
+          onKeyDown?.(event);
+        }}
+        ref={ref}
+      >
+        {children}
+      </button>
+      {tooltipVisible ? (
+        <span className="context-tooltip" id={tooltipId} role="tooltip">{tooltip}</span>
+      ) : null}
+    </span>
+  );
+});
 
 const DISPLAY_MODES: readonly RadarDisplayMode[] = ["smooth", "native"];
 
@@ -410,7 +505,6 @@ function SitePanel({
   className,
   currentSite,
   id,
-  onBack,
   onSelect,
   selectionReady,
   sites,
@@ -418,7 +512,6 @@ function SitePanel({
   className: string;
   currentSite: string;
   id: string;
-  onBack?: () => void;
   onSelect(site: string): void;
   selectionReady: boolean;
   sites: readonly RadarSiteOption[];
@@ -427,8 +520,12 @@ function SitePanel({
   const filteredSites = filterRadarSites(sites, query);
 
   return (
-    <aside aria-label="Radar sites" className={`tool-panel ${className}`} id={id}>
-      {onBack ? <PanelBack onClick={onBack} /> : null}
+    <aside
+      aria-label="Choose radar site"
+      className={`tool-panel ${className}`}
+      id={id}
+      role="dialog"
+    >
       <PanelHeader eyebrow="Radar sites" supporting={`${sites.length} WSR-88D STATIONS`} />
       <div className="site-search">
         <SearchIcon />
@@ -479,15 +576,6 @@ function PanelHeader({ eyebrow, supporting }: { eyebrow: string; supporting: str
   );
 }
 
-function PanelBack({ onClick }: { onClick(): void }) {
-  return (
-    <button aria-label="Back to Mistr menu" className="panel-back" onClick={onClick} type="button">
-      <ChevronIcon direction="left" />
-      BACK
-    </button>
-  );
-}
-
 function formatScanTimestamp(unixMs: number | undefined) {
   if (unixMs === undefined) {
     return { date: "---- -- --", time: "--:--:--", zone: "", accessible: "waiting" };
@@ -522,19 +610,6 @@ function formatSample(interrogation: GateInterrogation | null): string | null {
   return `${interrogation.value.toFixed(1)} ${interrogation.units}`;
 }
 
-function MenuIcon({ open }: { open: boolean }) {
-  return open ? (
-    <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" /></svg>
-  ) : (
-    <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h14" /></svg>
-  );
-}
-
-function ChevronIcon({ direction = "down" }: { direction?: "down" | "left" | "right" }) {
-  const path = direction === "left" ? "m14 6-6 6 6 6" : direction === "right" ? "m10 6 6 6-6 6" : "m6 9 6 6 6-6";
-  return <svg aria-hidden="true" className="chevron-icon" viewBox="0 0 24 24"><path d={path} /></svg>;
-}
-
 function PlayIcon() {
   return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m9 6 9 6-9 6Z" /></svg>;
 }
@@ -547,8 +622,22 @@ function RecenterIcon() {
   return <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6" /><path d="M12 2v4M22 12h-4M12 22v-4M2 12h4" /></svg>;
 }
 
-function InfoIcon() {
-  return <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M12 11v6M12 7h.01" /></svg>;
+function RadarSiteIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <path d="M12 21s6-5.7 6-11a6 6 0 1 0-12 0c0 5.3 6 11 6 11Z" />
+      <circle cx="12" cy="10" r="2.2" />
+    </svg>
+  );
+}
+
+function EyeIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <path d="M2.7 12s3.4-5.5 9.3-5.5 9.3 5.5 9.3 5.5-3.4 5.5-9.3 5.5S2.7 12 2.7 12Z" />
+      <circle cx="12" cy="12" r="2.6" />
+    </svg>
+  );
 }
 
 function CheckIcon() {
