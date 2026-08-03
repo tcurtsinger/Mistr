@@ -48,6 +48,7 @@ try {
   await selectSite("KTLX");
 
   const historyEvents = [];
+  let historyLoadingNotice = null;
   let lastCount = 0;
   let degradedSamples = 0;
   const startedAtUnixMs = Date.now();
@@ -56,6 +57,7 @@ try {
     const snapshot = await evaluate(`(()=>{
       const live=window.__MISTR_PHASE5__.report();
       const phase4=window.__MISTR_PHASE4__.report();
+      const ageOutput=document.querySelector('.frame-age');
       return {
         displayKind:live.display?.kind,
         history:live.history,
@@ -64,13 +66,21 @@ try {
         historyUpdate:live.historyUpdate,
         renderer:phase4.renderer,
         playback:phase4.playback,
-        freshness:document.querySelector('.freshness')?.textContent?.trim(),
-        topSite:document.querySelector('.context-selector strong')?.textContent?.trim(),
+        frameAge:{
+          text:ageOutput?.textContent?.trim() ?? null,
+          accessibleName:ageOutput?.getAttribute('aria-label') ?? null,
+          kind:ageOutput?.classList.contains('frame-age--current')?'current':ageOutput?.classList.contains('frame-age--historical')?'historical':null
+        },
+        topSite:document.querySelector('[data-control=radar-sites]')?.dataset.displayedSite,
+        notice:document.querySelector('.radar-notice')?.textContent?.replace(/\\s+/g,' ').trim() ?? null,
         error:document.querySelector('[role=alert]')?.textContent?.trim() ?? null
       };
     })()`);
     if (snapshot.error && !snapshot.error.includes("cancel")) fatalErrors.push(snapshot.error);
     if (snapshot.displayKind === "degraded") degradedSamples += 1;
+    if (snapshot.notice?.includes("Loading recent scans.")) {
+      historyLoadingNotice = snapshot.notice;
+    }
     const count = snapshot.history?.residentCount ?? snapshot.renderer?.metrics?.residentFrameCount ?? 0;
     const historyEvidence = snapshot.historyUpdate?.evidence ?? snapshot.evidence;
     if (count > lastCount && historyEvidence?.safe?.site === "KTLX") {
@@ -83,6 +93,7 @@ try {
         rendererGeneration: snapshot.renderer.generation,
         rendererResidentCount: snapshot.renderer.metrics?.residentFrameCount,
         frameUploadCount: snapshot.renderer.metrics?.frameUploadCount,
+        notice: snapshot.notice,
         capturedAtUnixMs: Date.now(),
       });
       lastCount = count;
@@ -112,10 +123,11 @@ try {
     completedAtUnixMs: Date.now(),
     siteSwitch: {
       pendingTopSite: pendingTruth.topSite,
-      pendingFreshness: pendingTruth.freshness,
+      pendingNotice: pendingTruth.notice,
       finalTopSite: final.topSite,
     },
     historyEvents,
+    historyLoadingNotice,
     degradedSamples,
     preRecoveryFrameUploadDelta,
     final,
@@ -146,7 +158,7 @@ try {
 }
 
 async function selectSite(site) {
-  await evaluate("document.querySelector('.context-selector').click()");
+  await evaluate("document.querySelector('[data-control=radar-sites]').click()");
   await delay(50);
   const selected = await evaluate(`(()=>{
     const button=[...document.querySelectorAll('#mistr-context-site-panel button')]
@@ -160,8 +172,8 @@ async function selectSite(site) {
 
 function surfaceTruth() {
   return evaluate(`(()=>({
-    topSite:document.querySelector('.context-selector strong')?.textContent?.trim(),
-    freshness:document.querySelector('.freshness')?.textContent?.trim()
+    topSite:document.querySelector('[data-control=radar-sites]')?.dataset.displayedSite,
+    notice:document.querySelector('.radar-notice')?.textContent?.replace(/\\s+/g,' ').trim() ?? null
   }))()`);
 }
 
@@ -169,7 +181,7 @@ async function waitForPendingSite(site, timeoutMs = 5_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const truth = await surfaceTruth();
-    if (truth.freshness === `UPDATING ${site}`) return truth;
+    if (truth.notice?.includes(`while ${site} live radar loads.`)) return truth;
     if (truth.topSite === site) {
       throw new Error(`${site} painted before the pending request could be superseded`);
     }
@@ -182,6 +194,8 @@ function snapshotFinal() {
   return evaluate(`(()=>{
     const live=window.__MISTR_PHASE5__.report();
     const phase4=window.__MISTR_PHASE4__.report();
+    const ageOutput=document.querySelector('.frame-age');
+    const slider=document.querySelector('.timeline input');
     return {
       history:live.history,
       evidence:live.evidence,
@@ -190,8 +204,16 @@ function snapshotFinal() {
       historyUpdate:live.historyUpdate,
       renderer:phase4.renderer,
       playback:phase4.playback,
-      topSite:document.querySelector('.context-selector strong')?.textContent?.trim(),
-      freshness:document.querySelector('.freshness')?.textContent?.trim(),
+      topSite:document.querySelector('[data-control=radar-sites]')?.dataset.displayedSite,
+      frameAge:{
+        text:ageOutput?.textContent?.trim() ?? null,
+        accessibleName:ageOutput?.getAttribute('aria-label') ?? null,
+        kind:ageOutput?.classList.contains('frame-age--current')?'current':ageOutput?.classList.contains('frame-age--historical')?'historical':null
+      },
+      frameAgeCapturedAtUnixMs:Date.now(),
+      sliderMaximum:Number(slider?.max ?? -1),
+      sliderValue:Number(slider?.value ?? -1),
+      sliderValueText:slider?.getAttribute('aria-valuetext') ?? null,
       timelineText:document.querySelector('.timeline-meta')?.textContent?.replace(/\\s+/g,' ').trim(),
       bodyText:document.body.innerText
     };

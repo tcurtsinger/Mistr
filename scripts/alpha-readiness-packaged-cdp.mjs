@@ -45,6 +45,15 @@ try {
   const reducedMotion = await captureReducedMotion();
   const contrast = await captureContrast();
   const visibleText = await evaluate("document.body.innerText");
+  const playbackText = await evaluate("document.querySelector('.playback-bar')?.innerText ?? ''");
+  const frameAge = await evaluate(`(()=>{
+    const output=document.querySelector('.frame-age');
+    return {
+      text:output?.textContent?.trim() ?? null,
+      accessibleName:output?.getAttribute('aria-label') ?? null,
+      kind:output?.classList.contains('frame-age--current')?'current':output?.classList.contains('frame-age--historical')?'historical':null
+    };
+  })()`);
   const renderer = await evaluate("window.__MISTR_PHASE4__.report().renderer");
   const report = {
     documentTitle: await evaluate("document.title"),
@@ -56,6 +65,8 @@ try {
     forcedColors,
     reducedMotion,
     contrast,
+    frameAge,
+    visibleStatusNoise: playbackText.match(/\b(?:fresh|stale|paused|newest)\b/gi) ?? [],
     visiblePrototypeTerms: `${await evaluate("document.title")}\n${visibleText}`.match(/\b(?:prototype|phase\s*[0-9]|fixture|benchmark|diagnostic)\b/gi) ?? [],
     completedAtUnixMs: Date.now(),
   };
@@ -84,7 +95,7 @@ async function captureViewport() {
     };
     const inside = value => value.left >= 0 && value.top >= 0
       && value.right <= innerWidth && value.bottom <= innerHeight;
-    const persistent = [...document.querySelectorAll('.edge-trigger,.context-bar,.playback-bar')].map(rect);
+    const persistent = [...document.querySelectorAll('.context-bar,.playback-bar')].map(rect);
     const visibleControls = [...document.querySelectorAll('button,input')].filter(element => {
       const style = getComputedStyle(element);
       const value = rect(element);
@@ -95,12 +106,16 @@ async function captureViewport() {
       innerHeight,
       scrollWidth:document.documentElement.scrollWidth,
       scrollHeight:document.documentElement.scrollHeight,
-      persistentControlsInside:persistent.length === 3 && persistent.every(inside),
+      persistentControlsInside:persistent.length === 2 && persistent.every(inside),
       persistent,
       undersizedControls:visibleControls.filter(element => {
         const value = rect(element);
         return element.type !== 'range' && (value.width < 24 || value.height < 24);
       }).map(element => element.getAttribute('aria-label') || element.textContent.trim()),
+      toolbarTargetSizes:[...document.querySelectorAll('.context-tool')].map(element => {
+        const value=rect(element);
+        return {name:element.getAttribute('aria-label'),width:value.width,height:value.height};
+      }),
       openPanelCount:document.querySelectorAll('.tool-panel').length,
     };
   })()`);
@@ -108,27 +123,14 @@ async function captureViewport() {
 
 async function exerciseKeyboard() {
   const playbackBefore = await evaluate("(()=>{const r=document.querySelector('.playback-bar').getBoundingClientRect();return {left:r.left,top:r.top,width:r.width,height:r.height}})()");
-  await evaluate("document.querySelector('.edge-trigger').click()");
+  await evaluate("document.querySelector('[data-control=radar-sites]').click()");
   await delay(100);
-  const menu = await evaluate(`(()=>({
+  const context = await evaluate(`(()=>({
     focus:document.activeElement?.getAttribute('aria-label') || document.activeElement?.textContent?.replace(/\\s+/g,' ').trim(),
     focusVisible:document.activeElement?.matches(':focus-visible') ?? false,
     openPanels:document.querySelectorAll('.tool-panel').length
   }))()`);
   const playbackOpen = await evaluate("(()=>{const r=document.querySelector('.playback-bar').getBoundingClientRect();return {left:r.left,top:r.top,width:r.width,height:r.height}})()");
-  await pressKey("Escape", "Escape", 27);
-  await delay(100);
-  const menuClosed = await evaluate(`(()=>({
-    closed:document.querySelectorAll('.tool-panel').length===0,
-    returnName:document.activeElement?.getAttribute('aria-label') || document.activeElement?.textContent?.replace(/\\s+/g,' ').trim()
-  }))()`);
-
-  await evaluate("document.querySelector('.context-selector').click()");
-  await delay(100);
-  const context = await evaluate(`(()=>({
-    focus:document.activeElement?.getAttribute('aria-label') || document.activeElement?.textContent?.replace(/\\s+/g,' ').trim(),
-    focusVisible:document.activeElement?.matches(':focus-visible') ?? false
-  }))()`);
   await pressKey("Escape", "Escape", 27);
   await delay(100);
   const contextClosed = await evaluate(`(()=>({
@@ -137,7 +139,18 @@ async function exerciseKeyboard() {
   }))()`);
 
   await evaluate("window.__MISTR_PHASE4__.setDisplayMode('smooth')");
-  await evaluate("document.querySelector('.context-selector--view').click()");
+  await delay(100);
+  await evaluate("document.querySelector('[data-control=radar-sites]').focus()");
+  await pressKey("ArrowRight", "ArrowRight", 39);
+  const toolbarRecenterFocus = await evaluate("document.activeElement?.getAttribute('aria-label')");
+  await pressKey("ArrowRight", "ArrowRight", 39);
+  await delay(20);
+  const toolbarViewFocus = await evaluate("document.activeElement?.getAttribute('aria-label')");
+  const viewTooltip = await evaluate("document.querySelector('.context-tooltip[role=tooltip]')?.textContent?.trim() ?? null");
+  await pressKey("Home", "Home", 36);
+  const toolbarHomeFocus = await evaluate("document.activeElement?.getAttribute('aria-label')");
+
+  await evaluate("document.querySelector('[data-control=radar-view]').click()");
   await delay(100);
   const view = await evaluate(`(()=>( {
     focus:document.activeElement?.getAttribute('aria-label') || document.activeElement?.textContent?.replace(/\\s+/g,' ').trim(),
@@ -149,7 +162,7 @@ async function exerciseKeyboard() {
   await pressEnter();
   await delay(100);
   const viewSelectedMode = await evaluate("window.__MISTR_PHASE4__.report().renderer.displayMode");
-  await evaluate("document.querySelector('.context-selector--view').click()");
+  await evaluate("document.querySelector('[data-control=radar-view]').click()");
   await delay(100);
   await pressKey("Escape", "Escape", 27);
   await delay(100);
@@ -157,7 +170,7 @@ async function exerciseKeyboard() {
     closed:document.querySelectorAll('.tool-panel').length===0,
     returnName:document.activeElement?.getAttribute('aria-label') || document.activeElement?.textContent?.replace(/\\s+/g,' ').trim()
   }))()`);
-  await evaluate("document.querySelector('.context-selector--view').click()");
+  await evaluate("document.querySelector('[data-control=radar-view]').click()");
   await delay(100);
   await pressKey("ArrowUp", "ArrowUp", 38);
   await pressEnter();
@@ -174,15 +187,15 @@ async function exerciseKeyboard() {
   const sliderAfter = Number(await evaluate("document.querySelector('.timeline input').value"));
   const valueTextAfter = await evaluate("document.querySelector('.timeline input').getAttribute('aria-valuetext')");
   return {
-    menuInitialFocus: menu.focus,
-    menuFocusVisible: menu.focusVisible,
-    menuOpenPanelCount: menu.openPanels,
-    menuEscapeClosed: menuClosed.closed,
-    menuEscapeReturn: menuClosed.returnName,
     contextInitialFocus: context.focus,
     contextFocusVisible: context.focusVisible,
+    contextOpenPanelCount: context.openPanels,
     contextEscapeClosed: contextClosed.closed,
     contextEscapeReturn: contextClosed.returnName,
+    toolbarRecenterFocus,
+    toolbarViewFocus,
+    toolbarHomeFocus,
+    viewTooltip,
     viewInitialFocus: view.focus,
     viewFocusVisible: view.focusVisible,
     viewOpenPanelCount: view.openPanels,
@@ -192,9 +205,10 @@ async function exerciseKeyboard() {
     viewEscapeReturn: viewClosed.returnName,
     viewRestoredMode,
     playbackBarStable: sameRect(playbackBefore, playbackOpen),
+    legacyMenuAbsent: await evaluate("!document.querySelector('.edge-trigger,.tool-panel--left') && !document.body.innerText.includes('About Mistr')"),
     sliderBefore,
     sliderAfter,
-    sliderValueTextUpdated: valueTextBefore !== valueTextAfter && valueTextAfter?.startsWith(`${sliderAfter + 1} of `),
+    sliderValueTextUpdated: valueTextBefore !== valueTextAfter && valueTextAfter?.startsWith(`Frame ${sliderAfter + 1} of `),
   };
 }
 
@@ -207,13 +221,18 @@ async function captureAccessibility() {
     .map(node => node.role?.value);
   return evaluate(`(()=>{
     const map=document.querySelector('.maplibregl-canvas');
-    const context=document.querySelector('.context-selector');
-    const view=document.querySelector('.context-selector--view');
+    const context=document.querySelector('[data-control=radar-sites]');
+    const recenter=document.querySelector('[data-control=recenter-radar]');
+    const view=document.querySelector('[data-control=radar-view]');
     return {
       unnamedInteractive:${JSON.stringify(unnamedInteractive)},
       mapTabIndex:map?.tabIndex ?? null,
       mapAccessibleName:map?.getAttribute('aria-label') || document.querySelector('.map-surface')?.getAttribute('aria-label'),
+      toolbarRole:document.querySelector('.context-bar')?.getAttribute('role') ?? null,
       contextHasPopup:context?.getAttribute('aria-haspopup') ?? null,
+      contextAccessibleName:context?.getAttribute('aria-label') ?? null,
+      displayedSite:context?.dataset.displayedSite ?? null,
+      recenterAccessibleName:recenter?.getAttribute('aria-label') ?? null,
       viewHasPopup:view?.getAttribute('aria-haspopup') ?? null,
       viewAccessibleName:view?.getAttribute('aria-label') ?? null
     };
@@ -230,7 +249,7 @@ async function captureForcedColors() {
     assertProtocolResult(documentNode, "DOM.getDocument");
     const buttonNode = await call("DOM.querySelector", {
       nodeId: documentNode.result.root.nodeId,
-      selector: ".context-selector--view",
+      selector: "[data-control=radar-view]",
     });
     assertProtocolResult(buttonNode, "DOM.querySelector");
     await call("CSS.forcePseudoState", {
@@ -238,7 +257,7 @@ async function captureForcedColors() {
       forcedPseudoClasses: ["focus", "focus-visible"],
     });
     modes.push(await evaluate(`(()=>{
-      const button=document.querySelector('.context-selector--view');
+      const button=document.querySelector('[data-control=radar-view]');
       const style=getComputedStyle(button);
       return {
         displayMode:${JSON.stringify(displayMode)},
@@ -265,7 +284,7 @@ async function captureForcedColors() {
 async function captureReducedMotion() {
   await call("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
   const result = await evaluate(`(()=>{
-    const style=getComputedStyle(document.querySelector('.edge-trigger'));
+    const style=getComputedStyle(document.querySelector('[data-control=radar-view]'));
     return {matches:matchMedia('(prefers-reduced-motion: reduce)').matches,transitionDuration:style.transitionDuration,animationDuration:style.animationDuration};
   })()`);
   await call("Emulation.setEmulatedMedia", { features: [] });

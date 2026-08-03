@@ -28,7 +28,7 @@ The product earns additional capabilities only when they improve live storm insp
 
 - The primary environment is a Windows desktop with mouse and keyboard, used at a desk during storm monitoring.
 - The application is expected to remain open for long sessions and to recover cleanly from data gaps, site changes, window lifecycle events, and graphics-context loss.
-- The normal operating environment is online. Network failure still requires explicit stale/error state and preservation of the last genuinely displayed observation.
+- The normal operating environment is online. Network failure still requires an explicit recovery or error notice, a truthful numeric age for the painted frame, and preservation of the last genuinely displayed observation.
 - macOS is an intended later platform. The owner has Mac hardware and an active Apple Developer membership available for future build, runtime, signing, and distribution validation.
 
 ## Capabilities and Constraints
@@ -41,7 +41,7 @@ The product earns additional capabilities only when they improve live storm insp
 - Smooth map pan and zoom.
 - Two explicit spatial presentation modes for that same measured observation: `Smooth` by default and `Native` on demand. `Smooth` may soften gate edges within one scan; it never synthesizes time, changes decoded values, or changes the native dBZ returned by inspection. `Native` exposes the exact nearest sampled polar gate.
 - A bounded recent-observation loop with play, pause, and direct timeline scrubbing. Focused timeline arrow-key movement may be supported without adding dedicated previous/next buttons.
-- Clear measured time, freshness, loading, stale, recovery, and failure state.
+- Clear measured time and numeric frame age during normal operation, with explicit preparation, loading, recovery, and failure notices when action or context is required.
 - The visible timeline follows a completed GPU paint, not merely a request or selected frame.
 - The last genuinely painted observation remains visible while newer data loads or a recoverable failure is handled.
 - The newest bundled archive observation establishes a safe first paint without decoding the entire diagnostic loop; every launch then proceeds automatically to current live radar for the stored site or KTLX on a fresh profile.
@@ -70,9 +70,10 @@ The product earns additional capabilities only when they improve live storm insp
 - The product name is **Mistr**.
 - Mistr must feel like a deliberate product rather than expose prototype phases, benchmarks, fixture controls, or engineering acceptance terminology in its normal interface.
 - The interface must be clean, focused, and trustworthy. GustAVO's accumulated feature set and incumbent interface are not requirements or default visual authority for Mistr.
-- The Alpha radar surface keeps the map full-screen beneath a compact top-center radar-context bar, one small left menu trigger, and one stable bottom-center playback bar. A future right-side alert trigger is reserved but does not ship before alerts exist.
-- The radar-context bar names its real spatial presentation choice with the compact visible labels `Smooth` and `Native`. These labels describe rendering only; they do not imply a different radar product, elevation, or measured observation.
-- Temporary menu and alert panels overlay the map without resizing or recentering it. Only one panel may be open, panels stop above the playback bar, and no control or panel is draggable or user-positionable.
+- The Alpha radar surface keeps the map full-screen beneath a compact icon-led top-center radar toolbar and one stable bottom-center playback bar. There is no left application menu or About panel; future top-bar capabilities are added only when they become real product controls.
+- The toolbar contains Mistr identity, a site icon that opens the single canonical searchable site picker, a direct recenter icon, and an eye icon whose `Radar View` tooltip identifies the `Smooth`/`Native` popup. The popup labels are exactly `Smooth` and `Native`; they describe rendering only and never imply a different radar product, elevation, or measured observation.
+- Temporary site and view panels remain anchored to their toolbar controls, overlay the map without resizing or recentering it, and are mutually exclusive. No control or panel is draggable or user-positionable.
+- During normal operation, the bottom bar shows the displayed scan timestamp and numeric frame age alongside transport, direct timeline scrubbing, and the active dBZ sample. It does not show `Fresh`, `Stale`, `Playing`, `Paused`, or `Newest`. Green age text is reserved for the recent newest painted live scan; historical, archive, and old latest-live frames use white. Preparation, loading, graphics recovery, and error notices remain explicit exceptional states.
 - Technical detail may remain available for reproducible diagnostics, but it must not dominate the storm-inspection workflow.
 
 ## Evidence on Hand
@@ -87,16 +88,16 @@ The product earns additional capabilities only when they improve live storm insp
 
 ## Product Principles
 
-1. **The painted observation is the truth.** Time, freshness, and controls follow what the GPU completed, never what the application merely intended to show.
+1. **The painted observation is the truth.** Time, numeric age, site context, and controls follow what the GPU completed, never what the application merely intended to show.
 2. **Keep radar interaction immediate.** Pan, zoom, playback, and scrubbing must remain responsive and isolated from network, decode, disk, and bulk-transfer work.
 3. **Keep the product narrower than the technology.** A capability does not belong merely because GustAVO had it or the radar engine can support it.
-4. **Fail visibly without discarding valid context.** Loading, stale data, recovery, and errors are explicit while the last trustworthy observation remains available when safe.
+4. **Fail visibly without discarding valid context.** The displayed age remains truthful, and preparation, loading, recovery, and errors are explicit while the last trustworthy observation remains available when safe.
 5. **Prefer explainable ownership over clever coupling.** Each task, state transition, buffer, and GPU resource has a bounded owner, deterministic evidence, and a release path that AI-assisted development can troubleshoot.
 
 ## Accessibility & Inclusion
 
 Mistr is mouse-and-keyboard first. Core site selection, map navigation, and radar transport controls must remain keyboard operable, expose meaningful accessible names and focus state, and communicate operational status through text or structure rather than color alone.
 
-Temporary panels move keyboard focus into their first available action and return it to the originating trigger when selected or dismissed. Windows forced-colors mode retains a visible focus outline, and failure text distinguishes an unavailable first acquisition from a retry that is preserving already-painted live radar.
+The icon-led toolbar exposes meaningful accessible names and tooltips; its site name follows painted truth and its view control names the selected `Smooth`/`Native` mode. Temporary panels move keyboard focus into their first available action and return it to the originating trigger when selected or dismissed. Numeric age and accessible text make the green/white age treatment redundant rather than color-only. Windows forced-colors mode retains a visible focus outline, and failure text distinguishes an unavailable first acquisition from a retry that is preserving already-painted live radar.
 
 No additional product-specific accessibility needs have been confirmed for Alpha v1.

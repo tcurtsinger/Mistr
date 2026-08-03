@@ -2,13 +2,13 @@
 
 **Checkpoint:** 2026-08-02
 
-**Merged baseline:** [PR #11 — Harden radar site selection and product chrome](https://github.com/tcurtsinger/Mistr/pull/11), merge commit `ccb4a02`
+**Merged baseline:** [PR #12 — Improve radar rendering quality](https://github.com/tcurtsinger/Mistr/pull/12), merge commit `2c7f30d`
 
-**Active change:** [PR #12 — Improve radar rendering quality](https://github.com/tcurtsinger/Mistr/pull/12)
+**Active change:** [PR #13 - Harden the radar chrome](https://github.com/tcurtsinger/Mistr/pull/13)
 
-**Branch:** `codex/mistr-radar-rendering-quality`
+**Branch:** `codex/mistr-ui-runtime-hardening`
 
-This document is the durable starting point for the next Mistr development session. Verify the active pull request, checks, and thread state on GitHub before acting because review status can change after this checkpoint.
+This document is the durable starting point for the next Mistr development session. Verify the active branch, worktree, and any future pull-request checks or threads before acting because repository state can change after this checkpoint.
 
 ## Product decision
 
@@ -19,15 +19,16 @@ Windows is the Alpha release platform. Shared Tauri, Rust, React, TypeScript, Ma
 ## Current user experience
 
 - The radar map fills the window beneath the approved compact floating controls.
-- The content-sized top context contains one canonical searchable site picker; fixed Alpha product/tilt facts live in About and the menu does not duplicate site selection.
-- The top context also exposes the real spatial display choice as `Smooth` by default and `Native` on demand. It does not present fixed product or elevation facts as controls.
-- The top context names the site that actually painted, never merely the requested site.
-- The bottom bar keeps displayed scan time, freshness, playback state/position, and active dBZ visible.
+- The content-sized top toolbar uses the sequence `Mistr | site icon, recenter icon | eye icon`. There is no left application menu or About panel.
+- The site icon opens the single canonical searchable site browser, recenter is a direct command, and the eye icon opens a radar-view popup containing only `Smooth` and `Native`. Its tooltip is `Radar View`; fixed product and elevation facts are not presented as controls.
+- The site control's accessible truth follows the radar that actually painted, never merely the requested site. Site acquisition retains a visible indicator and a compact notice naming both displayed and pending radar.
+- During normal operation, the bottom bar shows displayed scan timestamp and numeric frame age alongside transport, direct timeline scrubbing, and active dBZ. It does not show `Fresh`, `Stale`, `Playing`, `Paused`, or `Newest`.
+- The age is green only for the recent newest painted live scan. Historical, archive, and old latest-live frames use white; numeric age and accessible text ensure color is not the only truth cue.
 - Direct timeline dragging scrubs resident observations; there are no dedicated previous/next buttons.
 - A map click leaves a reticle, and its dBZ value is recomputed whenever another observation paints.
-- `Smooth` filters only the spatial appearance of the current measured observation; `Native` shows exact nearest-sampled polar gates. Both modes preserve native gate/status interrogation, measured time, freshness, and painted-frame truth.
+- `Smooth` filters only the spatial appearance of the current measured observation; `Native` shows exact nearest-sampled polar gates. Both modes preserve native gate/status interrogation, measured time, numeric age, and painted-frame truth.
 - Initial load, successful site change, and recenter fit measured radar coverage; user pan and zoom remain free afterward.
-- Active recent-history loading adds `LOADING RECENT n/20` beside the visible playback position. A settled partial set says `RECENT n/20`, and a one-frame set explains `WAITING FOR NEXT SCAN` instead of pretending playback is paused.
+- Preparation, active history loading, graphics recovery, and error states remain explicit exceptional notices. Usable resident playback stays available during background history work, but normal playback no longer carries permanent loading/position/status words.
 - No prototype phases, fixture selectors, benchmark buttons, or engineering counters appear in the normal product surface.
 - Engineering alignment anchors remain installed for packaged evidence but are hidden in the product map.
 
@@ -41,7 +42,7 @@ The OpenFreeMap style graph is bundled with the frontend and radar initializatio
 
 ### Stored site and site selection
 
-The archive establishes a safe initial display. Mistr then acquires the selected site's current safe Level II reflectivity observation. The site label changes and persistence occurs only after matching GPU paint truth. Failed or superseded requests preserve the last trustworthy painted radar.
+The archive establishes a safe initial display. Mistr then acquires the selected site's current safe Level II reflectivity observation. The site control's painted-site truth changes and persistence occurs only after matching GPU paint truth. Failed or superseded requests preserve the last trustworthy painted radar.
 
 The Alpha catalog contains the 155 operational WSR-88D identifiers currently present in the fixed Unidata Level II chunks provider and the NOAA Radar Operations Center inventory, including Alaska, Hawaii, Guam, and Puerto Rico. KOUN is a test radar with no current provider prefix and is intentionally excluded, along with TDWR, decommissioned/test, foreign, and other provider-absent identifiers. TypeScript and Rust read the same committed catalog, so unsupported identifiers fail before network work.
 
@@ -111,6 +112,8 @@ The merged UI/live-site hardening change passed the full source-level `npm run v
 
 The current rendering-quality change passes `npm run verify`: the public scan, documentation links, 193 frontend tests, production frontend build, Rust formatting and clippy with warnings denied, 98 Rust tests, and Rust check. The exact release binary passed separate 1,000-transition `Native` and `Smooth` Phase 4 scenarios at 3840x2160, automated nonblank/distinct/background-retaining pixel evidence, both modes at 3840x2160, 1100x700, and 1024x640, Native live site supersession, Smooth exact-next live history and direct scrubbing, and one Native plus one Smooth Phase 6 context-recovery pass. A timestamp-matched packaged Smooth KAMX scan also aligned with the official `SR_BREF` operational color bands without changing Mistr's Level II engine. Demonstrated review defects in rollback ownership were corrected so the playback controller performs one bounded Native retry from the first startup paint through later play and scrub selections, accepts the matching paint receipt, and synchronizes the visible mode; the renderer owns the equivalent rollback for a mode-only repaint that has no playback promise. Resource-wide failures remain explicit. Independent final audits found no other demonstrated renderer, UI, accessibility, persistence, ownership, evidence, or public-delivery defect after the documented checkpoints were corrected.
 
+The active radar-chrome hardening passes `npm run verify`: the public scan, documentation links, 204 frontend tests, production frontend build, Rust formatting and clippy with warnings denied, 98 Rust tests, and Rust check. The exact Windows/WebView2 release executable passed the accessibility/readiness matrix in both display modes at 3840x2160, 1100x700, and 1024x640. Evidence covers three measured 40-by-40-pixel toolbar targets at every viewport, toolbar arrow/Home navigation, site and view panel focus/return, the exact `Radar View` tooltip, one-panel ownership, a stable playback bar, direct scrub accessibility truth, forced colors, reduced motion, 5.09:1 inactive-instruction contrast, and absence of the retired application menu. A separate real-data packaged soak acquired four chronological KTLX observations in 0.1 minutes, exposed the exceptional recent-history loading notice, rendered the recent newest age as numeric green text with matching accessible meaning, uploaded exactly four frames, retained bounded GPU memory, passed direct oldest/newest scrub, and recovered a real WebGL context.
+
 The final release executable and bundles also pass:
 
 - the packaged live soak with exact-next KTLX volumes 569 through 572, four chronological resident frames, exactly four incremental uploads, direct oldest/newest scrub, bounded GPU memory, and real context recovery;
@@ -129,7 +132,7 @@ Release readiness also corrects a demonstrated installer defect: prior bundles d
 
 ## Pull-request checkpoint
 
-PR #8, rolling-history [PR #9](https://github.com/tcurtsinger/Mistr/pull/9), release-readiness [PR #10](https://github.com/tcurtsinger/Mistr/pull/10), and UI/live-site hardening [PR #11](https://github.com/tcurtsinger/Mistr/pull/11) are merged. Rendering quality [PR #12](https://github.com/tcurtsinger/Mistr/pull/12) is **ready for review**, not a draft. Local and packaged validation passed; GitHub CI was in progress with no comments or submitted reviews at this checkpoint. Only the repository owner merges.
+PR #8, rolling-history [PR #9](https://github.com/tcurtsinger/Mistr/pull/9), release-readiness [PR #10](https://github.com/tcurtsinger/Mistr/pull/10), UI/live-site hardening [PR #11](https://github.com/tcurtsinger/Mistr/pull/11), and rendering quality [PR #12](https://github.com/tcurtsinger/Mistr/pull/12) are merged. Radar-chrome hardening [PR #13](https://github.com/tcurtsinger/Mistr/pull/13) is **ready for review**, not a draft, from `codex/mistr-ui-runtime-hardening` on merged baseline `2c7f30d`. Only the repository owner merges.
 
 Review workflow:
 
@@ -141,7 +144,7 @@ Review workflow:
 6. Re-run affected local and packaged checks, commit, and push to the same branch.
 7. Never merge; only the user merges.
 
-## Next decision after this change merges
+## Next work after this checkpoint
 
 Do not begin national radar work. Continue owner-led UI and runtime hardening, then return to Store packaging only after the normal radar surface is accepted. Real sleep/wake and clean-machine installation are closed. The existing NSIS and MSI evidence remains useful, but new public packaging waits for this surface to stabilize.
 

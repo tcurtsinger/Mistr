@@ -23,9 +23,15 @@ try {
   const report = await evaluate(`(()=>({
     phase4:window.__MISTR_PHASE4__.report(),
     phase5:window.__MISTR_PHASE5__.report(),
+    phase6:window.__MISTR_PHASE6__.report(),
     bodyText:document.body.innerText,
-    topSite:document.querySelector('.context-selector strong')?.textContent?.trim(),
-    freshness:document.querySelector('.freshness')?.textContent?.trim(),
+    playbackText:document.querySelector('.playback-bar')?.innerText ?? '',
+    topSite:document.querySelector('[data-control=radar-sites]')?.dataset.displayedSite,
+    frameAge:(()=>{const output=document.querySelector('.frame-age');return {
+      text:output?.textContent?.trim() ?? null,
+      accessibleName:output?.getAttribute('aria-label') ?? null,
+      kind:output?.classList.contains('frame-age--current')?'current':output?.classList.contains('frame-age--historical')?'historical':null
+    }})(),
     error:document.querySelector('[role=alert]')?.textContent?.trim() ?? null
   }))()`);
   const failures = [];
@@ -33,13 +39,16 @@ try {
   if (report.phase4?.renderer?.metrics?.residentFrameCount !== 20) failures.push("installed archive loop is not resident");
   if (report.phase4?.renderer?.paintReceipt?.framebufferWidth <= 0) failures.push("installed archive has no GPU paint receipt");
   if (report.topSite !== "KTLX") failures.push("installed first launch does not paint KTLX");
-  if (report.freshness !== "ARCHIVE LOOP") failures.push("installed first launch does not label archive truth");
+  if (report.phase6?.sourceKind !== "nexrad_level2_archive_ii") failures.push("installed first launch does not preserve archive source truth");
+  if (report.frameAge?.kind !== "historical") failures.push("installed archive age is not historical");
+  if (!report.frameAge?.accessibleName?.startsWith("Historical scan,")) failures.push("installed archive age lacks non-color historical semantics");
+  if (/\b(?:FRESH|STALE|PAUSED|NEWEST)\b/i.test(report.playbackText)) failures.push("installed playback bar exposes removed status noise");
   if (report.error) failures.push(`installed first launch reports: ${report.error}`);
   const summary = {
     status: failures.length === 0 ? "PASS" : "FAIL",
     residentFrameCount: report.phase4?.renderer?.metrics?.residentFrameCount,
     topSite: report.topSite,
-    freshness: report.freshness,
+    frameAge: report.frameAge,
     failures,
   };
   await writeFile(resolve(output, `smoke-${port}.json`), `${JSON.stringify({ report, summary }, null, 2)}\n`);
@@ -81,6 +90,7 @@ async function waitForArchive() {
     try {
       const ready = await evaluate(`Boolean(
         window.__MISTR_PHASE4__
+        && window.__MISTR_PHASE6__
         && window.__MISTR_PHASE4__.report()?.renderer?.status === 'painted'
       )`);
       if (ready) return;

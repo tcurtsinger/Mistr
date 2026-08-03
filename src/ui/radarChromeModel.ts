@@ -13,10 +13,11 @@ export interface PlaybackLike {
   holdReason?: string;
 }
 
-export type FreshnessKind = "fresh" | "stale" | "archive" | "updating" | "error" | "waiting";
+export type FrameAgeKind = "current" | "historical";
 
-export interface FreshnessPresentation {
-  kind: FreshnessKind;
+export interface FrameAgePresentation {
+  accessibleLabel: string;
+  kind: FrameAgeKind;
   label: string;
 }
 
@@ -105,25 +106,27 @@ export function timelinePosition(
   return `${position} · ${historyLabel} ${frameCount}/${historyCapacity}`;
 }
 
-export function freshnessPresentation(
-  source: "live" | "archive" | "archive_frame" | "updating" | "error" | "waiting",
+export function frameAgePresentation(
   observedAtUnixMs: number | undefined,
   nowUnixMs: number,
-): FreshnessPresentation {
-  if (source === "archive") return { kind: "archive", label: "ARCHIVE LOOP" };
-  if (source === "archive_frame") return { kind: "archive", label: "ARCHIVE FRAME" };
-  if (source === "updating") return { kind: "updating", label: "UPDATING LIVE" };
-  if (source === "error") return { kind: "error", label: "RADAR ERROR" };
-  if (source === "waiting" || observedAtUnixMs === undefined) {
-    return { kind: "waiting", label: "WAITING FOR RADAR" };
+  latestLiveScan: boolean,
+): FrameAgePresentation {
+  if (observedAtUnixMs === undefined) {
+    return {
+      accessibleLabel: "Displayed scan age unavailable.",
+      kind: "historical",
+      label: "--:--",
+    };
   }
 
   const ageMs = Math.max(0, nowUnixMs - observedAtUnixMs);
   const ageSeconds = Math.floor(ageMs / 1_000);
-  if (ageSeconds < 600) {
-    return { kind: "fresh", label: `FRESH · ${formatAge(ageSeconds)}` };
-  }
-  return { kind: "stale", label: `STALE · ${formatAge(ageSeconds)}` };
+  const latestDescription = latestLiveScan ? "Latest live scan" : "Historical scan";
+  return {
+    accessibleLabel: `${latestDescription}, observed ${formatAccessibleAge(ageSeconds)} ago.`,
+    kind: latestLiveScan && ageSeconds < 600 ? "current" : "historical",
+    label: formatAge(ageSeconds),
+  };
 }
 
 export function liveFailureLabel(site: string, retrying: boolean): string {
@@ -163,4 +166,27 @@ export function formatAge(totalSeconds: number): string {
     return `${hours}h ${minutes.toString().padStart(2, "0")}m`;
   }
   return `${Math.floor(safeSeconds / 86_400)}d`;
+}
+
+export function formatAccessibleAge(totalSeconds: number): string {
+  const safeSeconds = Math.max(0, Math.floor(totalSeconds));
+  if (safeSeconds < 60) return `${safeSeconds} ${safeSeconds === 1 ? "second" : "seconds"}`;
+  if (safeSeconds < 3_600) {
+    const minutes = Math.floor(safeSeconds / 60);
+    const seconds = safeSeconds % 60;
+    return [
+      `${minutes} ${minutes === 1 ? "minute" : "minutes"}`,
+      seconds > 0 ? `${seconds} ${seconds === 1 ? "second" : "seconds"}` : null,
+    ].filter(Boolean).join(" ");
+  }
+  if (safeSeconds < 86_400) {
+    const hours = Math.floor(safeSeconds / 3_600);
+    const minutes = Math.floor((safeSeconds % 3_600) / 60);
+    return [
+      `${hours} ${hours === 1 ? "hour" : "hours"}`,
+      minutes > 0 ? `${minutes} ${minutes === 1 ? "minute" : "minutes"}` : null,
+    ].filter(Boolean).join(" ");
+  }
+  const days = Math.floor(safeSeconds / 86_400);
+  return `${days} ${days === 1 ? "day" : "days"}`;
 }
