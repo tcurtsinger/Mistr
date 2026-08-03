@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
+  acquireAllOrRelease,
   PackedSweepTransferClient,
   TransferClientError,
   type InvokeFunction,
@@ -41,6 +42,22 @@ function snapshot(generation: number, heldCredits = 0, session = 1): TransferSna
 }
 
 describe("PackedSweepTransferClient", () => {
+  it("releases every fulfilled parallel lease when a sibling request fails", async () => {
+    const released: number[] = [];
+    const failure = new Error("second request failed");
+    const successfulLease = Promise.resolve({
+      async release() {
+        released.push(1);
+      },
+    });
+
+    await expect(acquireAllOrRelease([
+      successfulLease,
+      Promise.reject(failure),
+    ])).rejects.toBe(failure);
+    expect(released).toEqual([1]);
+  });
+
   it("uses the existing leased-credit path for National manifests and chunks", async () => {
     const requests: Array<[string, Record<string, unknown> | undefined]> = [];
     let releases = 0;

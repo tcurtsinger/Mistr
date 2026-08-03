@@ -21,6 +21,7 @@ import { configureMapLibreWorker } from "./mapWorker";
 import { mapReadinessError, updateMapReadiness, type MapReadiness } from "./mapReadiness";
 import { assertChunkMatchesManifest } from "./packed-grid/packedGrid";
 import {
+  acquireAllOrRelease,
   PackedSweepTransferClient,
   tauriInvokeFunction,
   type Phase4ActivitySnapshot,
@@ -1260,7 +1261,7 @@ export function App() {
             if (manifest.chunks.length < 3) {
               throw new Error("National diagnostic requires at least three chunks");
             }
-            const [firstLease, secondLease] = await Promise.all([
+            const [firstLease, secondLease] = await acquireAllOrRelease([
               client.requestNationalChunk(0),
               client.requestNationalChunk(1),
             ]);

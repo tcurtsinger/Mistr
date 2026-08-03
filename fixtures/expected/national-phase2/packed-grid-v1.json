@@ -6,7 +6,7 @@
   "presentationFactor": 4,
   "manifestFile": "packed-grid-v1-manifest.bin",
   "manifestBytes": 2376,
-  "manifestSha256": "1c22aeb8f5627e22a298878a92728d3349e807f35f4f7cd156771a5f263e3bd1",
+  "manifestSha256": "053ac2ed46e6128701935027ed655b8bd972d3df12a9603791ab106458c94d60",
   "firstChunkFile": "packed-grid-v1-chunk-000.bin",
   "firstChunkBytes": 132274,
   "firstChunkSha256": "6f6a864360c84891b70f05ff2bc4ed0e2e741d16114d5d6fd2bbe7eed45edc9c",

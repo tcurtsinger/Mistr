@@ -80,6 +80,15 @@ The five UTF-8 strings begin exactly at byte 176, are each 1 through 256 bytes, 
 - provider `noaa-mrms-pds.s3.amazonaws.com`; and
 - an exact approved object key whose timestamp equals the manifest observation time.
 
+Grid coordinates use a north-west sample-anchor convention at every presentation level. The first latitude/longitude remains the first native sample represented by the level; each overview step is the native `0.01` degree step multiplied by the presentation factor. The final anchors are derived rather than copied from the base-grid endpoint:
+
+```text
+lastLongitude = firstLongitude + (width - 1) * longitudeStep
+lastLatitude  = firstLatitude  - (height - 1) * latitudeStep
+```
+
+This keeps dimensions, step, orientation, and endpoints self-consistent. An overview value still represents the complete native-cell reduction footprint beginning at its anchor; the exact base grid remains the interrogation authority.
+
 Each 72-byte descriptor is:
 
 | Relative offset | Bytes | Field |

@@ -149,6 +149,27 @@ export interface PackedGridLease<T extends PackedGridManifest | PackedGridChunk>
   release(): Promise<void>;
 }
 
+export async function acquireAllOrRelease<T extends { release(): Promise<void> }>(
+  requests: readonly Promise<T>[],
+): Promise<T[]> {
+  const settled = await Promise.allSettled(requests);
+  const fulfilled: T[] = [];
+  let rejected: PromiseRejectedResult | undefined;
+  for (const result of settled) {
+    if (result.status === "fulfilled") {
+      fulfilled.push(result.value as T);
+    } else if (!rejected) {
+      rejected = result;
+    }
+  }
+  if (!rejected) return fulfilled;
+
+  // A parallel sibling may already own a scarce backend transfer credit. Try
+  // every successful release before preserving the original acquisition error.
+  await Promise.allSettled(fulfilled.map((lease) => lease.release()));
+  throw rejected.reason;
+}
+
 export type TransferClientErrorCode =
   | "invalid_generation"
   | "session_not_open"

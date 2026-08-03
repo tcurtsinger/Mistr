@@ -28,6 +28,9 @@ const SOURCE_NATIONAL_MRMS: u8 = 1;
 const DOMAIN_CONUS: u8 = 1;
 const PRODUCT_MERGED_BASE_REFLECTIVITY_QC: u8 = 1;
 const ORIENTATION_NORTH_TO_SOUTH: u8 = 1;
+const MRMS_FIRST_LATITUDE_E6: i32 = 54_995_000;
+const MRMS_FIRST_LONGITUDE_E6: i32 = -129_995_000;
+const MRMS_BASE_STEP_E6: u32 = 10_000;
 
 #[derive(Debug, Error)]
 pub enum PackedGridError {
@@ -346,6 +349,22 @@ fn encode_manifest(
             "manifest is {total_length} bytes; limit is {PACKED_GRID_MANIFEST_LIMIT}"
         )));
     }
+    let width = u32::try_from(level.width)
+        .map_err(|_| PackedGridError::Bounds("level width exceeds u32".into()))?;
+    let height = u32::try_from(level.height)
+        .map_err(|_| PackedGridError::Bounds("level height exceeds u32".into()))?;
+    let first_latitude_e6 = degrees_e6(pyramid.grid.first_latitude_degrees)?;
+    let first_longitude_e6 = degrees_e6(pyramid.grid.first_longitude_degrees)?;
+    let longitude_step_e6 =
+        degrees_u32_e6(pyramid.grid.longitude_step_degrees * f64::from(level.factor))?;
+    let latitude_step_e6 =
+        degrees_u32_e6(pyramid.grid.latitude_step_degrees * f64::from(level.factor))?;
+    let last_latitude_e6 = regular_grid_last_e6(first_latitude_e6, latitude_step_e6, height, false)
+        .ok_or_else(|| PackedGridError::Bounds("level latitude transform overflowed".into()))?;
+    let last_longitude_e6 =
+        regular_grid_last_e6(first_longitude_e6, longitude_step_e6, width, true).ok_or_else(
+            || PackedGridError::Bounds("level longitude transform overflowed".into()),
+        )?;
     let mut bytes = vec![0u8; total_length];
     bytes[..4].copy_from_slice(PACKED_GRID_MAGIC);
     put_u16(&mut bytes, 4, PACKED_GRID_VERSION);
@@ -354,38 +373,14 @@ fn encode_manifest(
     put_u32(&mut bytes, 12, total_length as u32);
     put_u64(&mut bytes, 16, generation);
     put_i64(&mut bytes, 24, pyramid.observation_time_unix_ms);
-    put_u32(&mut bytes, 32, level.width as u32);
-    put_u32(&mut bytes, 36, level.height as u32);
-    put_i32(
-        &mut bytes,
-        40,
-        degrees_e6(pyramid.grid.first_latitude_degrees)?,
-    );
-    put_i32(
-        &mut bytes,
-        44,
-        degrees_e6(pyramid.grid.first_longitude_degrees)?,
-    );
-    put_i32(
-        &mut bytes,
-        48,
-        degrees_e6(pyramid.grid.last_latitude_degrees)?,
-    );
-    put_i32(
-        &mut bytes,
-        52,
-        degrees_e6(pyramid.grid.last_longitude_degrees)?,
-    );
-    put_u32(
-        &mut bytes,
-        56,
-        degrees_u32_e6(pyramid.grid.longitude_step_degrees * f64::from(level.factor))?,
-    );
-    put_u32(
-        &mut bytes,
-        60,
-        degrees_u32_e6(pyramid.grid.latitude_step_degrees * f64::from(level.factor))?,
-    );
+    put_u32(&mut bytes, 32, width);
+    put_u32(&mut bytes, 36, height);
+    put_i32(&mut bytes, 40, first_latitude_e6);
+    put_i32(&mut bytes, 44, first_longitude_e6);
+    put_i32(&mut bytes, 48, last_latitude_e6);
+    put_i32(&mut bytes, 52, last_longitude_e6);
+    put_u32(&mut bytes, 56, longitude_step_e6);
+    put_u32(&mut bytes, 60, latitude_step_e6);
     bytes[64] = orientation_code(pyramid.grid.row_orientation);
     bytes[65] = pyramid.encoding.bit_depth;
     put_u32(&mut bytes, 68, pyramid.encoding.reference_value_bits);
@@ -553,12 +548,26 @@ pub fn validate_packed_grid_manifest(
         || !presentation_factor.is_power_of_two()
         || width != MRMS_WIDTH.div_ceil(u32::from(presentation_factor))
         || height != MRMS_HEIGHT.div_ceil(u32::from(presentation_factor))
-        || get_i32(bytes, 40)? != 54_995_000
-        || get_i32(bytes, 44)? != -129_995_000
-        || get_i32(bytes, 48)? != 20_005_001
-        || get_i32(bytes, 52)? != -60_005_002
-        || get_u32(bytes, 56)? != 10_000 * u32::from(presentation_factor)
-        || get_u32(bytes, 60)? != 10_000 * u32::from(presentation_factor)
+    {
+        return Err(invalid_manifest(
+            "grid transform or presentation level changed",
+        ));
+    }
+    let level_step_e6 = MRMS_BASE_STEP_E6
+        .checked_mul(u32::from(presentation_factor))
+        .ok_or_else(|| invalid_manifest("presentation step overflowed"))?;
+    let expected_last_latitude_e6 =
+        regular_grid_last_e6(MRMS_FIRST_LATITUDE_E6, level_step_e6, height, false)
+            .ok_or_else(|| invalid_manifest("latitude transform overflowed"))?;
+    let expected_last_longitude_e6 =
+        regular_grid_last_e6(MRMS_FIRST_LONGITUDE_E6, level_step_e6, width, true)
+            .ok_or_else(|| invalid_manifest("longitude transform overflowed"))?;
+    if get_i32(bytes, 40)? != MRMS_FIRST_LATITUDE_E6
+        || get_i32(bytes, 44)? != MRMS_FIRST_LONGITUDE_E6
+        || get_i32(bytes, 48)? != expected_last_latitude_e6
+        || get_i32(bytes, 52)? != expected_last_longitude_e6
+        || get_u32(bytes, 56)? != level_step_e6
+        || get_u32(bytes, 60)? != level_step_e6
     {
         return Err(invalid_manifest(
             "grid transform or presentation level changed",
@@ -831,6 +840,17 @@ fn degrees_u32_e6(value: f64) -> Result<u32, PackedGridError> {
     Ok(scaled as u32)
 }
 
+fn regular_grid_last_e6(first: i32, step: u32, samples: u32, increasing: bool) -> Option<i32> {
+    let intervals = samples.checked_sub(1)?;
+    let delta = i64::from(step).checked_mul(i64::from(intervals))?;
+    let last = if increasing {
+        i64::from(first).checked_add(delta)?
+    } else {
+        i64::from(first).checked_sub(delta)?
+    };
+    i32::try_from(last).ok()
+}
+
 fn append(bytes: &mut [u8], cursor: &mut usize, value: &[u8]) -> Result<usize, PackedGridError> {
     let start = *cursor;
     let end = start
@@ -1073,6 +1093,12 @@ mod tests {
         assert_eq!(frame.summary.version, 1);
         assert_eq!(frame.summary.source_kind, "national_mrms");
         assert_eq!(frame.summary.chunks.len(), 28);
+        assert_eq!(frame.summary.first_latitude_degrees, 54.995);
+        assert_eq!(frame.summary.first_longitude_degrees, -129.995);
+        assert_eq!(frame.summary.last_latitude_degrees, 20.035);
+        assert_eq!(frame.summary.last_longitude_degrees, -60.035);
+        assert_eq!(frame.summary.latitude_step_degrees, 0.04);
+        assert_eq!(frame.summary.longitude_step_degrees, 0.04);
         let chunk = validate_packed_grid_chunk(&frame.chunks[0]).unwrap();
         assert_eq!(chunk.generation, 7);
         assert_eq!(chunk.chunk, frame.summary.chunks[0]);
@@ -1112,6 +1138,18 @@ mod tests {
         let mut bad_geometry = frame.manifest.clone();
         bad_geometry[descriptor_offset + 8] ^= 1;
         assert!(validate_packed_grid_manifest(&bad_geometry).is_err());
+
+        let mut duplicate_geometry = frame.manifest.clone();
+        duplicate_geometry.copy_within(
+            descriptor_offset..descriptor_offset + PACKED_GRID_DESCRIPTOR_BYTES,
+            descriptor_offset + PACKED_GRID_DESCRIPTOR_BYTES,
+        );
+        put_u32(
+            &mut duplicate_geometry,
+            descriptor_offset + PACKED_GRID_DESCRIPTOR_BYTES,
+            1,
+        );
+        assert!(validate_packed_grid_manifest(&duplicate_geometry).is_err());
 
         for offset in [68usize, 78, 112, 168] {
             let mut malformed = frame.chunks[0].clone();

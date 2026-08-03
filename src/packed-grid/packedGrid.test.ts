@@ -37,6 +37,12 @@ describe("PackedGrid v1 cross-language wire", () => {
       contentSha256: "1826ea8b575cc59c24433ab610197f5a1d5a8d91f20c61cf698ec1d6ff697b76",
       width: 1750,
       height: 875,
+      firstLatitudeDegrees: 54.995,
+      firstLongitudeDegrees: -129.995,
+      lastLatitudeDegrees: 20.035,
+      lastLongitudeDegrees: -60.035,
+      latitudeStepDegrees: 0.04,
+      longitudeStepDegrees: 0.04,
       presentationFactor: 4,
       bitDepth: 16,
       referenceValue: -9990,
@@ -88,5 +94,27 @@ describe("PackedGrid v1 cross-language wire", () => {
     const manifest = parsePackedGridManifest(manifestBytes);
     const chunk = await parsePackedGridChunk(fixture(CHUNK_PATH));
     expect(() => assertChunkMatchesManifest(manifest, chunk)).toThrow(PackedGridError);
+  });
+
+  it("derives chunk coordinates from each sequential index", async () => {
+    const manifestBytes = fixture(MANIFEST_PATH);
+    const manifestView = new DataView(manifestBytes.buffer);
+    const descriptorOffset = manifestView.getUint32(152, false);
+    const descriptorBytes = manifestView.getUint16(156, false);
+    manifestBytes.copyWithin(
+      descriptorOffset + descriptorBytes,
+      descriptorOffset,
+      descriptorOffset + descriptorBytes,
+    );
+    manifestView.setUint32(descriptorOffset + descriptorBytes, 1, false);
+    expect(() => parsePackedGridManifest(manifestBytes)).toThrowError(
+      expect.objectContaining({ code: "invalid_chunk_bounds" }),
+    );
+
+    const chunkBytes = fixture(CHUNK_PATH);
+    new DataView(chunkBytes.buffer).setUint32(80, 1, false);
+    await expect(parsePackedGridChunk(chunkBytes)).rejects.toMatchObject({
+      code: "invalid_chunk_bounds",
+    });
   });
 });

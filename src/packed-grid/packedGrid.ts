@@ -11,6 +11,9 @@ const RECORD_CHUNK = 2;
 const CHUNK_INTERIOR = 256;
 const CONTENT_HASH_START = 120;
 const CONTENT_HASH_END = 152;
+const MRMS_FIRST_LATITUDE_E6 = 54_995_000;
+const MRMS_FIRST_LONGITUDE_E6 = -129_995_000;
+const MRMS_BASE_STEP_E6 = 10_000;
 
 export type PackedGridErrorCode =
   | "truncated_header"
@@ -111,18 +114,23 @@ export function parsePackedGridManifest(
   const width = view.getUint32(32, false);
   const height = view.getUint32(36, false);
   const presentationFactor = view.getUint16(80, false);
+  const levelStepE6 = MRMS_BASE_STEP_E6 * presentationFactor;
+  const lastLatitudeE6 = regularGridLastE6(MRMS_FIRST_LATITUDE_E6, levelStepE6, height, false);
+  const lastLongitudeE6 = regularGridLastE6(MRMS_FIRST_LONGITUDE_E6, levelStepE6, width, true);
   if (
     presentationFactor < 1
     || presentationFactor > 16
     || !isPowerOfTwo(presentationFactor)
     || width !== Math.ceil(7000 / presentationFactor)
     || height !== Math.ceil(3500 / presentationFactor)
-    || view.getInt32(40, false) !== 54_995_000
-    || view.getInt32(44, false) !== -129_995_000
-    || view.getInt32(48, false) !== 20_005_001
-    || view.getInt32(52, false) !== -60_005_002
-    || view.getUint32(56, false) !== 10_000 * presentationFactor
-    || view.getUint32(60, false) !== 10_000 * presentationFactor
+    || view.getInt32(40, false) !== MRMS_FIRST_LATITUDE_E6
+    || view.getInt32(44, false) !== MRMS_FIRST_LONGITUDE_E6
+    || lastLatitudeE6 === null
+    || lastLongitudeE6 === null
+    || view.getInt32(48, false) !== lastLatitudeE6
+    || view.getInt32(52, false) !== lastLongitudeE6
+    || view.getUint32(56, false) !== levelStepE6
+    || view.getUint32(60, false) !== levelStepE6
     || bytes[64] !== 1
   ) {
     throw new PackedGridError("invalid_grid");
@@ -400,8 +408,11 @@ function validateDescriptor(
   width: number,
   height: number,
 ) {
-  const expectedX = descriptor.chunkX * CHUNK_INTERIOR;
-  const expectedY = descriptor.chunkY * CHUNK_INTERIOR;
+  const chunksX = Math.ceil(width / CHUNK_INTERIOR);
+  const expectedChunkX = expectedIndex % chunksX;
+  const expectedChunkY = Math.floor(expectedIndex / chunksX);
+  const expectedX = expectedChunkX * CHUNK_INTERIOR;
+  const expectedY = expectedChunkY * CHUNK_INTERIOR;
   const expectedInteriorWidth = Math.min(CHUNK_INTERIOR, width - expectedX);
   const expectedInteriorHeight = Math.min(CHUNK_INTERIOR, height - expectedY);
   const expectedHaloX = Math.max(0, expectedX - 1);
@@ -410,6 +421,8 @@ function validateDescriptor(
   const expectedHaloHeight = Math.min(height, expectedY + expectedInteriorHeight + 1) - expectedHaloY;
   if (
     descriptor.index !== expectedIndex
+    || descriptor.chunkX !== expectedChunkX
+    || descriptor.chunkY !== expectedChunkY
     || expectedX >= width
     || expectedY >= height
     || descriptor.interiorX !== expectedX
@@ -454,6 +467,20 @@ function asBytes(input: ArrayBuffer | Uint8Array) {
 
 function dataView(bytes: Uint8Array) {
   return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+}
+
+function regularGridLastE6(
+  first: number,
+  step: number,
+  samples: number,
+  increasing: boolean,
+): number | null {
+  if (!Number.isSafeInteger(step) || step < 0 || !Number.isSafeInteger(samples) || samples < 1) {
+    return null;
+  }
+  const delta = step * (samples - 1);
+  const last = increasing ? first + delta : first - delta;
+  return Number.isSafeInteger(last) && last >= -0x80000000 && last <= 0x7fffffff ? last : null;
 }
 
 function assertZero(
