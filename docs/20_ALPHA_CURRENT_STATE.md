@@ -4,7 +4,7 @@
 
 **Merged baseline:** [PR #13 - Harden the radar chrome](https://github.com/tcurtsinger/Mistr/pull/13), merge commit `28322ef`
 
-**Active change:** Radar legibility and weak-return presentation; pull request pending
+**Active change:** [PR #14 - Improve radar legibility and map context](https://github.com/tcurtsinger/Mistr/pull/14)
 
 **Branch:** `codex/mistr-radar-legibility`
 
@@ -136,7 +136,7 @@ Release readiness also corrects a demonstrated installer defect: prior bundles d
 
 ## Pull-request checkpoint
 
-PR #8, rolling-history [PR #9](https://github.com/tcurtsinger/Mistr/pull/9), release-readiness [PR #10](https://github.com/tcurtsinger/Mistr/pull/10), UI/live-site hardening [PR #11](https://github.com/tcurtsinger/Mistr/pull/11), rendering quality [PR #12](https://github.com/tcurtsinger/Mistr/pull/12), and radar-chrome hardening [PR #13](https://github.com/tcurtsinger/Mistr/pull/13) are merged. Radar legibility is active on `codex/mistr-radar-legibility`; its pull request is not yet open. Only the repository owner merges.
+PR #8, rolling-history [PR #9](https://github.com/tcurtsinger/Mistr/pull/9), release-readiness [PR #10](https://github.com/tcurtsinger/Mistr/pull/10), UI/live-site hardening [PR #11](https://github.com/tcurtsinger/Mistr/pull/11), rendering quality [PR #12](https://github.com/tcurtsinger/Mistr/pull/12), and radar-chrome hardening [PR #13](https://github.com/tcurtsinger/Mistr/pull/13) are merged. Radar legibility is ready for review in [PR #14](https://github.com/tcurtsinger/Mistr/pull/14) on `codex/mistr-radar-legibility`. It is not a draft. Only the repository owner merges.
 
 Review workflow:
 
