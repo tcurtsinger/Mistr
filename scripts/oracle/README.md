@@ -43,3 +43,15 @@ node scripts\compare-level3-n0s.mjs artifacts\phase-6\rust-n0s-ktlx.json artifac
 ```
 
 The committed, derived expected reports live under `fixtures/expected/phase-6/`; raw provider objects remain ignored.
+
+## National Phase 2 MRMS numeric oracle
+
+The National oracle uses ECMWF ecCodes as the independent GRIB decoder and Pillow only to read the embedded 16-bit PNG transport. It compares ecCodes dBZ with Mistr's raw-code/scaling formula at all 24,500,000 cells in each of four seasonal NOAA samples.
+
+```powershell
+python -m venv .oracle-venv
+.\.oracle-venv\Scripts\python.exe -m pip install -r scripts\oracle\requirements-national.txt
+npm run oracle:national
+```
+
+The command downloads exact hash-pinned public objects into ignored `fixtures/cache/mrms-oracle/` and regenerates the small `fixtures/expected/national-phase2/mrms-oracle.json` evidence file. The committed result includes decoder versions, object and normalized hashes, all-cell mismatch counts, status/value counts, point samples, and tiny windows; it never commits a downloaded observation or defines valid raw codes from observed values.

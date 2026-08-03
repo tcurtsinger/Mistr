@@ -247,6 +247,24 @@ The behavior-preserving coordinator phase must prove:
 
 Phase 1 exit requires `npm run verify`, documentation and public-repository checks, whitespace validation, and the existing packaged Phase 4, 5, and 6 paths. An unavailable packaged path is reported as unverified rather than silently passed.
 
+### National Phase 2 acquisition and wire gate
+
+Phase 2 adds source, cross-language, and packaged checks without weakening any Site gate:
+
+1. Exact object-key parsing rejects wrong products, paths, dates, timestamps, and hosts.
+2. Inventory parsing rejects foreign/truncated/malformed listings and orders candidates by measured observation time rather than response order.
+3. Response and expansion bounds reject oversized compressed/GRIB/PNG/normalized data and HTML/XML bodies returned with HTTP 200.
+4. The strict decoder rejects mutations to GRIB discipline/edition, section order, product, grid, Template 5.41 metadata, bit depth, scaling, bitmap/status, PNG shape/color/interlace, and filename/message time identity.
+5. Four seasonal NOAA samples compare every cell with independent ecCodes output; committed expected data contains hashes and small samples only.
+6. Synthetic raw codes absent from the oracle, including the structural endpoints, decode through the accepted GRIB formula rather than an observed-value lookup table.
+7. Strongest-valid overview reduction and missing/no-coverage priority are unit tested.
+8. Rust emits one `PackedGrid v1` manifest and chunk fixture that TypeScript parses and validates for source, grid, encoding, string/descriptor bounds, big-endian values, identity, and payload SHA-256.
+9. Corrupt manifests, chunks, geometry, length, reserved bytes, and payload hashes fail closed.
+10. National manifest/chunk transfers use the existing global broker; two concurrent leases succeed, a third returns `credit_exhausted`, and all credits return after release.
+11. The release/WebView2 diagnostic acquires and decodes 30 distinct current observations, simultaneously retains all 30 immutable compressed source objects, validates all 840 factor-4 chunks, proves the unchanged schema/renderer model below the 200 MiB target, transfers the newest complete working set, and restores the 20-frame KTLX Site loop without painting National.
+
+The dedicated packaged command is `npm run test:national:phase2:packaged`. Its report is generated under ignored `artifacts/national-phase-2/`. Phase 2 exit also requires `npm run verify`, `npm run docs:check`, `npm run public:check`, `git diff --check`, and unchanged packaged Phase 4, 5, and 6 regressions. The hidden `window.__MISTR_NATIONAL_PHASE2__` API is diagnostic-only; `window.__MISTR_PHASE4__`, `window.__MISTR_PHASE5__`, and `window.__MISTR_PHASE6__` remain unchanged.
+
 ## 7. Performance plan
 
 ### Test scenarios

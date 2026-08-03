@@ -66,7 +66,7 @@ impl GenerationToken {
         );
     }
 
-    fn ensure_current(&self) -> Result<(), LivePipelineError> {
+    pub(crate) fn ensure_current(&self) -> Result<(), LivePipelineError> {
         let current = self.current.load(Ordering::SeqCst);
         if current != self.generation {
             return Err(LivePipelineError::StaleGeneration {

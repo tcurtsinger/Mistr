@@ -1,0 +1,4 @@
+eccodes==2.44.0
+findlibs==0.1.3
+numpy==2.5.1
+pillow==12.3.0

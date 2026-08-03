@@ -33,7 +33,7 @@ pub struct TransferError {
 }
 
 impl TransferError {
-    fn new(code: &'static str, message: impl Into<String>) -> Self {
+    pub(crate) fn new(code: &'static str, message: impl Into<String>) -> Self {
         Self {
             code,
             message: message.into(),
@@ -281,7 +281,7 @@ impl TransferBroker {
         Ok(snapshot(&state))
     }
 
-    fn acquire(&self, session: u64, generation: u64) -> Result<(), TransferError> {
+    pub(crate) fn acquire(&self, session: u64, generation: u64) -> Result<(), TransferError> {
         let mut state = self.lock()?;
         ensure_current(&state, session, generation)?;
         if !state.active {
@@ -331,18 +331,22 @@ impl TransferBroker {
         Ok(snapshot(&state))
     }
 
-    fn finish_without_publish(&self, session: u64) {
+    pub(crate) fn finish_without_publish(&self, session: u64) {
         if let Ok(mut state) = self.inner.lock() {
             take_in_flight_credit(&mut state, session);
         }
     }
 
-    fn complete_for_publish(&self, session: u64, generation: u64) -> Result<(), TransferError> {
+    pub(crate) fn complete_for_publish(
+        &self,
+        session: u64,
+        generation: u64,
+    ) -> Result<(), TransferError> {
         let mut state = self.lock()?;
         complete_for_publish_locked(&mut state, session, generation)
     }
 
-    fn live_generation_token(
+    pub(crate) fn live_generation_token(
         &self,
         session: u64,
         generation: u64,

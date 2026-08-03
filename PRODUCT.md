@@ -26,9 +26,9 @@ The product earns additional capabilities only when they improve live storm insp
 
 ## Approved National Direction
 
-National radar is the approved next product milestone, but it is not part of the currently visible product. The active Phase 1 foundation introduces a typed radar-session coordinator and places the existing selected-site engine behind `SiteLevel2Session`. This internal boundary keeps requested-source intent separate from the source that actually painted, rejects stale generation receipts, rolls failed transitions back to the last painted source, and persists source choice only after authoritative GPU paint.
+National radar is the approved next product milestone, but it is not part of the currently visible product. Merged Phase 1 introduced the typed radar-session coordinator and placed the existing selected-site engine behind `SiteLevel2Session`. This internal boundary keeps requested-source intent separate from the source that actually painted, rejects stale generation receipts, rolls failed transitions back to the last painted source, and persists source choice only after authoritative GPU paint.
 
-Phase 1 does not add a `National` control, MRMS acquisition, a gridded renderer, National history, or a second active radar loop. The existing Site experience remains the only exposed radar source until the later static National phase can paint a complete, truthful CONUS observation. The approved phased product and engineering contract is [National Radar Implementation Plan](docs/26_NATIONAL_RADAR_IMPLEMENTATION_PLAN.md).
+The active Phase 2 branch adds a diagnostic-only NOAA MRMS acquisition, strict numeric decoder, value-aware overview generator, and `PackedGrid v1` transport. Its release-runtime evidence can acquire and transfer exact CONUS observations through the existing global two-credit broker, but it deliberately does not paint them or expose a `National` control. The existing Site experience remains the only exposed radar source until the later static National phase can paint a complete, truthful CONUS observation. The approved phased product and engineering contract is [National Radar Implementation Plan](docs/26_NATIONAL_RADAR_IMPLEMENTATION_PLAN.md).
 
 ## Operating Context
 
@@ -66,7 +66,7 @@ Phase 1 does not add a `National` control, MRMS acquisition, a gridded renderer,
 - A large settings surface or general-purpose storm-command-center shell.
 - macOS as a release-blocking acceptance platform.
 
-The approved post-Alpha National milestone does not retroactively make any of these capabilities part of the shipped Alpha surface. Documentation and UI must continue to distinguish the active internal foundation from a usable National product.
+The approved post-Alpha National milestone does not retroactively make any of these capabilities part of the shipped Alpha surface. Documentation and UI must continue to distinguish internal acquisition/wire diagnostics from a usable National product.
 
 ### Platform policy
 
@@ -88,7 +88,7 @@ The approved post-Alpha National milestone does not retroactively make any of th
 
 ## Evidence on Hand
 
-- The existing repository proves strict Level II acquisition/decoding, bounded predecessor backfill plus exact-next rolling live polling, bounded binary IPC, incremental GPU-resident history and playback, live progressive publication, cancellation, Level III `N0S` parity, and visible-first WebGL recovery.
+- The existing repository proves strict Level II acquisition/decoding, bounded predecessor backfill plus exact-next rolling live polling, bounded binary IPC, incremental GPU-resident history and playback, live progressive publication, cancellation, Level III `N0S` parity, and visible-first WebGL recovery. The active Phase 2 branch additionally proves strict diagnostic-only MRMS acquisition/decoding and `PackedGrid v1` transfer without presenting National radar as shipped.
 - Pinned public-data fixtures and expected results live under `fixtures/`.
 - Architecture and accepted engineering decisions live under `docs/`, including the packed wire, GPU renderer, resident playback, live freshness/fallback, and recovery records.
 - Packaged Windows validation scripts reproduce critical WebView2, 4K, performance, lifecycle, and recovery behavior.

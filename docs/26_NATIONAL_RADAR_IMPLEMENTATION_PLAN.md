@@ -4,7 +4,7 @@
 |---|---|
 | Decision date | 2026-08-03 |
 | Last plan amendment | 2026-08-03 — 20-observation retained history, level-of-detail GPU working set, theoretical-domain encoding, time-sliced uploads, and cross-source freshness evidence |
-| Status | Approved plan; Phase 1 foundation active on `codex/mistr-national-foundation`, not merged or user-visible |
+| Status | Approved plan; Phase 1 merged in PR #15; Phase 2 data/wire foundation active on `codex/mistr-national-mrms-foundation`, not user-visible |
 | Planned source | NOAA Multi-Radar/Multi-Sensor System (MRMS) `MergedBaseReflectivityQC` |
 | Initial geographic scope | Contiguous United States (CONUS) |
 | Initial retained history | 20 exact observations, approximately 38 minutes at the normal two-minute publication cadence |
@@ -16,7 +16,7 @@ This document defines the next Mistr radar milestone: a truthful, bounded Nation
 
 The plan deliberately avoids the failure modes demonstrated by GustAVO's national/site radar path. National radar will not be assembled from individual Level II sites inside Mistr, represented as a large set of animated MapLibre tile sources, or automatically substituted for site radar at a zoom threshold. It will be a separate NOAA-produced gridded observation type with the same generation, ownership, paint-receipt, playback, recovery, and UI-truth standards already required by Mistr.
 
-This remains the governing phased contract. The owner separately authorized Phase 1 on 2026-08-03. That authorization does not extend to MRMS acquisition, decoding, rendering, history, or visible National controls.
+This remains the governing phased contract. The owner authorized Phase 1 and merged it through PR #15, then separately authorized Phase 2 on 2026-08-03. Phase 2 authorization extends only to MRMS acquisition, strict decoding, numeric levels/chunks, `PackedGrid v1`, and hidden diagnostics; it does not authorize rendering, product history, exact point interrogation, or visible National controls.
 
 ## 2. Accepted product decisions
 
@@ -258,6 +258,8 @@ Development correctness is established against an independent decoder such as ec
 
 ### 6.5 PackedGrid v1
 
+The implemented byte-level Phase 2 contract is documented in [PackedGrid v1](27_PACKED_GRID_V1.md).
+
 National receives its own packed binary schema rather than pretending to be a polar sweep.
 
 The schema must identify:
@@ -466,7 +468,7 @@ This plan now contains a purpose-built numeric level-of-detail streaming subsyst
 
 ### Phase 1 — Foundation and behavior-preserving coordinator
 
-**Active branch status:** implemented and source/packaged validated for review on `codex/mistr-national-foundation`; PR evidence is recorded at the branch checkpoint. Nothing in this status claims that National radar exists or has shipped.
+**Merged status:** implemented and merged through PR #15 at commit `debf49b`. Nothing in this status claims that National radar exists or has shipped.
 
 Phase 1 branch evidence includes `npm run verify`, the packaged Phase 4 4K resident-playback gate, packaged Phase 5 live supersession/history, and both packaged Phase 6 recovery passes. The documented one-off Phase 4 stabilized-heap sample crossed on the first run and passed on the immediate unchanged rerun; every radar-specific gate passed in both runs, so the existing `DRF-004` reopen rule was not triggered.
 
@@ -483,6 +485,8 @@ Exit gate: current Site behavior and all existing validation remain unchanged th
 
 ### Phase 2 — MRMS acquisition, decoder, and PackedGrid
 
+**Active branch status:** implemented and source/packaged validated for review behind diagnostics on `codex/mistr-national-mrms-foundation`. No National renderer, timeline, paint receipt, or visible control is present.
+
 Deliverables:
 
 - fixed-host bounded inventory and object download;
@@ -496,6 +500,8 @@ Deliverables:
 - multi-season numeric oracle corpus used as confirmation, including synthetic valid-but-never-observed raw codes and malformed-input cases;
 - non-shipping 30-observation retention and working-set diagnostic proving that extension does not change the schema or renderer model;
 - diagnostic-only release-runtime acquisition and transfer evidence.
+
+Phase 2 branch evidence includes `npm run verify`, the dedicated National release/WebView2 diagnostic, and unchanged packaged Phase 4, 5, and 6 regressions. The final National run retained 30 immutable compressed observations in 44,094,473 bytes, decoded 30 distinct grids spanning 57.90 minutes, validated 840 factor-4 chunks, measured 96,243,964 bytes for 30 overview frames plus staging, proved the shared two-credit backpressure/release contract, transferred the newest 28-chunk observation, and restored the 20-frame KTLX Site loop.
 
 Exit gate: Mistr can acquire and transfer exact National observations safely, but exposes no unfinished product UI.
 
@@ -678,7 +684,7 @@ The implementation branch must keep the following synchronized with material dec
 
 The current-state checkpoint must continue to distinguish plans from shipped behavior. It must not claim National exists before the matching implementation and packaged evidence have merged.
 
-## 14. Phase 1 authorization checkpoint
+## 14. Phase authorization checkpoints
 
 The owner authorized Phase 1 on 2026-08-03. The implementation branch followed this startup sequence:
 
@@ -687,6 +693,14 @@ The owner authorized Phase 1 on 2026-08-03. The implementation branch followed t
 3. created `codex/mistr-national-foundation` without altering the protected SVGs;
 4. began Phase 1 only;
 5. retained current Site behavior and validation as the regression baseline; and
-6. will stop at the Phase 1 exit gate after commit, push, and a Ready-for-review PR.
+6. stopped at the Phase 1 exit gate, opened ready-for-review PR #15, and was merged by the owner at `debf49b`.
 
-Phase 2 remains blocked on Phase 1 review, owner merge, and separate owner authorization.
+The owner separately authorized Phase 2 after that merge. The Phase 2 branch:
+
+1. started at merged commit `debf49b` after verifying `main` and `origin/main` matched;
+2. preserved the two protected untracked SVG files without modification;
+3. implements only fixed-host MRMS acquisition/decoding, exact numeric representation, value-aware levels, `PackedGrid v1`, shared-credit transfer, bounded cache scaffolding, independent-oracle tests, and hidden release diagnostics;
+4. records an actual 30-observation diagnostic without changing the wire schema or working-set model; and
+5. will stop at the Phase 2 exit gate after commit, push, and a Ready-for-review PR.
+
+Phase 3 remains blocked on Phase 2 review, owner merge, and separate owner authorization.

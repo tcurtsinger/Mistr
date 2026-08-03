@@ -43,6 +43,11 @@
 | R31 | Palette styling hides meaningful weak precipitation or visually overstates reflectivity | Medium | High | Drizzle or snow disappears; ordinary rain shifts into yellow/red too early; a presentation cutoff is mislabeled as clutter removal | Preserve every valid raw code and native inspection; pin NOAA/NWS operational `SR_BREF` RGB anchors; bound the display-only alpha curve to non-positive through 20 dBZ; test exact unrounded conversion and all 256 entries; validate clear-air plus weak-precipitation scenes | Accepted presentation tradeoff for Alpha; broader seasonal corpus remains open |
 | R32 | Source coordination lets intent, stale work, or persistence outrun paint truth | Medium | Critical | Requested source labels early, old generation commits, failed request overwrites stored source | Typed `RadarSourceKey`; one coordinator; matching source/generation receipt; tested supersession and rollback; persistence callback only after accepted paint | Mitigated in Phase 1 unit tests and packaged Phase 5 supersession; future National path remains open |
 | R33 | Phase 1 refactor breaks established selected-site packaged diagnostics | Medium | Critical | Missing `__MISTR_PHASE*__` methods, archive race, history/polling change, or different GPU evidence | Preserve public diagnostic APIs; run Phase 4/5/6 packaged paths; compare existing gates without threshold relaxation | Mitigated by Phase 1 packaged Phase 4/5/6 passes; repeat every later phase |
+| R34 | NOAA MRMS changes object, GRIB2, PNG, grid, scaling, or status structure | Medium | Critical | Strict decoder rejects a new observation or numeric oracle disagrees | Fixed product-specific contract; exact diagnostic reason; multi-season oracle; fail closed and preserve painted radar; review provider changes before acceptance | Mitigated for the Phase 2 corpus and live packaged run; future format drift remains open |
+| R35 | Fixture observations become an accidental raw-code allowlist | Medium | Critical | Rare structurally valid code is rejected despite accepted metadata | Store exact `u16` raw codes plus GRIB scaling/status metadata; decode the complete structural domain by formula; test valid never-observed endpoints | Mitigated by Phase 2 formula tests and four-season full-cell oracle |
+| R36 | National chunks bypass or leak the global two-credit IPC bound | Medium | Critical | More than two leases, stuck credits after parse/cancel, or separate National pool | Reuse the sole `TransferBroker`; repeat identity in every payload; release on every failure; unit and packaged three-request backpressure proof | Mitigated by Phase 2 packaged acquisition/transfer; renderer upload ownership remains Phase 3 work |
+| R37 | A 20/30-frame National overview exceeds the GPU radar budget | Medium | Critical | Halo/staging ledger reaches 200 MiB target or 256 MiB ceiling | Value-aware level selection; separate retained/resident/painted truth; include halos and one staged frame; measured 30-frame diagnostic before product rendering | Mitigated for factor-4 payload ledger: 20+stage 65,197,524 bytes and 30+stage 96,243,964 bytes; actual GPU/fixed-resource evidence remains open |
+| R38 | Diagnostic MRMS plumbing is mistaken for shipped National radar | Medium | Critical | UI control, source label, timeline, or documentation claims National before a complete paint path | Hidden diagnostic API only; non-persisting coordinator transition; restore Site after evidence; explicit current-state/product wording; no National renderer in Phase 2 | Mitigated in Phase 2 branch; remains a release-review gate |
 
 ## Top risks by immediate priority
 
@@ -53,6 +58,7 @@
 5. R2/R3 — real-time chunk correctness.
 6. R30 — packaged-runtime proof.
 7. R32/R33 — source-transition truth and selected-site regression safety.
+8. R34/R36/R38 — strict National format, shared ownership, and no premature product exposure.
 
 ## Triggered stop/review conditions
 
@@ -67,7 +73,10 @@ Pause the current phase and perform a design review if:
 - Integration changes national mosaic semantics.
 - A dependency requires unbounded or arbitrary network access.
 - A stale source receipt or failed transition changes painted or persisted source truth.
-- Phase 1 requires exposing an incomplete National control or changing selected-site behavior.
+- Any pre-renderer phase requires exposing an incomplete National control or changing selected-site behavior.
+- A structurally valid raw code requires an observed-value allowlist, quantization, or wire-schema change.
+- National manifests/chunks require a second transfer-credit pool or exceed the existing two-credit bound.
+- The measured 30-observation working set reaches the 256 MiB hard radar ceiling or requires replacing `PackedGrid v1`.
 
 ## Risk review cadence
 
