@@ -50,7 +50,7 @@ For a valid Level II reflectivity code, the canonical conversion is exact:
 dBZ = (rawCode - offset) / scale
 ```
 
-Mistr does not round the result before palette lookup or point interrogation. Status is authoritative: below-threshold is transparent, range-folded remains an explicit categorical state, and an unknown or missing status never becomes a valid return. All valid codes, including weak clear-air returns, use the fully opaque NOAA/NWS operational `SR_BREF` reflectivity ramp rather than disappearing behind a hard display cutoff or being visually shifted into a warmer severity band.
+Mistr does not round the result before palette lookup or point interrogation. Status is authoritative: below-threshold is transparent, range-folded remains an explicit categorical state, and an unknown or missing status never becomes a valid return. Valid reflectivity keeps the NOAA/NWS operational `SR_BREF` RGB thresholds. A separate display-only curve makes non-positive dBZ transparent, progressively raises opacity from 0 through 20 dBZ, and leaves values at or above 20 dBZ fully opaque. This does not classify clutter or alter the native measured gate returned by inspection.
 
 The `Smooth` display mode may filter the spatial presentation inside a single measured observation. `Native` uses exact nearest-gate sampling. Neither mode changes normalized bytes, scale/offset metadata, scan time, freshness, playback truth, or the native dBZ returned for a map inspection. The complete boundary and acceptance contract is [Radar Rendering Quality](25_RADAR_RENDERING_QUALITY.md).
 

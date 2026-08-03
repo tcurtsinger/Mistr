@@ -118,6 +118,8 @@ The palette passes from black night through cobalt and rose into pale dawn, but 
 
 **The Weather Separation Rule.** Cyclorama color belongs to chrome, focus, and controlled seams. It is never blended over NEXRAD pixels, used to recolor the basemap, or allowed to imitate radar or warning severity.
 
+**The Operational Context Rule.** Land and water remain the base plane beneath radar. Neutral coastlines, major-road casing, boundaries, and important labels remain above it with light-and-dark contrast that survives changing radar colors. Minor street detail stays subdued. Global radar opacity is not used to make the map visible.
+
 **The Bounded Dawn Rule.** Pale pink and white are edge light and active-state material, not panel or page backgrounds.
 
 ## Typography
@@ -144,6 +146,8 @@ The palette passes from black night through cobalt and rose into pale dawn, but 
 The map fills the window. In Alpha, the top-center toolbar contains Mistr identity followed by a site icon that opens the canonical searchable site picker, a direct recenter icon, and an eye icon that opens the real two-state radar-view popup. The popup's visible labels are exactly `Smooth` and `Native`, with `Smooth` as the default, and the eye control exposes the tooltip `Radar View`. Base reflectivity at the lowest usable tilt is fixed Alpha scope, so product and elevation remain documented facts rather than inert control-like chrome.
 
 `Smooth` filters the spatial presentation of one measured observation. It does not interpolate between scan times, generate a frame, change decoded gates, or change the dBZ returned by inspection. `Native` shows the exact polar gates with nearest sampling. Changing this display choice therefore leaves the selected observation, site, measured time, numeric age, playback position, and painted-frame receipt unchanged.
+
+Reflectivity uses a shared display-only weak-return curve in both modes. Non-positive returns are visually suppressed, positive returns grow progressively to full opacity at 20 dBZ, and stronger operational colors remain unchanged. This treatment is never described as clutter removal: a visually hidden gate remains a valid measured gate, and inspection continues to report its native status and exact dBZ.
 
 The site control's accessible name and tooltip follow the observation that actually painted. While a different site is being acquired, a compact visible acquisition indicator and notice name both the radar that remains displayed and the pending site; the toolbar never claims the switch before GPU publication succeeds.
 
@@ -207,6 +211,12 @@ Chrome is content-sized rather than viewport-filling. The toolbar and playback b
 - Initial load, successful site changes, and recenter fit the selected radar's measured coverage into the available map surface.
 - Framing scales with the desktop window instead of falling back to a near-national view on 4K displays.
 - User pan and zoom remain unconstrained after the initial fit.
+
+### Operational Map Context
+- Coastlines, major roads, state boundaries, and important place labels sit above radar using neutral light-and-dark contrast rather than Stormlight color.
+- At detailed zooms, major-road casing and label halos remain legible across dark, green, yellow, red, and pale weak-return backgrounds; regional roads use restrained pale lines rather than a full casing pair. Neither treatment lowers the entire radar layer's opacity.
+- Minor roads, paths, railways, buildings, and secondary labels stay subdued so the map supplies location without becoming the stage.
+- The map uses the existing bundled OpenFreeMap source graph; visual context does not introduce another provider or network path.
 
 ### Status and Recovery
 - Preparation, partial-history loading, site acquisition, graphics recovery, and failures use established notice or playback regions rather than adding permanent status words to the normal bar.

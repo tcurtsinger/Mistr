@@ -18,7 +18,7 @@ The historical phase documents record how this architecture was selected, bounde
 - Ship Windows first while preserving a reasonable path to macOS validation.
 - Make one selected-site live base-reflectivity workflow dependable before adding national mosaic, velocity, alerts, cameras, or other weather surfaces.
 - Keep the measured, painted observation as the source of truth for time, freshness, and playback state.
-- Keep `Smooth` and `Native` as explicit spatial views of that same observation; inspection always reports the native gate/status truth and weak valid returns are never removed by a display cutoff.
+- Keep `Smooth` and `Native` as explicit spatial views of that same observation; inspection always reports native gate/status truth even when the display-only weak-return curve makes a measured low return transparent.
 - Preserve the fixture, packaged-runtime, performance, and recovery gates as part of product engineering.
 - Keep prototype phase labels, benchmark controls, and diagnostic internals out of the normal interface.
 
@@ -54,7 +54,7 @@ The numbered documents and phase reports below are historical architecture and a
 | [22_ALPHA_RELEASE_READINESS.md](22_ALPHA_RELEASE_READINESS.md) | Operational soak, installed-product, accessibility, lifecycle, and public Alpha release gates |
 | [23_ALPHA_UI_AND_SITE_HARDENING.md](23_ALPHA_UI_AND_SITE_HARDENING.md) | Full operational WSR-88D catalog, bounded discovery, startup/status truth, and hands-on UI remediation |
 | [24_VISIBLE_FIRST_STARTUP_AND_RECENT_BACKFILL.md](24_VISIBLE_FIRST_STARTUP_AND_RECENT_BACKFILL.md) | Basemap-independent first paint, lazy archive diagnostics, predecessor backfill, and truthful partial-history states |
-| [25_RADAR_RENDERING_QUALITY.md](25_RADAR_RENDERING_QUALITY.md) | Product reflectivity palette, `Smooth`/`Native` spatial modes, native interrogation truth, and rendering acceptance gates |
+| [25_RADAR_RENDERING_QUALITY.md](25_RADAR_RENDERING_QUALITY.md) | Product reflectivity palette and weak-return visibility, operational map context, `Smooth`/`Native` spatial modes, native interrogation truth, and rendering acceptance gates |
 | [phase-reports/PHASE_2_PACKED_WIRE_AND_IPC.md](phase-reports/PHASE_2_PACKED_WIRE_AND_IPC.md) | Phase 2 cross-language, packaged IPC, timing, and memory evidence |
 | [phase-reports/PHASE_3_STATIC_GPU_RENDERER.md](phase-reports/PHASE_3_STATIC_GPU_RENDERER.md) | Phase 3 packaged GPU, alignment, palette, coexistence, and performance evidence |
 | [phase-reports/PHASE_4_RESIDENT_PLAYBACK.md](phase-reports/PHASE_4_RESIDENT_PLAYBACK.md) | Phase 4 real 20-observation residency, 4K playback, paint truth, and resource evidence |
