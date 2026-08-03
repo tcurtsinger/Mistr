@@ -40,7 +40,7 @@ The product earns additional capabilities only when they improve live storm insp
 - Live high-resolution base reflectivity.
 - Smooth map pan and zoom.
 - A display-only weak-return visibility curve that hides non-positive reflectivity, progressively reveals 0–20 dBZ, and leaves stronger operational precipitation fully opaque. This is presentation rather than meteorological clutter classification; native measured dBZ remains available to inspection.
-- Operational map context above radar: coastlines, major roads, boundaries, and important place labels remain legible through precipitation without globally washing out radar colors.
+- Layered operational map context: local roads, buildings, railways, water names, and secondary places remain below radar, while quiet coastlines, major routes, boundaries, and important place labels remain legible above precipitation without globally washing out radar colors.
 - Two explicit spatial presentation modes for that same measured observation: `Smooth` by default and `Native` on demand. `Smooth` may soften gate edges within one scan; it never synthesizes time, changes decoded values, or changes the native dBZ returned by inspection. `Native` exposes the exact nearest sampled polar gate.
 - A bounded recent-observation loop with play, pause, and direct timeline scrubbing. Focused timeline arrow-key movement may be supported without adding dedicated previous/next buttons.
 - Clear measured time and numeric frame age during normal operation, with explicit preparation, loading, recovery, and failure notices when action or context is required.

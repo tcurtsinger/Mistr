@@ -50,9 +50,9 @@ const REFLECTIVITY_ANCHORS: readonly PaletteAnchor[] = [
 // 20 dBZ upward. It does not classify clutter or mutate a measured value.
 const REFLECTIVITY_OPACITY_ANCHORS: readonly OpacityAnchor[] = [
   { dbz: 0, alpha: 0 },
-  { dbz: 5, alpha: 96 },
-  { dbz: 10, alpha: 166 },
-  { dbz: 15, alpha: 217 },
+  { dbz: 5, alpha: 56 },
+  { dbz: 10, alpha: 120 },
+  { dbz: 15, alpha: 184 },
   { dbz: 20, alpha: 255 },
 ];
 

@@ -43,12 +43,12 @@ The Alpha reflectivity ramp is a meteorological data palette, not Stormlight chr
 Mistr keeps the official reference's operational RGB thresholds, then applies a separate display-only weak-return visibility curve to Level II reflectivity:
 
 - at or below 0 dBZ: alpha 0;
-- 5 dBZ: alpha 96/255;
-- 10 dBZ: alpha 166/255;
-- 15 dBZ: alpha 217/255; and
+- 5 dBZ: alpha 56/255;
+- 10 dBZ: alpha 120/255;
+- 15 dBZ: alpha 184/255; and
 - at or above 20 dBZ: alpha 255.
 
-Opacity interpolates from the exact unrounded dBZ value between those anchors. The curve is deliberately concave so positive weak precipitation remains more visible than it would under a linear fade while the broad pale disk formed by negative-dBZ clear-air returns no longer dominates the map. This is a presentation cutoff, not meteorological quality control. Negative dBZ can include genuine extremely light drizzle or snow, and 0–20 dBZ can contain either weak precipitation or non-weather return; the native gate/status/dBZ remains available to inspection. See [NOAA JetStream reflectivity guidance](https://www.noaa.gov/jetstream/reflectivity).
+Opacity interpolates from the exact unrounded dBZ value between those anchors. The curve stays close to linear while deliberately sitting slightly below a linear fade from 5 through 15 dBZ, reducing long-session shimmer from dense weak positive returns before precipitation becomes fully opaque at 20 dBZ. The broad pale disk formed by negative-dBZ clear-air returns remains absent. This is a presentation cutoff, not meteorological quality control. Negative dBZ can include genuine extremely light drizzle or snow, and 0–20 dBZ can contain either weak precipitation or non-weather return; the native gate/status/dBZ remains available to inspection. See [NOAA JetStream reflectivity guidance](https://www.noaa.gov/jetstream/reflectivity).
 
 In `Native`, every non-positive valid gate therefore has a transparent palette entry. In `Smooth`, that gate remains a status-valid spatial neighbor, so an adjacent positive return may fade into its footprint within the existing bounded one-gate/one-radial interpolation. This does not bridge a source-invalid status or missing radial and does not change the underlying gate truth.
 
@@ -56,14 +56,22 @@ Palette anchors may interpolate color and alpha for presentation, but each looku
 
 ## 5. Operational map context
 
-Radar remains below the bundled map's first symbol layer. The existing OpenFreeMap graph then keeps selected operational context above it without a second provider or global radar-opacity reduction:
+Radar is inserted at the explicit `mistr-coastline-context` boundary in the bundled style rather than below the map's first symbol. That boundary creates two intentional graphs without a second provider or global radar-opacity reduction.
 
-- one neutral coastline and water outline reuses the existing `openmaptiles` water source;
-- major roads use a pale casing with a dark center at detailed zooms so at least one edge remains legible across changing radar colors, while regional equivalents remain restrained pale lines;
-- state boundaries receive restrained neutral contrast; and
-- cities, towns, states, and highway labels use a pale face with a near-black halo.
+Below radar:
 
-Paths, minor streets, railways, buildings, and secondary place labels remain subdued. The map supplies location while radar remains the primary information surface.
+- buildings, aeroways, paths, minor/service/track roads, secondary/tertiary roads, railways, and one-way markers;
+- water names, local road names, towns, villages, suburbs, and secondary places; and
+- local road names only from close zoom, in title case and at subdued contrast.
+
+Above radar:
+
+- a cool neutral coastline/water outline reusing the existing `openmaptiles` water source;
+- motorways and primary/trunk roads only, with regional density disclosed progressively and restrained dual contrast at detailed zooms;
+- country and state boundaries; and
+- motorway/major-route identifiers plus important city, state, and country labels.
+
+The above-radar set is deliberately small. Its lines remain recognizable when sought but cannot become a pale wireframe or fragment the storm into equally salient road geometry. Important cities outrank route lines, missing point-icon sprites are not required, and minor context remains useful on the unobscured map beneath the radar.
 
 ## 6. Spatial display modes
 
@@ -110,20 +118,20 @@ Source-level evidence must prove:
 5. uploaded palette bytes remain correctly premultiplied for WebGL;
 6. `Smooth` and `Native` use the same observation and point interrogation result;
 7. filtering cannot create data across invalid/status boundaries or the azimuth seam;
-8. coastline, major-road, boundary, and important-label context remains above radar using only the existing map source graph; and
+8. the explicit context boundary keeps local detail below radar while coastline, major-route, boundary, and important-label context remains above it using only the existing map source graph; and
 9. the visible labels and accessible control name expose the active mode without implying a new observation or meteorological clutter classification.
 
 The combined packaged Windows/WebView2 matrix must cover direct scrub, resident playback, site switching, 4K pan/zoom, context loss/restoration, and compact/forced-colors inspection across both modes. Renderer-sensitive playback, recovery, responsive-layout, and accessibility paths exercise both modes directly; mode-independent acquisition ownership remains covered once per live workflow. The existing long-task, hot-path I/O/upload, GPU-memory, and painted-receipt gates do not relax for visual quality.
 
 ### Current Alpha evidence
 
-The release WebView2 renderer with the weak-return curve passed separate `Native` and `Smooth` 1,000-transition resident-playback scenarios at 3840x2160 with zero long tasks, zero hot-path acquisition, and zero hot-path frame uploads. Frame-time P95 was 6.2 ms in both modes. Switching `Native` to `Smooth` changed neither observation/receipt truth nor the 53,099,312-byte resident GPU set and caused no upload. Automated isolated-pixel evidence found substantial signal in both modes, a 62.7% changed-pixel ratio, and 27.9% background retained in common; generated overview and close-zoom captures show the broad weak-return field receding while positive structure remains visible.
+The release WebView2 renderer with the quiet weak-return curve and explicit map-context boundary passed separate `Native` and `Smooth` 1,000-transition resident-playback scenarios at 3840x2160 with zero long tasks, zero hot-path acquisition, and zero hot-path frame uploads. Frame-time P95 was 6.1 ms in Native and 6.2 ms in Smooth. Switching modes changed neither observation/receipt truth nor the 53,099,312-byte resident GPU set and caused no upload. Automated isolated-pixel evidence found substantial signal in both modes, a 53.7% changed-pixel ratio, and 33.0% background retained in common; generated overview and close-zoom captures show weak texture receding while positive structure remains visible. Runtime coexistence placed local context through `place_town` below radar and began the essential above-radar graph at `mistr-coastline-context`.
 
-A packaged live KOKX observation at `2026-08-03T03:30:55Z` reproduced the owner's Long Island/Northeast operating scene. The prior pale negative-dBZ disk was absent, coherent positive precipitation remained visible from weak blue/cyan through operational green/yellow bands, and neutral coastlines, major roads, boundaries, and important labels remained readable through the storm. The downloaded volume and screenshots remain ignored local validation artifacts.
+A packaged live KOKX observation at `2026-08-03T04:18:59Z` reproduced the owner's Long Island/Northeast operating scene. The prior pale negative-dBZ disk was absent, coherent positive precipitation remained visible from weak blue/cyan through operational green/yellow bands, important cities and major routes remained readable, and the former bright road mesh no longer fragmented the storm. The downloaded volume and screenshots remain ignored local validation artifacts.
 
 A timestamp-matched 2026-08-02 22:08:23Z live KAMX check compared Mistr's packaged Smooth Level II draw with the official KAMX `SR_BREF` WMS frame. The operational color bands and storm structure aligned without the prior early yellow/orange severity shift. The comparison validates presentation rather than source identity: NOAA's WMS product includes its own Level III/MRMS processing, while Mistr continues to render independently decoded Level II measurements.
 
-The same release build passed both modes at 3840x2160, 1100x700, and 1024x640, including keyboard mode selection, one-panel behavior, accessible active-mode naming, focus restoration, forced-colors focus, and reduced motion. Live acquisition with generation supersession, a successive observation, direct oldest/newest scrubbing, and two cold-start context-recovery passes also succeeded.
+The current quiet-map release passed both modes at 3840x2160, 1100x700, and 1024x640, including keyboard mode selection, one-panel behavior, accessible active-mode naming, focus restoration, forced-colors focus, and reduced motion. Both cold-start/context-recovery passes also succeeded with the explicit context boundary. Live acquisition ownership, generation supersession, successive observations, and direct oldest/newest scrubbing remain covered by the unchanged earlier packaged workflows, while the current binary repeated a live KOKX acquisition and matching GPU paint.
 
 ## 10. Rollback
 
