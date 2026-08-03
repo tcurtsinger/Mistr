@@ -13,7 +13,7 @@ Primary public buckets:
 | `s3://unidata-nexrad-level3` | Selected real-time Level III products | Implemented official `N0S` storm-relative velocity path |
 | Existing NOAA/NWS `SR_BREF` WMS | Current selected-site tiled reflectivity | Visual/latency comparison and fallback only |
 | Existing IEM RIDGE `N0S` | Current selected-site tiled SRV | Product parity, latency comparison, fallback only |
-| Existing IEM `USCOMP-N0Q` | National mosaic | Retained outside the raw selected-site engine |
+| NOAA `noaa-mrms-pds` `CONUS/MergedBaseReflectivityQC_00.50/` | Planned National CONUS base-reflectivity mosaic | Approved future numeric source; no Phase 1 acquisition or decoder |
 
 The current AWS Open Data registry names `unidata-nexrad-level2` as archive data, `unidata-nexrad-level2-chunks` as real-time Level II data, and `unidata-nexrad-level3` as selected real-time Level III data.
 
@@ -73,9 +73,23 @@ Mistr must not initially:
 
 ### 3.4 National radar
 
-Level II is per-site. `USCOMP-N0Q` or a future official gridded multi-radar product remains responsible for wide-area national context.
+Level II is per-site and Mistr will not combine sites into a mosaic. The approved future National source is NOAA MRMS `MergedBaseReflectivityQC` for CONUS: NOAA has already performed the multi-radar processing and quality control, while Mistr will validate, decode, preserve, and render the numeric grid without claiming mosaic authorship.
 
-Building a proper mosaic requires overlap policy, beam-height/quality considerations, terrain/blockage handling, time alignment, and multi-radar quality control. That is outside Mistr's initial scope.
+The active Phase 1 branch adds only typed source-session coordination. It performs no MRMS listing, download, gzip expansion, GRIB2/PNG decode, normalization, caching, or transfer. Those responsibilities begin in Phase 2 under the strict fixed-host, exact-object, size-bounded, fail-closed contract in [National Radar Implementation Plan](26_NATIONAL_RADAR_IMPLEMENTATION_PLAN.md).
+
+National's durable normalized baseline is a two-byte unsigned raw code plus declared GRIB scaling and status metadata. Development fixtures confirm correctness but never define an observed-value allowlist. Unsupported template, bit depth, scaling, packing, grid, or status metadata rejects the new observation and preserves the last painted source.
+
+### 3.5 Source identity boundary
+
+`RadarSourceKey` identifies user-level source intent independently of decoder provenance:
+
+```ts
+type RadarSourceKey =
+  | { kind: "site"; siteIcao: string }
+  | { kind: "national"; domain: "conus" };
+```
+
+Archive and live Level II observations for one station both satisfy the same top-level Site intent. Their exact provider source remains in observation provenance and paint truth. A later National observation will retain its MRMS product, domain, object key, hash, and measured time without being represented as a polar sweep.
 
 ## 4. Acquisition modes
 

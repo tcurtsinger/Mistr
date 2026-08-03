@@ -2,9 +2,9 @@
 
 ## 1. Repository intent
 
-Mistr is a separate prototype repository. Keeping it separate prevents experimental decoder, binary-schema, and WebGL work from destabilizing GustAVO before the feasibility gates pass.
+Mistr is the product repository. Its selected-site Windows Alpha is implemented; historical prototype documents remain engineering evidence rather than authority to copy GustAVO behavior.
 
-Implementation proceeds one evidence-gated phase at a time. It must not copy the entire GustAVO application into Mistr.
+National implementation proceeds one evidence-gated phase at a time. It must not recreate GustAVO's automatic handoff, dual timelines, MapLibre radar-tile engine, or directory-scanned network cache.
 
 ## 2. Planned stack
 
@@ -39,7 +39,9 @@ Mistr/
     diagnostics\
     packed-sweep\
     playback\
-    radar-coordinator\
+    radar-session\
+      RadarSessionCoordinator.ts
+      SiteLevel2Session.ts
     radar-resources\
     raw-radar-layer\
   src-tauri\
@@ -61,9 +63,11 @@ Mistr/
 
 Large source fixtures may live in approved external/LFS storage, but their manifests, hashes, expected samples, and scripted scenarios stay in the repository.
 
-## 4. Minimal prototype UI
+## 4. Current product and active-phase UI
 
-Mistr's UI exists to prove behavior, not to become a second GustAVO design project.
+Mistr's normal UI follows `PRODUCT.md` and `DESIGN.md`; diagnostics remain hidden behind packaged APIs rather than becoming a second weather dashboard.
+
+National Phase 1 changes no visible interface. It must not add a placeholder source picker, disabled National option, MRMS status, or diagnostic counters. The later complete static-National phase owns the explicit `National`/`Site` control and must preserve current keyboard, focus, compact-layout, painted-truth, and one-panel behavior.
 
 Required surfaces:
 
@@ -228,3 +232,6 @@ Artifacts must be named deterministically enough to compare runs and bounded eno
 - Add a regression test before or with every demonstrated defect fix.
 - Keep architecture, decoder, renderer, and UI changes separable in review.
 - User controls when any Mistr work is integrated or merged into GustAVO.
+- National phases use separate `codex/` branches and Ready-for-review pull requests; only the owner merges.
+- Phase 1 ends after the behavior-preserving coordinator, synchronized documentation, full regression evidence, and PR review. It does not begin MRMS or National UI work.
+- The pre-existing `assets/radar.svg` and `assets/recenter.svg` files remain outside Phase 1 unless separately authorized.

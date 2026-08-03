@@ -1,13 +1,13 @@
 # Mistr
 
-**Status:** Mistr is now the product. The Windows-first Alpha foundation is underway; the earlier Phase 0 through 6 prototype work is retained below as reproducible engine evidence, not as the product identity or normal interface.
+**Status:** Mistr is the product. The selected-site Windows Alpha is implemented and packaged-validated. National Phase 1 is an internal coordinator refactor in progress; National radar is not yet a visible or usable product.
 
 Mistr is a focused desktop radar instrument for selected-site storm inspection. Its Alpha product contract lives in [PRODUCT.md](../PRODUCT.md), and its implemented interface rules live in [DESIGN.md](../DESIGN.md).
 
 Its qualified radar path is:
 
 ```text
-AWS radar data -> decode and normalize -> packed binary IPC -> WebGL2 GPU resources -> MapLibre custom layer
+Radar Session Coordinator -> SiteLevel2Session -> AWS radar data -> decode and normalize -> packed binary IPC -> WebGL2 GPU resources -> MapLibre custom layer
 ```
 
 The historical phase documents record how this architecture was selected, bounded, tested, and reviewed. They remain useful to future maintainers, but forward product work is planned directly in Mistr rather than as a GustAVO integration rehearsal.
@@ -21,6 +21,7 @@ The historical phase documents record how this architecture was selected, bounde
 - Keep `Smooth` and `Native` as explicit spatial views of that same observation; inspection always reports native gate/status truth even when the display-only weak-return curve makes a measured low return transparent.
 - Preserve the fixture, packaged-runtime, performance, and recovery gates as part of product engineering.
 - Keep prototype phase labels, benchmark controls, and diagnostic internals out of the normal interface.
+- Keep the active Phase 1 source coordinator invisible: no National control appears until the National session, numeric grid renderer, and paint-truth path are complete in a later phase.
 
 ## Documentation map
 
@@ -55,6 +56,7 @@ The numbered documents and phase reports below are historical architecture and a
 | [23_ALPHA_UI_AND_SITE_HARDENING.md](23_ALPHA_UI_AND_SITE_HARDENING.md) | Full operational WSR-88D catalog, bounded discovery, startup/status truth, and hands-on UI remediation |
 | [24_VISIBLE_FIRST_STARTUP_AND_RECENT_BACKFILL.md](24_VISIBLE_FIRST_STARTUP_AND_RECENT_BACKFILL.md) | Basemap-independent first paint, lazy archive diagnostics, predecessor backfill, and truthful partial-history states |
 | [25_RADAR_RENDERING_QUALITY.md](25_RADAR_RENDERING_QUALITY.md) | Product reflectivity palette and weak-return visibility, operational map context, `Smooth`/`Native` spatial modes, native interrogation truth, and rendering acceptance gates |
+| [26_NATIONAL_RADAR_IMPLEMENTATION_PLAN.md](26_NATIONAL_RADAR_IMPLEMENTATION_PLAN.md) | Approved explicit-source CONUS MRMS plan with 20 exact retained observations, a level-of-detail GPU working set designed for later 30-frame extension, phased delivery, and acceptance gates; Phase 1 foundation is active and no National UI/data path exists yet |
 | [phase-reports/PHASE_2_PACKED_WIRE_AND_IPC.md](phase-reports/PHASE_2_PACKED_WIRE_AND_IPC.md) | Phase 2 cross-language, packaged IPC, timing, and memory evidence |
 | [phase-reports/PHASE_3_STATIC_GPU_RENDERER.md](phase-reports/PHASE_3_STATIC_GPU_RENDERER.md) | Phase 3 packaged GPU, alignment, palette, coexistence, and performance evidence |
 | [phase-reports/PHASE_4_RESIDENT_PLAYBACK.md](phase-reports/PHASE_4_RESIDENT_PLAYBACK.md) | Phase 4 real 20-observation residency, 4K playback, paint truth, and resource evidence |

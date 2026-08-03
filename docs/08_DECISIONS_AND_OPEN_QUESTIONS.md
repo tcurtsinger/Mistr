@@ -78,6 +78,50 @@
 
 **Reason:** It is not a shader feature and requires algorithmic/meteorological validation.
 
+### D013 — National is an explicit source, not a zoom handoff
+
+**Decision:** The future top-level choices are `National` and `Site`. Mistr never switches between them automatically from camera zoom.
+
+**Reason:** Explicit intent avoids blank/oscillating handoffs and prevents camera state from silently changing the product and timeline.
+
+### D014 — NOAA MRMS is the National numeric source
+
+**Decision:** Use NOAA `MergedBaseReflectivityQC` for CONUS. Mistr validates and renders NOAA's processed quality-controlled mosaic; it does not merge Level II sites or claim mosaic authorship.
+
+**Reason:** This preserves numeric dBZ/status truth without recreating a scientifically complex mosaic or depending on provider-colored WMS tiles.
+
+### D015 — One typed Radar Session Coordinator
+
+**Decision:** `RadarSourceKey` is `{ kind: "site", siteIcao } | { kind: "national", domain: "conus" }`. One coordinator owns source intent, one active transition generation, painted-source truth, receipt acceptance, rollback, and persistence after paint.
+
+**Reason:** UI state, data sessions, and renderers must not maintain independent source or timeline authority.
+
+**Phase 1 result:** `RadarSessionCoordinator` and `SiteLevel2Session` implement this boundary around current Site behavior. No National session, control, acquisition, or renderer is present yet.
+
+### D016 — Separate source sessions and renderers
+
+**Decision:** Preserve the existing polar `SiteLevel2Session` and add a later `NationalMrmsSession` with a numeric-grid renderer. Do not pretend a gridded MRMS observation is a polar sweep or MapLibre tile loop.
+
+**Reason:** The products have different geometry, decoding, working sets, and interrogation paths but must share transition and paint-truth semantics.
+
+### D017 — Independent timelines, one painted source
+
+**Decision:** Site and National never share or merge timelines, and Mistr never keeps two complete active loops. The old source may remain visible only until the replacement completely paints.
+
+**Reason:** This preserves truthful source/time/age/dBZ identity and bounds resources during transition.
+
+### D018 — National history separates retained from resident
+
+**Decision:** Rust retains 20 exact MRMS observations while the GPU owns a bounded presentation-level working set. The architecture must support a later 30-observation diagnostic without replacing the schema, renderer, cache, timeline, or source coordinator.
+
+**Reason:** Twenty full 7,000 by 3,500 native grids cannot fit the radar GPU budget.
+
+### D019 — Playback locks to one common complete quality
+
+**Decision:** Active playback and timeline dragging use the finest complete presentation level available for every playable National observation at the viewport. Fine selected-frame refinement occurs only after pause or scrub settle.
+
+**Reason:** Missing fine detail must not stall motion or make frames alternate visibly between coarse and detailed quality.
+
 ## 2. Decisions required before implementation
 
 ### Q001 — Level II decoder dependency
@@ -185,7 +229,7 @@ Decide Git LFS, release assets, internal artifact storage, or another durable me
 - Storm-motion derivation.
 - 3D volume rendering and cross-sections.
 - Derived products such as VIL, echo tops, hail, rotation, or storm tracking.
-- Raw/gridded national mosaic replacement.
+- National domains outside CONUS and additional MRMS products.
 - Multi-radar/quad-pane view.
 - macOS/Linux product support.
 - Offline complete radar archive.
