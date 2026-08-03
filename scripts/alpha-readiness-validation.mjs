@@ -20,6 +20,12 @@ export function validateAlphaReadiness(report) {
     requireGate(failures, viewport?.scrollWidth === width && viewport?.scrollHeight === height, `${prefix} has document overflow`);
     requireGate(failures, viewport?.persistentControlsInside === true, `${prefix} clips a persistent instrument`);
     requireGate(failures, viewport?.undersizedControls?.length === 0, `${prefix} has a control below the 24px target minimum`);
+    requireGate(
+      failures,
+      viewport?.toolbarTargetSizes?.length === 3
+        && viewport.toolbarTargetSizes.every(target => target.width >= 40 && target.height >= 40),
+      `${prefix} has a radar toolbar target below 40px`,
+    );
     requireGate(failures, viewport?.openPanelCount === 0, `${prefix} unexpectedly starts with a panel open`);
   }
 

@@ -61,8 +61,8 @@ components:
     backgroundColor: "{colors.instrument-black}"
     textColor: "{colors.day-white}"
     rounded: "{rounded.instrument}"
-    height: "42px"
-    padding: "3px 5px"
+    height: "44px"
+    padding: "1px 5px"
   playback-bar:
     backgroundColor: "{colors.instrument-black}"
     textColor: "{colors.day-white}"

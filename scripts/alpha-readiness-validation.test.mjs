@@ -15,6 +15,11 @@ function validReport() {
         displayMode,
         persistentControlsInside: true,
         undersizedControls: [],
+        toolbarTargetSizes: [
+          { name: "Choose radar site. KTLX is displayed.", width: 40, height: 40 },
+          { name: "Recenter radar on KTLX", width: 40, height: 40 },
+          { name: "Radar view. Smooth selected.", width: 40, height: 40 },
+        ],
         openPanelCount: 0,
       }))
     )),
@@ -78,6 +83,7 @@ describe("Alpha readiness packaged validation", () => {
   it.each([
     ["document overflow", (report) => { report.viewports[2].scrollWidth += 1; }],
     ["control target", (report) => { report.viewports[1].undersizedControls = ["button"]; }],
+    ["toolbar target", (report) => { report.viewports[0].toolbarTargetSizes[1].width = 36; }],
     ["focus restoration", (report) => { report.keyboard.contextEscapeReturn = ""; }],
     ["toolbar navigation", (report) => { report.keyboard.toolbarViewFocus = ""; }],
     ["view tooltip", (report) => { report.keyboard.viewTooltip = "View"; }],

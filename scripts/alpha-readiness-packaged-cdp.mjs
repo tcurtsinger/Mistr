@@ -112,6 +112,10 @@ async function captureViewport() {
         const value = rect(element);
         return element.type !== 'range' && (value.width < 24 || value.height < 24);
       }).map(element => element.getAttribute('aria-label') || element.textContent.trim()),
+      toolbarTargetSizes:[...document.querySelectorAll('.context-tool')].map(element => {
+        const value=rect(element);
+        return {name:element.getAttribute('aria-label'),width:value.width,height:value.height};
+      }),
       openPanelCount:document.querySelectorAll('.tool-panel').length,
     };
   })()`);

@@ -90,9 +90,9 @@ button { color: inherit; }
   left: 50%;
   display: flex;
   align-items: center;
-  min-height: 42px;
+  min-height: 44px;
   max-width: calc(100vw - 184px);
-  padding: 3px 5px;
+  padding: 1px 5px;
   border-radius: 12px;
   transform: translateX(-50%);
 }
@@ -121,8 +121,8 @@ button { color: inherit; }
 
 .context-tool {
   position: relative;
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
   display: grid;
   place-items: center;
   padding: 0;
