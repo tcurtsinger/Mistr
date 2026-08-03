@@ -177,6 +177,29 @@ describe("quiet operational radar map context", () => {
     }
   });
 
+  it("reveals state and unnetworked routes only with the detailed road graph", () => {
+    const regionalOpacity = [
+      "interpolate",
+      ["linear"],
+      ["zoom"],
+      6.75,
+      [
+        "match",
+        ["get", "network"],
+        ["us-interstate", "us-highway"],
+        1,
+        0,
+      ],
+      7.25,
+      1,
+    ];
+
+    expect(paint("highway_major_context_casing")["line-opacity"])
+      .toEqual(regionalOpacity);
+    expect(paint("highway_major_context")["line-opacity"])
+      .toEqual(regionalOpacity);
+  });
+
   it("restricts bright road labels to major classes and subdues local labels below radar", () => {
     expect(layer("highway_name_other")).toMatchObject({ minzoom: 10 });
     expect(filter("highway_name_other"))
