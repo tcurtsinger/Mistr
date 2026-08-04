@@ -1604,7 +1604,9 @@ export class UploadFrameBudget {
 
   rowsForSlice(remainingRows: number): number {
     const affordable = Math.floor((this.budgetMs - this.spentMs) / this.estimatedMsPerRow);
-    return Math.max(MINIMUM_UPLOAD_ROWS_PER_SLICE, Math.min(affordable, remainingRows));
+    // Clamp to the remaining rows last: a tail band shorter than the minimum
+    // must upload exactly the rows that exist, never a padded 32-row band.
+    return Math.min(remainingRows, Math.max(MINIMUM_UPLOAD_ROWS_PER_SLICE, affordable));
   }
 
   recordSlice(rowCount: number, elapsedMs: number): void {

@@ -73,6 +73,18 @@ describe("National upload frame budget", () => {
     expect(frames.count()).toBe(2);
   });
 
+  it("never sizes a slice past the remaining tail rows", async () => {
+    stubAnimationFrames();
+    const budget = new UploadFrameBudget(4);
+    await budget.yieldIfSpent();
+
+    // A 258-row halo chunk ends in a tail band shorter than the minimum.
+    expect(budget.rowsForSlice(2)).toBe(2);
+    expect(budget.rowsForSlice(31)).toBe(31);
+    budget.recordSlice(32, 0.1);
+    expect(budget.rowsForSlice(2)).toBe(2);
+  });
+
   it("rejects a non-positive budget", () => {
     expect(() => new UploadFrameBudget(0)).toThrow(
       "National upload frame budget must be positive",
