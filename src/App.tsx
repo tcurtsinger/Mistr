@@ -1016,6 +1016,19 @@ export function App() {
         }
         return reachedHistoryLimit && historyLimit < MAX_LIVE_HISTORY_FRAMES;
       };
+      const continueLiveBackfillAndPolling = (
+        site: string,
+        pollingSession: number,
+        historyLimit = diagnosticHistoryLimit,
+      ) => {
+        void runLiveBackfill(site, pollingSession, historyLimit).then(
+          (stoppedAtLimit) => {
+            if (!cancelled && pollingSession === livePollingSession && !stoppedAtLimit) {
+              void runLivePolling(site, pollingSession);
+            }
+          },
+        );
+      };
       const startLiveSession = async (
         site: string,
         requestedGeneration?: number,
@@ -1029,11 +1042,7 @@ export function App() {
         const report = await acquireLive(site, false, 180, "after", requestedGeneration);
         if (!cancelled && pollingSession === livePollingSession) {
           setLiveHistoryStatus("loading");
-          void runLiveBackfill(site, pollingSession, historyLimit).then((stoppedAtLimit) => {
-            if (!cancelled && pollingSession === livePollingSession && !stoppedAtLimit) {
-              void runLivePolling(site, pollingSession);
-            }
-          });
+          continueLiveBackfillAndPolling(site, pollingSession, historyLimit);
         }
         return report;
       };
@@ -1165,13 +1174,7 @@ export function App() {
         nationalWorkingSetRef.current = null;
         latestNationalPhase3 = null;
         setNationalPhase3(null);
-        void runLiveBackfill(model.siteIcao, pollingSession, diagnosticHistoryLimit).then(
-          (stoppedAtLimit) => {
-            if (!cancelled && pollingSession === livePollingSession && !stoppedAtLimit) {
-              void runLivePolling(model.siteIcao, pollingSession);
-            }
-          },
-        );
+        continueLiveBackfillAndPolling(model.siteIcao, pollingSession);
         radarSessionCoordinatorRef.current!.synchronizePaint(
           radarPaintIdentity(model, receipt),
         );
@@ -1217,6 +1220,28 @@ export function App() {
         liveBackfillCursor = null;
         modelsById.clear();
         setLiveHistoryStatus(undefined);
+      };
+
+      const resumeSitePollingAfterNationalFailure = (generation: number) => {
+        const sourceState = radarSessionCoordinatorRef.current!.snapshot();
+        const paintedSite = sourceState.painted?.source.kind === "site"
+          ? sourceState.painted.source.siteIcao
+          : null;
+        if (
+          cancelled
+          || transferGeneration !== generation
+          || sourceState.transition
+          || !paintedSite
+          || !layer
+          || !controller
+          || !residentLiveHistory
+          || residentLiveHistory.length === 0
+          || residentLiveHistory.some((model) => model.siteIcao !== paintedSite)
+        ) return;
+
+        livePollingSession += 1;
+        const pollingSession = livePollingSession;
+        continueLiveBackfillAndPolling(paintedSite, pollingSession);
       };
 
       const ensureNationalLayer = () => {
@@ -1392,6 +1417,9 @@ export function App() {
           interrogationObservationRef.current = null;
           removeSiteAfterNationalPaint();
           focusNational(instance);
+        },
+        onTransitionFailed: (_error, generation) => {
+          resumeSitePollingAfterNationalFailure(generation);
         },
       });
       nationalMrmsSessionRef.current = nationalMrmsSession;

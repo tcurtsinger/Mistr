@@ -16,6 +16,7 @@ export interface NationalMrmsSessionOptions<T> {
   nextGeneration(): number;
   acquireAndPaint(generation: number): Promise<NationalMrmsPaintResult<T>>;
   onPaintAccepted?(value: T, paint: RadarPaintIdentity): void;
+  onTransitionFailed?(error: unknown, generation: number): void;
 }
 
 export class NationalMrmsSession<T> {
@@ -38,6 +39,9 @@ export class NationalMrmsSession<T> {
     } catch (error) {
       const wasCurrent = this.options.coordinator.isCurrent(transition);
       this.options.coordinator.failTransition(transition, error);
+      if (wasCurrent) {
+        this.options.onTransitionFailed?.(error, transition.generation);
+      }
       if (!wasCurrent && !(error instanceof RadarSourceSupersededError)) {
         throw new RadarSourceSupersededError(
           `National transition ${transition.id} was superseded before completion`,
