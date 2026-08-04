@@ -140,17 +140,24 @@ export class NationalPlaybackController {
     this.layer.setPlaybackQualityLock(4);
     this.emit();
     this.beginQualityUpgrade();
-    return this.ensureCommonSelection(4).then(
-      () => {
-        if (this.playing && this.playRequest === request && !this.operation) {
-          this.scheduleNext(this.dwellForCurrent());
-        }
-      },
-      (error) => {
+    return (async () => {
+      // A pause can land while a selection is still awaiting its paint
+      // receipt, leaving that operation in flight with the play control
+      // already re-enabled. That settling selection is part of this start:
+      // await it instead of rejecting the user's click against it.
+      const pending = this.operation;
+      if (pending) await pending.catch(() => {});
+      if (this.disposed || !this.playing || this.playRequest !== request) return;
+      try {
+        await this.ensureCommonSelection(4);
+      } catch (error) {
         if (this.playRequest === request) this.stopPlayback();
         throw error;
-      },
-    );
+      }
+      if (this.playing && this.playRequest === request && !this.operation) {
+        this.scheduleNext(this.dwellForCurrent());
+      }
+    })();
   }
 
   /**

@@ -348,6 +348,45 @@ describe("NationalPlaybackController", () => {
     expect(refined).toEqual([observationId(observations.at(-1)!)]);
   });
 
+  it("restarts cleanly when play is clicked while a paused selection still awaits paint", async () => {
+    vi.useFakeTimers();
+    const observations = frames(3);
+    const layer = new FakeNationalLayer(observations);
+    let finishPaint!: (receipt: NationalPaintReceipt) => void;
+    let pendingPaint = new Promise<NationalPaintReceipt>((resolve) => {
+      finishPaint = resolve;
+    });
+    let holdNextPaint = true;
+    vi.spyOn(layer, "selectResidentAndWait").mockImplementation(async (id, factor) => {
+      layer.selected = id;
+      layer.presentationFactor = factor;
+      layer.selectFactors.push(factor);
+      if (holdNextPaint) {
+        holdNextPaint = false;
+        return pendingPaint;
+      }
+      return layer.receipt();
+    });
+    const controller = new NationalPlaybackController(layer, observations, {
+      dwellMs: 100,
+      latestDwellMs: 100,
+    });
+    controller.establishInitialPaint(layer.receipt());
+
+    const firstPlay = controller.play();
+    await vi.waitFor(() => expect(layer.selectFactors.length).toBe(1));
+    controller.pause();
+    // The pause left the first selection awaiting its paint; a second click
+    // must join that settling paint rather than reject against it.
+    const secondPlay = controller.play();
+    finishPaint(layer.receipt());
+    await firstPlay.catch(() => {});
+    await expect(secondPlay).resolves.toBeUndefined();
+    expect(controller.snapshot().playing).toBe(true);
+    expect(layer.selectFactors.length).toBeGreaterThan(1);
+    controller.pause();
+  });
+
   it("uses the same timeline model for a non-shipping 30-frame diagnostic", () => {
     const observations = frames(30);
     const layer = new FakeNationalLayer(observations);
