@@ -13,6 +13,7 @@ export interface SiteLevel2SessionOptions<T> {
   readonly coordinator: RadarSessionCoordinator;
   readonly nextGeneration: () => number;
   readonly acquireAndPaint: SiteLevel2AcquireAndPaint<T>;
+  readonly onPaintAccepted?: (value: T, paint: RadarPaintIdentity) => void;
 }
 
 export type SiteLevel2AcquireAndPaint<T> = (
@@ -33,11 +34,13 @@ export class SiteLevel2Session<T> {
   private readonly coordinator: RadarSessionCoordinator;
   private readonly nextGeneration: () => number;
   private readonly acquireAndPaint: SiteLevel2SessionOptions<T>["acquireAndPaint"];
+  private readonly onPaintAccepted?: SiteLevel2SessionOptions<T>["onPaintAccepted"];
 
   constructor(options: SiteLevel2SessionOptions<T>) {
     this.coordinator = options.coordinator;
     this.nextGeneration = options.nextGeneration;
     this.acquireAndPaint = options.acquireAndPaint;
+    this.onPaintAccepted = options.onPaintAccepted;
   }
 
   async start(siteIcao: string, options: SiteLevel2StartOptions = {}): Promise<T> {
@@ -70,6 +73,7 @@ export class SiteLevel2Session<T> {
           `site transition ${transition.id} was superseded before paint acceptance`,
         );
       }
+      this.onPaintAccepted?.(result.value, result.paint);
       return result.value;
     } catch (error) {
       const wasCurrent = this.coordinator.isCurrent(transition);

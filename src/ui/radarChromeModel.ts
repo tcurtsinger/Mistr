@@ -110,6 +110,7 @@ export function frameAgePresentation(
   observedAtUnixMs: number | undefined,
   nowUnixMs: number,
   latestLiveScan: boolean,
+  newestLabel = "Latest live scan",
 ): FrameAgePresentation {
   if (observedAtUnixMs === undefined) {
     return {
@@ -121,7 +122,7 @@ export function frameAgePresentation(
 
   const ageMs = Math.max(0, nowUnixMs - observedAtUnixMs);
   const ageSeconds = Math.floor(ageMs / 1_000);
-  const latestDescription = latestLiveScan ? "Latest live scan" : "Historical scan";
+  const latestDescription = latestLiveScan ? newestLabel : "Historical scan";
   return {
     accessibleLabel: `${latestDescription}, observed ${formatAccessibleAge(ageSeconds)} ago.`,
     kind: latestLiveScan && ageSeconds < 600 ? "current" : "historical",

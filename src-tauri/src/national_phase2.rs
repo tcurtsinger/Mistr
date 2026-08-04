@@ -1,10 +1,12 @@
-//! Diagnostic-only National Phase 2 acquisition and PackedGrid transfer wiring.
+//! National MRMS acquisition, exact retained grids, and PackedGrid transfer wiring.
 //!
-//! No product control calls this module. The commands exist so release WebView2
-//! diagnostics can prove fixed-host acquisition, strict decode, bounded working
-//! set generation, and use of the existing global two-credit broker.
+//! Phase 2 diagnostics and the Phase 3 static product share this fixed-host,
+//! bounded backend. Product paint truth remains owned by the frontend session,
+//! coverage-aware renderer receipt, and the existing global two-credit broker.
 
-use crate::mrms::{DownloadedMrmsObject, MrmsClient, MrmsDecodeEvidence, decode_mrms_gzip};
+use crate::mrms::{
+    DownloadedMrmsObject, MrmsCellValue, MrmsClient, MrmsDecodeEvidence, decode_mrms_gzip,
+};
 use crate::packed_grid::{
     MrmsNumericPyramid, PACKED_GRID_VERSION, PackedGridFrame, PackedGridManifestSummary,
     validate_packed_grid_chunk, validate_packed_grid_manifest,
@@ -29,12 +31,29 @@ const GPU_HARD_CEILING_BYTES: usize = 256 * 1024 * 1024;
 struct PreparedNationalFrame {
     generation: u64,
     pyramid: Arc<MrmsNumericPyramid>,
-    frame: PackedGridFrame,
+    frames: BTreeMap<u16, PackedGridFrame>,
 }
 
 impl PreparedNationalFrame {
     fn total_bytes(&self) -> usize {
-        self.pyramid.retained_bytes() + self.frame.transfer_bytes()
+        self.pyramid.retained_bytes()
+            + self
+                .frames
+                .values()
+                .map(PackedGridFrame::transfer_bytes)
+                .sum::<usize>()
+    }
+
+    fn frame(&self, presentation_factor: u16) -> Result<&PackedGridFrame, TransferError> {
+        self.frames.get(&presentation_factor).ok_or_else(|| {
+            TransferError::new(
+                "national_presentation_level_unavailable",
+                format!(
+                    "presentation factor {presentation_factor} is unavailable for generation {}",
+                    self.generation
+                ),
+            )
+        })
     }
 }
 
@@ -125,6 +144,28 @@ impl PreparedCache {
             )
         })
     }
+
+    fn matching_identity(
+        &self,
+        generation: u64,
+        observation_time_unix_ms: i64,
+        content_sha256: &str,
+    ) -> Result<Arc<PreparedNationalFrame>, TransferError> {
+        self.by_object
+            .values()
+            .find(|prepared| {
+                prepared.generation == generation
+                    && prepared.pyramid.observation_time_unix_ms == observation_time_unix_ms
+                    && sha256_hex(&prepared.pyramid.content_sha256) == content_sha256
+            })
+            .cloned()
+            .ok_or_else(|| {
+                TransferError::new(
+                    "national_point_identity_stale",
+                    "point lookup does not match a retained National observation",
+                )
+            })
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -182,6 +223,49 @@ pub struct NationalPhase2PrepareReport {
     pub decode_and_level_ms: f64,
     pub packed_grid: PackedGridManifestSummary,
     pub retention_extension: NationalRetentionDiagnostic,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NationalPhase3PrepareReport {
+    pub generation: u64,
+    pub object_key: String,
+    pub observation_time_unix_ms: i64,
+    pub compressed_sha256: String,
+    pub normalized_sha256: String,
+    pub compressed_bytes: usize,
+    pub retained_backend_bytes: usize,
+    pub presentation_factors: Vec<u16>,
+    pub presentation_gpu_bytes: Vec<NationalPresentationBytes>,
+    pub discovery_ms: f64,
+    pub download_ms: f64,
+    pub decode_and_level_ms: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NationalPresentationBytes {
+    pub presentation_factor: u16,
+    pub chunk_count: usize,
+    pub transfer_bytes: usize,
+    pub projected_gpu_bytes: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NationalPointLookup {
+    pub inspection_id: String,
+    pub generation: u64,
+    pub observation_time_unix_ms: i64,
+    pub content_sha256: String,
+    pub object_key: String,
+    pub longitude: f64,
+    pub latitude: f64,
+    pub row: u32,
+    pub column: u32,
+    pub raw_code: u16,
+    pub status: &'static str,
+    pub value_dbz: Option<f64>,
 }
 
 #[tauri::command]
@@ -292,12 +376,101 @@ pub async fn prepare_national_phase2_diagnostic(
     let prepared = Arc::new(PreparedNationalFrame {
         generation,
         pyramid: Arc::new(pyramid),
-        frame,
+        frames: BTreeMap::from([(OVERVIEW_FACTOR, frame)]),
     });
     let mut cache = state.inner.lock().map_err(|_| {
         TransferError::new(
             "national_cache_poisoned",
             "National Phase 2 cache is unavailable after an internal panic",
+        )
+    })?;
+    let retired = cache.insert(evidence.object_key, prepared)?;
+    drop(cache);
+    drop(retired);
+    Ok(report)
+}
+
+#[tauri::command]
+pub async fn prepare_national_phase3_frame(
+    broker: tauri::State<'_, TransferBroker>,
+    state: tauri::State<'_, NationalPhase2State>,
+    session: u64,
+    generation: u64,
+) -> Result<NationalPhase3PrepareReport, TransferError> {
+    let broker = broker.inner().clone();
+    let token = broker.live_generation_token(session, generation)?;
+    let client =
+        MrmsClient::new().map_err(|error| TransferError::new(error.code(), error.to_string()))?;
+
+    let discovery_started = Instant::now();
+    let object = client
+        .discover_latest_count(Utc::now(), 1)
+        .await
+        .map_err(|error| TransferError::new(error.code(), error.to_string()))?
+        .pop()
+        .ok_or_else(|| TransferError::new("national_inventory_empty", "no current MRMS object"))?;
+    token
+        .ensure_current()
+        .map_err(|error| TransferError::new("national_generation_stale", error.to_string()))?;
+    let discovery_ms = discovery_started.elapsed().as_secs_f64() * 1_000.0;
+
+    let download_started = Instant::now();
+    let download = Arc::new(
+        client
+            .download(&object)
+            .await
+            .map_err(|error| TransferError::new(error.code(), error.to_string()))?,
+    );
+    token
+        .ensure_current()
+        .map_err(|error| TransferError::new("national_generation_stale", error.to_string()))?;
+    let download_ms = download_started.elapsed().as_secs_f64() * 1_000.0;
+
+    let decode_started = Instant::now();
+    let (evidence, pyramid, frames) = build_static_frames(download, generation).await?;
+    token
+        .ensure_current()
+        .map_err(|error| TransferError::new("national_generation_stale", error.to_string()))?;
+    let decode_and_level_ms = decode_started.elapsed().as_secs_f64() * 1_000.0;
+    let retained_backend_bytes = pyramid.retained_bytes();
+    let presentation_gpu_bytes = frames
+        .iter()
+        .map(|(&presentation_factor, frame)| NationalPresentationBytes {
+            presentation_factor,
+            chunk_count: frame.chunks.len(),
+            transfer_bytes: frame.transfer_bytes(),
+            projected_gpu_bytes: frame
+                .summary
+                .chunks
+                .iter()
+                .map(|chunk| usize::from(chunk.halo_width) * usize::from(chunk.halo_height) * 2)
+                .sum(),
+        })
+        .collect::<Vec<_>>();
+    let presentation_factors = frames.keys().copied().collect::<Vec<_>>();
+    let report = NationalPhase3PrepareReport {
+        generation,
+        object_key: evidence.object_key.clone(),
+        observation_time_unix_ms: evidence.observation_time_unix_ms,
+        compressed_sha256: evidence.compressed_sha256,
+        normalized_sha256: evidence.normalized_sha256,
+        compressed_bytes: evidence.compressed_bytes,
+        retained_backend_bytes,
+        presentation_factors,
+        presentation_gpu_bytes,
+        discovery_ms,
+        download_ms,
+        decode_and_level_ms,
+    };
+    let prepared = Arc::new(PreparedNationalFrame {
+        generation,
+        pyramid: Arc::new(pyramid),
+        frames,
+    });
+    let mut cache = state.inner.lock().map_err(|_| {
+        TransferError::new(
+            "national_cache_poisoned",
+            "National frame cache is unavailable after an internal panic",
         )
     })?;
     let retired = cache.insert(evidence.object_key, prepared)?;
@@ -328,18 +501,54 @@ async fn build_frame(
     .map_err(|error| TransferError::new("national_backend_task_failed", error.to_string()))?
 }
 
+async fn build_static_frames(
+    download: Arc<DownloadedMrmsObject>,
+    generation: u64,
+) -> Result<
+    (
+        MrmsDecodeEvidence,
+        MrmsNumericPyramid,
+        BTreeMap<u16, PackedGridFrame>,
+    ),
+    TransferError,
+> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let decoded = decode_mrms_gzip(&download.compressed_bytes, download.object.clone())
+            .map_err(|error| TransferError::new(error.code(), error.to_string()))?;
+        let evidence = decoded.evidence.clone();
+        let pyramid =
+            MrmsNumericPyramid::from_decoded(decoded, OVERVIEW_FACTOR).map_err(|error| {
+                TransferError::new("national_level_generation_failed", error.to_string())
+            })?;
+        let mut frames = BTreeMap::new();
+        for presentation_factor in [1, 2, OVERVIEW_FACTOR] {
+            let frame = PackedGridFrame::encode(generation, &pyramid, presentation_factor)
+                .map_err(|error| {
+                    TransferError::new("national_packed_grid_failed", error.to_string())
+                })?;
+            frames.insert(presentation_factor, frame);
+        }
+        Ok::<_, TransferError>((evidence, pyramid, frames))
+    })
+    .await
+    .map_err(|error| TransferError::new("national_backend_task_failed", error.to_string()))?
+}
+
 #[tauri::command]
 pub async fn request_national_packed_grid_manifest(
     broker: tauri::State<'_, TransferBroker>,
     state: tauri::State<'_, NationalPhase2State>,
     session: u64,
     generation: u64,
+    presentation_factor: Option<u16>,
 ) -> Result<Response, TransferError> {
     let broker = broker.inner().clone();
     broker.acquire(session, generation)?;
+    let factor = presentation_factor.unwrap_or(OVERVIEW_FACTOR);
     let result = prepared_bytes(&state, generation, |prepared| {
-        prepared.frame.manifest.clone()
-    });
+        prepared.frame(factor).map(|frame| frame.manifest.clone())
+    })
+    .and_then(|result| result);
     publish_bytes(broker, session, generation, result)
 }
 
@@ -350,12 +559,14 @@ pub async fn request_national_packed_grid_chunk(
     session: u64,
     generation: u64,
     chunk_index: u32,
+    presentation_factor: Option<u16>,
 ) -> Result<Response, TransferError> {
     let broker = broker.inner().clone();
     broker.acquire(session, generation)?;
+    let factor = presentation_factor.unwrap_or(OVERVIEW_FACTOR);
     let result = prepared_bytes(&state, generation, |prepared| {
         prepared
-            .frame
+            .frame(factor)?
             .chunks
             .get(chunk_index as usize)
             .cloned()
@@ -368,6 +579,185 @@ pub async fn request_national_packed_grid_chunk(
     })
     .and_then(|result| result);
     publish_bytes(broker, session, generation, result)
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn lookup_national_grid_point(
+    state: tauri::State<'_, NationalPhase2State>,
+    session: u64,
+    generation: u64,
+    observation_time_unix_ms: i64,
+    content_sha256: String,
+    inspection_id: String,
+    longitude: f64,
+    latitude: f64,
+) -> Result<NationalPointLookup, TransferError> {
+    let _session = session;
+    if inspection_id.is_empty()
+        || inspection_id.len() > 128
+        || !longitude.is_finite()
+        || !latitude.is_finite()
+    {
+        return Err(TransferError::new(
+            "national_point_invalid",
+            "inspection identity and coordinates must be bounded and finite",
+        ));
+    }
+    let prepared = {
+        let cache = state.inner.lock().map_err(|_| {
+            TransferError::new(
+                "national_cache_poisoned",
+                "National frame cache is unavailable after an internal panic",
+            )
+        })?;
+        cache.matching_identity(generation, observation_time_unix_ms, &content_sha256)?
+    };
+    lookup_prepared_point(
+        &prepared,
+        generation,
+        observation_time_unix_ms,
+        content_sha256,
+        inspection_id,
+        longitude,
+        latitude,
+    )
+}
+
+#[tauri::command]
+pub async fn find_national_peak_point(
+    state: tauri::State<'_, NationalPhase2State>,
+    session: u64,
+    generation: u64,
+    observation_time_unix_ms: i64,
+    content_sha256: String,
+    inspection_id: String,
+) -> Result<NationalPointLookup, TransferError> {
+    let _session = session;
+    if inspection_id.is_empty() || inspection_id.len() > 128 {
+        return Err(TransferError::new(
+            "national_point_invalid",
+            "inspection identity must be bounded",
+        ));
+    }
+    let prepared = {
+        let cache = state.inner.lock().map_err(|_| {
+            TransferError::new(
+                "national_cache_poisoned",
+                "National frame cache is unavailable after an internal panic",
+            )
+        })?;
+        cache.matching_identity(generation, observation_time_unix_ms, &content_sha256)?
+    };
+    let peak_prepared = prepared.clone();
+    let (longitude, latitude) =
+        tauri::async_runtime::spawn_blocking(move || find_peak_coordinates(&peak_prepared))
+            .await
+            .map_err(|error| {
+                TransferError::new("national_backend_task_failed", error.to_string())
+            })??;
+    lookup_prepared_point(
+        &prepared,
+        generation,
+        observation_time_unix_ms,
+        content_sha256,
+        inspection_id,
+        longitude,
+        latitude,
+    )
+}
+
+fn find_peak_coordinates(prepared: &PreparedNationalFrame) -> Result<(f64, f64), TransferError> {
+    let pyramid = &prepared.pyramid;
+    let base = pyramid.levels.get(&1).ok_or_else(|| {
+        TransferError::new(
+            "national_base_level_missing",
+            "exact base grid is unavailable",
+        )
+    })?;
+    let (index, _) = base
+        .raw_codes
+        .iter()
+        .enumerate()
+        .filter(|(_, raw)| matches!(pyramid.encoding.decode_raw(**raw), MrmsCellValue::Valid(_)))
+        .max_by_key(|(_, raw)| **raw)
+        .ok_or_else(|| {
+            TransferError::new(
+                "national_valid_point_missing",
+                "retained National observation contains no valid cells",
+            )
+        })?;
+    let row = index / base.width;
+    let column = index % base.width;
+    Ok((
+        pyramid.grid.first_longitude_degrees + column as f64 * pyramid.grid.longitude_step_degrees,
+        pyramid.grid.first_latitude_degrees - row as f64 * pyramid.grid.latitude_step_degrees,
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn lookup_prepared_point(
+    prepared: &PreparedNationalFrame,
+    generation: u64,
+    observation_time_unix_ms: i64,
+    content_sha256: String,
+    inspection_id: String,
+    longitude: f64,
+    latitude: f64,
+) -> Result<NationalPointLookup, TransferError> {
+    let pyramid = &prepared.pyramid;
+    let grid = &pyramid.grid;
+    let column = ((longitude - grid.first_longitude_degrees) / grid.longitude_step_degrees).round();
+    let row = ((grid.first_latitude_degrees - latitude) / grid.latitude_step_degrees).round();
+    if column < 0.0 || row < 0.0 || column >= f64::from(grid.width) || row >= f64::from(grid.height)
+    {
+        return Err(TransferError::new(
+            "national_point_outside_coverage",
+            "inspection coordinate is outside the MRMS CONUS grid",
+        ));
+    }
+    let column = column as u32;
+    let row = row as u32;
+    let base = pyramid.levels.get(&1).ok_or_else(|| {
+        TransferError::new(
+            "national_base_level_missing",
+            "exact base grid is unavailable",
+        )
+    })?;
+    let index = usize::try_from(row)
+        .ok()
+        .and_then(|row| row.checked_mul(base.width))
+        .and_then(|offset| {
+            usize::try_from(column)
+                .ok()
+                .and_then(|column| offset.checked_add(column))
+        })
+        .ok_or_else(|| TransferError::new("national_point_invalid", "grid index overflowed"))?;
+    let raw_code = *base.raw_codes.get(index).ok_or_else(|| {
+        TransferError::new(
+            "national_point_invalid",
+            "grid index is outside retained data",
+        )
+    })?;
+    let (status, value_dbz) = match pyramid.encoding.decode_raw(raw_code) {
+        MrmsCellValue::Valid(value) => ("valid", Some(value)),
+        MrmsCellValue::Missing => ("missing", None),
+        MrmsCellValue::NoCoverage => ("no_coverage", None),
+    };
+    Ok(NationalPointLookup {
+        inspection_id,
+        generation,
+        observation_time_unix_ms,
+        content_sha256,
+        object_key: pyramid.object_key.clone(),
+        longitude,
+        latitude,
+        row,
+        column,
+        raw_code,
+        status,
+        value_dbz,
+    })
 }
 
 fn prepared_bytes<T>(
@@ -402,6 +792,15 @@ fn publish_bytes(
     };
     broker.complete_for_publish(session, generation)?;
     Ok(Response::new(bytes))
+}
+
+fn sha256_hex(bytes: &[u8; 32]) -> String {
+    use std::fmt::Write;
+    let mut encoded = String::with_capacity(64);
+    for byte in bytes {
+        write!(&mut encoded, "{byte:02x}").expect("writing to a String cannot fail");
+    }
+    encoded
 }
 
 fn retention_diagnostic(
@@ -564,6 +963,121 @@ mod tests {
             .collect()
     }
 
+    fn point_lookup_frame() -> PreparedNationalFrame {
+        PreparedNationalFrame {
+            generation: 12,
+            pyramid: Arc::new(MrmsNumericPyramid {
+                object_key: "CONUS/MergedBaseReflectivityQC_00.50/20260803/MRMS_MergedBaseReflectivityQC_00.50_20260803-162812.grib2.gz".into(),
+                observation_time_unix_ms: 1_785_775_692_000,
+                content_sha256: [0xab; 32],
+                grid: MrmsGridDefinition {
+                    width: 2,
+                    height: 2,
+                    first_latitude_degrees: 40.0,
+                    first_longitude_degrees: -100.0,
+                    last_latitude_degrees: 39.99,
+                    last_longitude_degrees: -99.99,
+                    longitude_step_degrees: 0.01,
+                    latitude_step_degrees: 0.01,
+                    row_orientation: MrmsRowOrientation::NorthToSouth,
+                },
+                encoding: MrmsValueEncoding {
+                    bit_depth: 16,
+                    reference_value_bits: (-9_990.0f32).to_bits(),
+                    binary_scale: 0,
+                    decimal_scale: 1,
+                    missing_raw: 9_000,
+                    no_coverage_raw: 0,
+                },
+                levels: BTreeMap::from([(
+                    1,
+                    NumericGridLevel {
+                        factor: 1,
+                        width: 2,
+                        height: 2,
+                        raw_codes: vec![9_990, 9_000, 0, 65_535],
+                    },
+                )]),
+            }),
+            frames: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn exact_point_lookup_uses_retained_base_grid_and_echoes_identity() {
+        let prepared = point_lookup_frame();
+        let valid = lookup_prepared_point(
+            &prepared,
+            12,
+            1_785_775_692_000,
+            "ab".repeat(32),
+            "inspect-valid".into(),
+            -100.0,
+            40.0,
+        )
+        .unwrap();
+        assert_eq!(valid.status, "valid");
+        assert_eq!(valid.raw_code, 9_990);
+        assert_eq!(valid.value_dbz, Some(0.0));
+        assert_eq!(valid.row, 0);
+        assert_eq!(valid.column, 0);
+        assert_eq!(valid.inspection_id, "inspect-valid");
+
+        let missing = lookup_prepared_point(
+            &prepared,
+            12,
+            1_785_775_692_000,
+            "ab".repeat(32),
+            "inspect-missing".into(),
+            -99.99,
+            40.0,
+        )
+        .unwrap();
+        assert_eq!(missing.status, "missing");
+        assert_eq!(missing.value_dbz, None);
+
+        let no_coverage = lookup_prepared_point(
+            &prepared,
+            12,
+            1_785_775_692_000,
+            "ab".repeat(32),
+            "inspect-none".into(),
+            -100.0,
+            39.99,
+        )
+        .unwrap();
+        assert_eq!(no_coverage.status, "no_coverage");
+    }
+
+    #[test]
+    fn point_lookup_identity_rejects_stale_generation_time_or_hash() {
+        let mut cache = PreparedCache::default();
+        let prepared = Arc::new(point_lookup_frame());
+        cache
+            .insert(prepared.pyramid.object_key.clone(), prepared)
+            .unwrap();
+        assert!(
+            cache
+                .matching_identity(12, 1_785_775_692_000, &"ab".repeat(32))
+                .is_ok()
+        );
+        assert!(
+            cache
+                .matching_identity(11, 1_785_775_692_000, &"ab".repeat(32))
+                .is_err()
+        );
+        assert!(
+            cache
+                .matching_identity(12, 1_785_775_692_001, &"ab".repeat(32))
+                .is_err()
+        );
+        assert!(
+            cache
+                .matching_identity(12, 1_785_775_692_000, &"cd".repeat(32))
+                .is_err()
+        );
+    }
+
     #[test]
     fn prepared_cache_is_directly_indexed_and_bounded() {
         let mut cache = PreparedCache {
@@ -605,7 +1119,7 @@ mod tests {
                                 },
                                 levels: BTreeMap::new(),
                             }),
-                            frame,
+                            frames: BTreeMap::from([(OVERVIEW_FACTOR, frame)]),
                         }),
                     )
                     .unwrap(),
@@ -653,7 +1167,7 @@ mod tests {
                     },
                     levels: BTreeMap::new(),
                 }),
-                frame,
+                frames: BTreeMap::from([(OVERVIEW_FACTOR, frame)]),
             }),
         );
         assert!(result.is_err());

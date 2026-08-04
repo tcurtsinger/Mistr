@@ -14,7 +14,12 @@ import {
 } from "./geo";
 import { PALETTE_WIDTH, paletteColor, type Rgba } from "./palette";
 
-export type GateStatusName = "valid" | "below_threshold" | "range_folded";
+export type GateStatusName =
+  | "valid"
+  | "below_threshold"
+  | "range_folded"
+  | "missing"
+  | "no_coverage";
 
 export interface RadarSweepCpuModel {
   observationId: string;

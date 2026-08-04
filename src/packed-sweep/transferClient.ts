@@ -142,6 +142,43 @@ export interface NationalPhase2PrepareReport {
   retentionExtension: NationalRetentionDiagnostic;
 }
 
+export interface NationalPresentationBytes {
+  presentationFactor: number;
+  chunkCount: number;
+  transferBytes: number;
+  projectedGpuBytes: number;
+}
+
+export interface NationalPhase3PrepareReport {
+  generation: number;
+  objectKey: string;
+  observationTimeUnixMs: number;
+  compressedSha256: string;
+  normalizedSha256: string;
+  compressedBytes: number;
+  retainedBackendBytes: number;
+  presentationFactors: number[];
+  presentationGpuBytes: NationalPresentationBytes[];
+  discoveryMs: number;
+  downloadMs: number;
+  decodeAndLevelMs: number;
+}
+
+export interface NationalPointLookup {
+  inspectionId: string;
+  generation: number;
+  observationTimeUnixMs: number;
+  contentSha256: string;
+  objectKey: string;
+  longitude: number;
+  latitude: number;
+  row: number;
+  column: number;
+  rawCode: number;
+  status: "valid" | "missing" | "no_coverage";
+  valueDbz: number | null;
+}
+
 export interface PackedGridLease<T extends PackedGridManifest | PackedGridChunk> {
   packed: T;
   wireBytes: number;
@@ -423,23 +460,146 @@ export class PackedSweepTransferClient {
     }
   }
 
-  async requestNationalManifest(): Promise<PackedGridLease<PackedGridManifest>> {
+  async prepareNationalPhase3(): Promise<NationalPhase3PrepareReport> {
+    this.assertSessionOpen();
+    await this.flushPendingReleaseAcks();
+    const session = this.session;
+    const generation = this.generation;
+    if (!this.active || generation === 0) {
+      throw new TransferClientError("generation_not_active", "no generation is active");
+    }
+    try {
+      const report = await this.invoke<NationalPhase3PrepareReport>(
+        "prepare_national_phase3_frame",
+        { session, generation },
+      );
+      if (
+        !this.active
+        || this.session !== session
+        || this.generation !== generation
+        || report.generation !== generation
+        || report.presentationFactors.join(",") !== "1,2,4"
+      ) {
+        throw new TransferClientError(
+          "stale_response",
+          `National frame preparation for generation ${generation} completed after supersession`,
+        );
+      }
+      return report;
+    } catch (error) {
+      throw normalizeInvokeError(error);
+    }
+  }
+
+  async requestNationalManifest(
+    presentationFactor = 4,
+  ): Promise<PackedGridLease<PackedGridManifest>> {
+    assertPresentationFactor(presentationFactor);
     return this.requestNationalRaw(
       "request_national_packed_grid_manifest",
-      {},
+      { presentationFactor },
       async (response) => parsePackedGridManifest(response),
     );
   }
 
-  async requestNationalChunk(chunkIndex: number): Promise<PackedGridLease<PackedGridChunk>> {
+  async requestNationalChunk(
+    chunkIndex: number,
+    presentationFactor = 4,
+  ): Promise<PackedGridLease<PackedGridChunk>> {
     if (!Number.isSafeInteger(chunkIndex) || chunkIndex < 0) {
       throw new RangeError("chunkIndex must be a non-negative safe integer");
     }
+    assertPresentationFactor(presentationFactor);
     return this.requestNationalRaw(
       "request_national_packed_grid_chunk",
-      { chunkIndex },
+      { chunkIndex, presentationFactor },
       parsePackedGridChunk,
     );
+  }
+
+  async lookupNationalPoint(request: {
+    generation: number;
+    observationTimeUnixMs: number;
+    contentSha256: string;
+    inspectionId: string;
+    longitude: number;
+    latitude: number;
+  }): Promise<NationalPointLookup> {
+    this.assertSessionOpen();
+    const session = this.session;
+    if (!this.active || this.generation === 0) {
+      throw new TransferClientError("generation_not_active", "no generation is active");
+    }
+    assertGeneration(request.generation);
+    if (!Number.isSafeInteger(request.observationTimeUnixMs) || request.observationTimeUnixMs <= 0) {
+      throw new TypeError("observationTimeUnixMs must be a positive safe integer");
+    }
+    if (!/^[0-9a-f]{64}$/.test(request.contentSha256)) {
+      throw new TypeError("contentSha256 must be a lowercase SHA-256 digest");
+    }
+    if (!request.inspectionId || request.inspectionId.length > 128) {
+      throw new TypeError("inspectionId must contain 1 to 128 characters");
+    }
+    if (!Number.isFinite(request.longitude) || !Number.isFinite(request.latitude)) {
+      throw new TypeError("inspection coordinates must be finite");
+    }
+    const result = await this.invoke<NationalPointLookup>("lookup_national_grid_point", {
+      session,
+      ...request,
+    });
+    assertNationalPointLookup(result);
+    if (
+      !this.active
+      || this.session !== session
+      || result.generation !== request.generation
+      || result.observationTimeUnixMs !== request.observationTimeUnixMs
+      || result.contentSha256 !== request.contentSha256
+      || result.inspectionId !== request.inspectionId
+    ) {
+      throw new TransferClientError("stale_response", "National point lookup was superseded");
+    }
+    return result;
+  }
+
+  async findNationalPeakPoint(request: {
+    generation: number;
+    observationTimeUnixMs: number;
+    contentSha256: string;
+    inspectionId: string;
+  }): Promise<NationalPointLookup> {
+    this.assertSessionOpen();
+    const session = this.session;
+    if (!this.active || this.generation === 0) {
+      throw new TransferClientError("generation_not_active", "no generation is active");
+    }
+    assertGeneration(request.generation);
+    if (!Number.isSafeInteger(request.observationTimeUnixMs) || request.observationTimeUnixMs <= 0) {
+      throw new TypeError("observationTimeUnixMs must be a positive safe integer");
+    }
+    if (!/^[0-9a-f]{64}$/.test(request.contentSha256)) {
+      throw new TypeError("contentSha256 must be a lowercase SHA-256 digest");
+    }
+    if (!request.inspectionId || request.inspectionId.length > 128) {
+      throw new TypeError("inspectionId must contain 1 to 128 characters");
+    }
+    const result = await this.invoke<NationalPointLookup>("find_national_peak_point", {
+      session,
+      ...request,
+    });
+    assertNationalPointLookup(result);
+    if (
+      !this.active
+      || this.session !== session
+      || result.generation !== request.generation
+      || result.observationTimeUnixMs !== request.observationTimeUnixMs
+      || result.contentSha256 !== request.contentSha256
+      || result.inspectionId !== request.inspectionId
+      || result.status !== "valid"
+      || result.valueDbz === null
+    ) {
+      throw new TransferClientError("stale_response", "National peak lookup was superseded or invalid");
+    }
+    return result;
   }
 
   private async requestNationalRaw<T extends PackedGridManifest | PackedGridChunk>(
@@ -850,6 +1010,51 @@ function assertGeneration(generation: number) {
     throw new TransferClientError(
       "invalid_generation",
       "generation must be a positive safe integer",
+    );
+  }
+}
+
+function assertPresentationFactor(presentationFactor: number) {
+  if (![1, 2, 4].includes(presentationFactor)) {
+    throw new RangeError("presentationFactor must be 1, 2, or 4");
+  }
+}
+
+function assertNationalPointLookup(result: NationalPointLookup) {
+  const exactObjectKey = /^CONUS\/MergedBaseReflectivityQC_00\.50\/\d{8}\/MRMS_MergedBaseReflectivityQC_00\.50_\d{8}-\d{6}\.grib2\.gz$/;
+  const commonValid = typeof result.inspectionId === "string"
+    && result.inspectionId.length >= 1
+    && result.inspectionId.length <= 128
+    && Number.isSafeInteger(result.generation)
+    && result.generation > 0
+    && Number.isSafeInteger(result.observationTimeUnixMs)
+    && result.observationTimeUnixMs > 0
+    && /^[0-9a-f]{64}$/.test(result.contentSha256)
+    && exactObjectKey.test(result.objectKey)
+    && Number.isFinite(result.longitude)
+    && Number.isFinite(result.latitude)
+    && Number.isSafeInteger(result.row)
+    && result.row >= 0
+    && result.row < 3_500
+    && Number.isSafeInteger(result.column)
+    && result.column >= 0
+    && result.column < 7_000
+    && Number.isInteger(result.rawCode)
+    && result.rawCode >= 0
+    && result.rawCode <= 0xffff;
+  const statusValid = result.status === "missing"
+    ? result.rawCode === 9_000 && result.valueDbz === null
+    : result.status === "no_coverage"
+      ? result.rawCode === 0 && result.valueDbz === null
+      : result.status === "valid"
+        && result.rawCode !== 0
+        && result.rawCode !== 9_000
+        && Number.isFinite(result.valueDbz)
+        && result.valueDbz === (-9_990 + result.rawCode) / 10;
+  if (!commonValid || !statusValid) {
+    throw new TransferClientError(
+      "invalid_national_point",
+      "National point lookup response violates the exact grid/value contract",
     );
   }
 }

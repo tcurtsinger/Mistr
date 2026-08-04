@@ -265,6 +265,23 @@ Phase 2 adds source, cross-language, and packaged checks without weakening any S
 
 The dedicated packaged command is `npm run test:national:phase2:packaged`. Its report is generated under ignored `artifacts/national-phase-2/`. Phase 2 exit also requires `npm run verify`, `npm run docs:check`, `npm run public:check`, `git diff --check`, and unchanged packaged Phase 4, 5, and 6 regressions. The hidden `window.__MISTR_NATIONAL_PHASE2__` API is diagnostic-only; `window.__MISTR_PHASE4__`, `window.__MISTR_PHASE5__`, and `window.__MISTR_PHASE6__` remain unchanged.
 
+### National Phase 3 static-renderer gate
+
+Phase 3 adds source, renderer, UI, and packaged checks without beginning history/playback:
+
+1. Coverage helpers require unique in-range chunks and prove factor-4 complete-domain versus factor-1 viewport selection.
+2. Working-set tests prove no receipt before all required chunk uploads, one lease release per success/failure path, and prior-presentation rollback on partial failure.
+3. Sampling tests cover raw-code formula endpoints, Native nearest-cell truth, Smooth spatial interpolation, and the ban on interpolation across missing/no-coverage status.
+4. `NationalMrmsSession` tests cover accepted paint/persistence, acquisition failure rollback, supersession, and stale receipt rejection through the shared coordinator.
+5. Rust exact point tests prove valid, missing, and no-coverage results from the retained base grid and reject generation/time/hash drift.
+6. The packaged release run paints one complete factor-4 CONUS observation, refines to a bounded factor-1 viewport, and requires matching coverage-aware GPU receipts after fences.
+7. The run proves Native/Smooth change only spatial pixels, exact lookup remains tied to painted identity, and green age semantics are newest-for-source rather than cross-source recency.
+8. Real `WEBGL_lose_context` recovery must increment context epoch while preserving observation, presentation factor, coverage version, and no-network local rehydration.
+9. Site-to-National and National-to-Site transitions retain the old renderer until replacement paint and end with one settled source/timeline.
+10. The final shared broker snapshot must retain exactly two credits with zero held or in-flight ownership.
+
+The dedicated command is `npm run test:national:phase3:packaged`; reports and 4K screenshots are generated only under ignored `artifacts/national-phase-3/`. Phase 3 exit also requires `npm run verify`, `npm run docs:check`, `npm run public:check`, `git diff --check`, and unchanged packaged Phase 4, 5, and 6 regression commands. Hidden `window.__MISTR_NATIONAL_PHASE3__` is evidence-only; the existing Phase 4/5/6 APIs remain required.
+
 ## 7. Performance plan
 
 ### Test scenarios

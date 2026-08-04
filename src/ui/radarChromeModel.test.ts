@@ -134,6 +134,23 @@ describe("radar chrome model", () => {
     });
   });
 
+  it("keeps a three-minute-older National observation truthful and newest for National", () => {
+    const now = 1_000_000;
+    const site = frameAgePresentation(now - 30_000, now, true);
+    const national = frameAgePresentation(
+      now - 210_000,
+      now,
+      true,
+      "Newest National observation",
+    );
+    expect(site).toMatchObject({ kind: "current", label: "00:30" });
+    expect(national).toEqual({
+      accessibleLabel: "Newest National observation, observed 3 minutes 30 seconds ago.",
+      kind: "current",
+      label: "03:30",
+    });
+  });
+
   it("does not expose freshness or playback adjectives in the age label", () => {
     for (const presentation of [
       frameAgePresentation(60_000, 100_000, true),

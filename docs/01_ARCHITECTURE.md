@@ -2,7 +2,7 @@
 
 ## 1. Architecture principles
 
-1. **Bound each source.** The implemented product still paints selected-site radar only. Phase 2 can acquire and transfer NOAA's numeric National source through diagnostics, while later visible National work still enters through a separate session and renderer rather than changing Level II into a mosaic engine.
+1. **Bound each source.** Site remains the qualified polar engine. Phase 3 paints one NOAA numeric National observation through a separate session and gridded renderer rather than changing Level II into a mosaic engine.
 2. **One authoritative state machine.** UI components display state; they do not infer data readiness.
 3. **No radar tiles in the selected-site hot path.** Radar observations are decoded datasets, not MapLibre raster sources.
 4. **No bulk JSON.** Large numeric data crosses the Tauri boundary as packed bytes.
@@ -18,11 +18,12 @@
 flowchart LR
     UI["React product UI"] --> ORCH["Radar Session Coordinator"]
     ORCH --> SITE["SiteLevel2Session"]
-    ORCH -. "later visible phase" .-> NAT["NationalMrmsSession"]
-    NDIAG["Hidden Phase 2 diagnostic"] --> MRMS["Strict NOAA MRMS adapter"]
+    ORCH --> NAT["NationalMrmsSession"]
+    NDIAG["Hidden Phase 2/3 diagnostics"] --> MRMS["Strict NOAA MRMS adapter"]
     MRMS --> NORMGRID["Exact grid and value-aware levels"]
     NORMGRID --> PGRID["PackedGrid v1"]
     PGRID --> IPC
+    NAT --> MRMS
     SITE --> ACQ["Rust acquisition service"]
     ACQ --> L2A["Level II archive adapter"]
     ACQ --> L2C["Level II chunks adapter"]
@@ -35,8 +36,11 @@ flowchart LR
     L3DEC --> NORM
     NORM --> WIRE["PackedSweep v1"]
     WIRE --> IPC["Tauri raw-byte IPC"]
-    IPC --> RES["Renderer resource manager"]
-    RES --> GL["MapLibre WebGL2 custom layer"]
+    IPC --> SRES["Site polar resource manager"]
+    IPC --> NRES["National working-set controller"]
+    SRES --> GL["Site polar WebGL2 layer"]
+    NRES --> NGL["National numeric-grid WebGL2 layer"]
+    NGL --> MAP
     GL --> MAP["Basemap and overlays"]
     ORCH --> TRUTH["Requested source and painted-source truth"]
     ORCH --> OBS["Structured events and debug bundle"]
@@ -50,7 +54,7 @@ flowchart LR
 
 ### 3.1 Rust process
 
-The Tauri process owns network access, chunk assembly, decoding, normalization, directly indexed memory caches, hashes, and fixture capture. Phase 2 adds a fixed-host MRMS adapter, strict GRIB2 Template 5.41/PNG decoder, exact raw-code grid, numeric overview pyramid, and `PackedGrid v1` encoder behind diagnostic-only commands.
+The Tauri process owns network access, chunk assembly, decoding, normalization, directly indexed memory caches, hashes, and fixture capture. Merged Phase 2 supplies the fixed-host MRMS adapter, strict GRIB2 Template 5.41/PNG decoder, exact raw-code grid, numeric overview pyramid, and `PackedGrid v1` encoder. Phase 3 retains the base grid as point-interrogation authority while transferring only bounded presentation chunks.
 
 Rules:
 
@@ -68,7 +72,7 @@ The renderer owns:
 - React controls and diagnostics.
 - The authoritative frontend mirror of the radar state machine.
 - Parsing the small header of `PackedSweep v1`.
-- Parsing bounded `PackedGrid v1` manifests and individual numeric chunks in the hidden National Phase 2 diagnostic.
+- Parsing bounded `PackedGrid v1` manifests and individual numeric chunks for the Phase 3 National working set.
 - Typed-array views over received bytes.
 - MapLibre custom-layer registration.
 - WebGL resource creation, selection, draw, and release.
@@ -98,18 +102,26 @@ The prototype should not have separate browser and packaged provider implementat
 - Preserve current acquisition, decoder, rolling-history, two-credit IPC, renderer, playback, and recovery behavior.
 - Pass the coordinator-assigned transition generation through acquisition and GPU replacement.
 - Return the final paint identity for coordinator acceptance.
-- Reject a completion when a newer Site or future National request has superseded it.
+- Reject a completion when a newer Site or National request has superseded it.
 
-Phase 1 implemented these two components. Phase 2 uses the coordinator only to prove a non-persisting, non-painted National diagnostic transition; it still does not add `NationalMrmsSession` or a visible National control.
+Phase 1 implemented these two components. Phase 3 now places `NationalMrmsSession` behind the same coordinator without changing the Site engine.
 
-### Phase 2 MRMS and `PackedGrid v1` diagnostic path
+### Merged Phase 2 MRMS and `PackedGrid v1` path
 
 - `MrmsClient` allows only anonymous HTTPS to `noaa-mrms-pds.s3.amazonaws.com`, lists bounded exact current/previous UTC-day prefixes, sorts by measured observation time, and downloads only validated `MergedBaseReflectivityQC_00.50` keys.
 - The decoder bounds compressed, expanded GRIB, PNG, and normalized bytes; rejects markup returned with HTTP 200; pins the reviewed discipline, identification, grid, product, packing, bitmap, orientation, bit depth, scaling, and status contract; and preserves every structurally valid 16-bit raw code.
 - `MrmsNumericPyramid` builds power-of-two levels with strongest-valid, then missing, then no-coverage reduction. It never averages numeric/status codes.
 - `PackedGrid v1` carries one complete bounded frame manifest plus bounded big-endian numeric chunks with generation, source identity, measured time, content hash, transform, encoding, presentation level, chunk geometry, halo bounds, length, and payload hash.
-- `NationalPhase2State` holds a directly indexed, count- and byte-bounded prepared cache. It is diagnostic scaffolding, not the Phase 3/4 National session or durable history implementation.
+- `NationalPhase2State` holds a directly indexed, count- and byte-bounded prepared cache. Phase 3 retains exactly one current base grid plus factors 1, 2, and 4; Phase 4 will extend ownership to bounded chronological history.
 - National manifests and chunks acquire credits from the existing `TransferBroker`; there is no second credit pool. Partial, stale, or invalid payload work releases its ownership and never changes paint truth.
+
+### Phase 3 static National renderer path
+
+- `NationalMrmsSession` begins a typed `{ kind: "national", domain: "conus" }` transition and commits only the matching complete renderer receipt.
+- `NationalWorkingSetController` chooses a complete factor-4 domain overview or factor-1 camera viewport, validates every required descriptor, owns one chunk lease through upload, and rolls back incomplete mutation.
+- `NationalGridLayer` owns separate active/staged presentations, `R16UI` numeric textures, the reflectivity palette, spatial sampling shaders, coverage identity, GPU fences, and visible-first context rehydration.
+- The old Site layer remains enabled until National has acquired, decoded, transferred, and uploaded every required chunk. Immediately before the first complete National draw, Site is disabled; acceptance then releases the Site loop. The inverse transition follows the same atomic rule.
+- Exact inspection asks Rust for the retained base cell using the painted generation, observation time, content hash, and a unique inspection identity. Late or cross-source replies are ignored.
 
 ### `AcquisitionService`
 
@@ -265,21 +277,21 @@ Mistr does not build a national mosaic from Level II sites and never switches so
 The approved model is one coordinator with exactly one active source generation and one painted source truth:
 
 - `SiteLevel2Session` owns the currently implemented per-site Level II path.
-- Phase 2's hidden diagnostic owns no product timeline, but proves NOAA `MergedBaseReflectivityQC` CONUS acquisition, strict decoding, overview generation, and chunk transfer. A later `NationalMrmsSession` will own that path as a painted product source.
+- `NationalMrmsSession` owns the Phase 3 one-observation CONUS path. It does not yet poll or backfill.
 - Site and National keep independent timelines, but only the painted source exposes one timeline at a time.
 - During transition the old source may remain visibly painted, but superseded backfill stops and the replacement does not become UI truth until a complete receipt commits.
 - After commit, the old source releases its complete loop; Mistr does not keep two permanent warm radar histories.
 - MapLibre source-loaded state, hidden opacity, and tile events are not radar readiness signals.
 
-Merged Phase 1 established this ownership boundary around Site. Phase 2 adds only non-painted diagnostic data plumbing and still deliberately ships no visible National UI.
+Merged Phases 1 and 2 established coordination and data transport. The active Phase 3 branch completes the first painted National source while deliberately retaining a one-observation timeline.
 
 ## 9. Cache architecture
 
 Separate three concerns:
 
-1. **Raw object cache:** immutable downloaded Level II/III objects keyed by bucket/key plus content metadata. National Phase 2 does not add a disk cache; its downloaded diagnostics remain process-owned and ignored evidence only.
-2. **Normalized data cache:** Mistr-owned `PackedSweep` files for Site plus the bounded, directly indexed in-memory MRMS grid/level cache used by Phase 2 diagnostics.
-3. **GPU loop cache:** process-lifetime resources bounded by loop size and GPU bytes.
+1. **Raw object cache:** immutable downloaded Level II/III objects keyed by bucket/key plus content metadata. Phase 3 National remains process-owned in memory and does not add a directory-scanned disk cache.
+2. **Normalized data cache:** Mistr-owned `PackedSweep` files for Site plus the bounded, directly indexed in-memory MRMS base grid and value-aware levels.
+3. **GPU working set:** the active Site loop or the active National complete overview/detail presentation, never two permanent histories.
 
 The prototype must not reuse GustAVO's PNG tile cache.
 

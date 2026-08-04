@@ -96,11 +96,11 @@
 
 **Reason:** UI state, data sessions, and renderers must not maintain independent source or timeline authority.
 
-**Implemented result:** Merged Phase 1 supplies `RadarSessionCoordinator` and `SiteLevel2Session` around current Site behavior. Phase 2 uses a non-persisting National transition only for hidden acquisition/transfer evidence; there is still no National session, control, or renderer.
+**Implemented result:** Merged Phase 1 supplies `RadarSessionCoordinator` and `SiteLevel2Session`; Phase 3 adds `NationalMrmsSession` behind the same acceptance/persistence boundary.
 
 ### D016 — Separate source sessions and renderers
 
-**Decision:** Preserve the existing polar `SiteLevel2Session` and add a later `NationalMrmsSession` with a numeric-grid renderer. Do not pretend a gridded MRMS observation is a polar sweep or MapLibre tile loop.
+**Decision:** Preserve the existing polar `SiteLevel2Session` and use `NationalMrmsSession` with a separate numeric-grid renderer. Do not pretend a gridded MRMS observation is a polar sweep or MapLibre tile loop.
 
 **Reason:** The products have different geometry, decoding, working sets, and interrogation paths but must share transition and paint-truth semantics.
 
@@ -147,6 +147,30 @@
 **Reason:** Source acquisition and wire safety can be reviewed independently without exposing a partially implemented product or weakening the old-source-visible paint contract.
 
 **Phase 2 evidence:** The final packaged release run retained 30 exact compressed source objects in 44,094,473 bytes, decoded 30 distinct observations spanning 57.90 minutes, validated 840 factor-4 chunks, measured 96,243,964 bytes for 30 frames plus staging below the 200 MiB target, proved third-request backpressure at the shared two-credit limit, transferred the newest 28-chunk frame, and restored 20 KTLX Site residents. This is not renderer or product evidence.
+
+### D024 — National receipts bind presentation coverage
+
+**Decision:** National becomes paint truth only after every chunk required by one declared presentation factor and coverage version uploads, complete coverage draws, and its GPU fence completes. The receipt includes the observation/generation/hash, factor, coverage kind/version, chunk count, context epoch, timing, bytes, and framebuffer.
+
+**Reason:** An observation identity alone cannot prove that a chunked viewport is complete or that a camera-old detail set is what the user sees.
+
+### D025 — Phase 3 uses complete overview plus exact viewport detail
+
+**Decision:** The static National home view uses the complete factor-4 domain. At high zoom, Phase 3 atomically replaces it with required factor-1 viewport chunks while retaining the old complete presentation during staging. Factor 2 is generated and wire-compatible for Phase 4 selection but is not required by the Phase 3 camera threshold.
+
+**Reason:** This makes a full CONUS frame immediately usable, proves the exact renderer path, and bounds frontend/GPU ownership without pre-implementing playback quality locking.
+
+### D026 — Smooth never bridges numeric status
+
+**Decision:** National Native uses nearest-cell sampling at the active presentation level. Smooth may bilinearly interpolate only when all four source cells are valid; otherwise it falls back to the nearest valid sample or remains transparent for missing/no coverage. Interrogation always asks Rust's exact base grid.
+
+**Reason:** Spatial presentation may soften cell edges but cannot invent precipitation across provider status boundaries or become numeric truth.
+
+### D027 — Phase 3 is exactly one National observation
+
+**Decision:** Phase 3 exposes one newest current National observation with disabled transport/scrub movement. It does not poll, backfill, retain a National loop, or reuse the Site timeline.
+
+**Reason:** Static end-to-end paint, interrogation, handoff, and recovery are reviewable independently from the substantially larger Phase 4 history/residency/quality-lock subsystem.
 
 ## 2. Decisions required before implementation
 
@@ -298,3 +322,4 @@ Additional accepted prototype ADRs:
 - [x] Resident playback, atomic replacement, and paint truth: [`16_RESIDENT_PLAYBACK_DECISION.md`](16_RESIDENT_PLAYBACK_DECISION.md).
 - [x] Real-time publication boundary and fallback: [`17_REALTIME_FRESHNESS_AND_FALLBACK_DECISION.md`](17_REALTIME_FRESHNESS_AND_FALLBACK_DECISION.md).
 - [x] Level III N0S and visible-first context recovery: [`18_LEVEL3_N0S_AND_CONTEXT_RECOVERY_DECISION.md`](18_LEVEL3_N0S_AND_CONTEXT_RECOVERY_DECISION.md).
+- [x] National numeric-grid renderer, coverage receipts, and exact interrogation: [`28_NATIONAL_STATIC_RENDERER_DECISION.md`](28_NATIONAL_STATIC_RENDERER_DECISION.md).
