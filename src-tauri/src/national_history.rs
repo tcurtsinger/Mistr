@@ -269,6 +269,22 @@ impl NationalHistoryStore {
             .unwrap_or(0)
     }
 
+    fn matching_detail(
+        &self,
+        generation: u64,
+        observation_time_unix_ms: i64,
+        content_sha256: &str,
+        presentation_factor: u16,
+    ) -> Option<Arc<PackedGridFrame>> {
+        self.detail
+            .as_ref()
+            .filter(|detail| {
+                detail.matches(generation, observation_time_unix_ms, content_sha256)
+                    && detail.frame.summary.presentation_factor == presentation_factor
+            })
+            .map(|detail| detail.frame.clone())
+    }
+
     fn total_bytes(&self) -> usize {
         self.retained_bytes()
             + self.staged_bytes()
@@ -808,10 +824,37 @@ pub async fn prepare_national_history_presentation(
         ));
     }
     let token = broker.live_generation_token(session, generation)?;
-    let retained = {
+    let started = Instant::now();
+    let (retained, cached_detail) = {
         let store = lock_store(&state)?;
-        store.find(generation, observation_time_unix_ms, &content_sha256, true)?
+        let retained = store.find(generation, observation_time_unix_ms, &content_sha256, true)?;
+        let cached = store.matching_detail(
+            generation,
+            observation_time_unix_ms,
+            &content_sha256,
+            presentation_factor,
+        );
+        (retained, cached)
     };
+    if let Some(packed) = cached_detail {
+        token.ensure_current().map_err(stale_error)?;
+        let projected_gpu_bytes = packed
+            .summary
+            .chunks
+            .iter()
+            .map(|chunk| usize::from(chunk.halo_width) * usize::from(chunk.halo_height) * 2)
+            .sum();
+        let history = lock_store(&state)?.snapshot();
+        return Ok(NationalHistoryPresentationReport {
+            observation: retained.identity(),
+            presentation_factor,
+            chunk_count: packed.chunks.len(),
+            transfer_bytes: packed.transfer_bytes(),
+            projected_gpu_bytes,
+            decode_and_level_ms: elapsed_ms(started),
+            history,
+        });
+    }
     let download = retained.download.clone();
     let exact_pyramid = retained
         .exact_pyramid
@@ -823,7 +866,6 @@ pub async fn prepare_national_history_presentation(
             )
         })?
         .clone();
-    let started = Instant::now();
     let packed = tauri::async_runtime::spawn_blocking(move || {
         let pyramid = match exact_pyramid {
             Some(pyramid) => pyramid,
@@ -1493,6 +1535,46 @@ mod tests {
         assert_eq!(snapshot.retained.len(), 30);
         assert_eq!(snapshot.retained[0].generation, 11);
         assert_eq!(snapshot.retained[29].observation_time_unix_ms, 30_000);
+    }
+
+    #[test]
+    fn matching_detail_reuses_the_prepared_frame_without_redecode() {
+        let mut store = test_store(20);
+        store.reset(7, VecDeque::new());
+        commit(&mut store, NationalHistoryMutationKind::Current, 1_000).unwrap();
+        let retained = store.retained.front().unwrap();
+        let identity = retained.identity();
+        let mut detail_frame = (*retained.overview).clone();
+        detail_frame.summary.presentation_factor = 1;
+        let detail_frame = Arc::new(detail_frame);
+        store.detail = Some(DetailedPresentation {
+            generation: identity.generation,
+            observation_time_unix_ms: identity.observation_time_unix_ms,
+            content_sha256: identity.content_sha256.clone(),
+            frame: detail_frame.clone(),
+        });
+
+        let cached = store
+            .matching_detail(
+                identity.generation,
+                identity.observation_time_unix_ms,
+                &identity.content_sha256,
+                1,
+            )
+            .unwrap();
+
+        assert!(Arc::ptr_eq(&cached, &detail_frame));
+        assert!(
+            store
+                .matching_detail(
+                    identity.generation,
+                    identity.observation_time_unix_ms,
+                    &identity.content_sha256,
+                    2,
+                )
+                .is_none()
+        );
+        assert_eq!(store.activity.decoder_runs, 0);
     }
 
     fn test_store(retained_limit: usize) -> NationalHistoryStore {

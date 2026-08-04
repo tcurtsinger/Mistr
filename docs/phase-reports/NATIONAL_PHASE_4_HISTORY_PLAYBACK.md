@@ -28,6 +28,8 @@ Phase 5 long-session, UTC rollover, lower-GPU/device-floor, installer, sleep/wak
 
 `NationalPlaybackController` selects only complete factor-4 resources during play and active scrub. A resident-only reservation waits for in-flight acquisition/refinement and prevents new predecessor/poll work until interaction ends. Paused high-zoom selection may refine, but refinement cannot change timeline time, numeric age, source, or exact interrogation identity.
 
+National-to-Site acquisition waits for the currently observed National acquisition/history transaction before it advances the global transfer generation, then verifies the same Site transition still owns intent. Paused camera moves reuse a matching prepared Rust detail frame by exact generation/time/hash/factor identity rather than repeating full-grid decode and encoding.
+
 ## Packaged Windows/WebView2 evidence
 
 Command:
@@ -41,7 +43,7 @@ Primary 3840 by 2160 result:
 | Measurement | Result |
 |---|---:|
 | Retained exact observations | 20 |
-| Measured history span | 38.12 minutes |
+| Measured history span | 38.02 minutes |
 | Complete common GPU residents | 20 |
 | Resident transition receipts | 1,000 |
 | Hot-path network requests | 0 |
@@ -52,7 +54,7 @@ Primary 3840 by 2160 result:
 | Hot-path texture uploads | 0 |
 | Detailed factor-1 residents after settle | 2 |
 | Peak National GPU allocation | 64,227,072 bytes |
-| Maximum upload slice | 3.70 ms across initial staging, detail, and both recovery passes |
+| Maximum upload slice | 2.80 ms across initial staging, detail, and both recovery passes |
 | Context epoch after real reset | 2 |
 | Shared transfer credits after evidence | 2 available, 0 held, 0 in flight |
 | Restored source | KTLX Site |
@@ -66,6 +68,7 @@ Generated JSON and screenshots remain under ignored `artifacts/national-phase-4/
 ## Automated correctness coverage
 
 - Rust store tests: chronology, staged rollback preservation, reversible post-eviction compensation, idempotent duplicate finalization, one-oldest eviction at 20, and the same store/snapshot model at a non-shipping 30-frame limit.
+- Rust detail-cache tests: same-identity/factor preparation returns the identical packed frame, while a different factor misses and requires a rebuild.
 - TypeScript renderer/working-set tests: complete lease release, provisional paint, post-fence supersession rollback, recovery receipt matching that ignores only context/draw freshness while preserving the full presentation identity, and a deterministic latest-only async queue proving one active lookup plus newest-pending replacement.
 - Playback tests: common factor-4 play/scrub, pause-only refinement, overview-camera no-refinement behavior, and diagnostic 30-frame controller compatibility.
 - Session tests: current Site failures report only after coordinator rollback, while superseded Site failures cannot trigger fallback restoration.
@@ -74,6 +77,6 @@ Generated JSON and screenshots remain under ignored `artifacts/national-phase-4/
 
 ## Acceptance disposition
 
-The dedicated National Phase 4 packaged gate passes the primary release-runtime history, residency, zero-I/O playback, quality-lock, memory, context-recovery, credit-release, exact-lookup, inspection-refresh/coalescing, post-finalization recovery receipt, active-playback failed-Site restoration, and successful Site-return criteria. `npm run verify` passes 269 frontend/script tests and 129 Rust tests across the library and binaries, together with the production build, formatting, warnings-denied clippy, Rust check, documentation links, and public-repository scan. The merged National Phase 2/3 packaged gates and unchanged selected-site Phase 4/5/6 packaged regressions also pass.
+The dedicated National Phase 4 packaged gate passes the primary release-runtime history, residency, zero-I/O playback, quality-lock, memory, context-recovery, credit-release, exact-lookup, inspection-refresh/coalescing, post-finalization recovery receipt, active-playback failed-Site restoration, and successful Site-return criteria. `npm run verify` passes 269 frontend/script tests and 130 Rust tests across the library and binaries, together with the production build, formatting, warnings-denied clippy, Rust check, documentation links, and public-repository scan. The merged National Phase 2/3 packaged gates and unchanged selected-site Phase 4/5/6 packaged regressions also pass.
 
 Whitespace validation and staged-file inspection remain pre-commit controls. Pull-request review and CI remain required before the owner may merge.

@@ -1075,6 +1075,18 @@ export function App() {
       ): Promise<Phase5Report> => {
         if (!client) throw new Error("selected-site transfer client is unavailable");
         const activeClient = client;
+        const nationalOperation = nationalAcquisitionOperation;
+        if (nationalOperation) await nationalOperation.catch(() => {});
+        const transition = radarSessionCoordinatorRef.current!.snapshot().transition;
+        if (
+          transition?.generation !== generation
+          || transition.requestedSource.kind !== "site"
+          || transition.requestedSource.siteIcao !== site
+        ) {
+          throw new RadarSourceSupersededError(
+            "Site transition was superseded while National history settled",
+          );
+        }
         transferGeneration = generation;
         livePollingSession += 1;
         nationalHistorySession += 1;
