@@ -293,7 +293,8 @@ Phase 4 adds bounded-history, transaction, residency, and playback tests without
 5. The packaged release run retains 20 exact chronological observations, spans at least 30 minutes, and keeps every factor-4 common presentation GPU resident below the 200 MiB target and 256 MiB hard ceiling.
 6. Oldest/newest direct scrub and 1,000 chronological transitions require matching generation/observation/content/presentation receipts without disk, network, decode, IPC, or upload work.
 7. High-zoom pause refines the selected exact factor-1 viewport and bounded adjacent temporal window while all 20 common presentations remain complete. Active play returns atomically to factor 4 and keeps that quality locked.
-8. Exact point lookup must name one retained painted identity; a late identity result is rejected.
+8. Exact point lookup must name one retained painted identity; a late identity result is rejected, and a persistent map inspection is re-queried after every playback or scrub observation cut before a new value appears.
+9. A backend commit remains reversibly journaled until renderer finalization; simulated post-fence cancellation/context loss restores an evicted oldest frame and the prior GPU graph before either side can publish.
 9. Real `WEBGL_lose_context` recovery increments context epoch, restores the selected observation and all 20 common residents from CPU-owned bytes, and records zero backend activity.
 10. The final broker has two credits and zero held/in-flight ownership, and a National-to-KTLX transition ends with one settled Site timeline.
 

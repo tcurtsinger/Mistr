@@ -58,6 +58,7 @@ pub fn run() {
             national_history::prepare_national_history_predecessor,
             national_history::prepare_national_history_newer,
             national_history::commit_national_history_frame,
+            national_history::finalize_national_history_frame,
             national_history::rollback_national_history_frame,
             national_history::prepare_national_history_presentation,
             national_history::request_national_history_manifest,

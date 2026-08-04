@@ -98,6 +98,27 @@ struct DetailedPresentation {
     frame: Arc<PackedGridFrame>,
 }
 
+#[derive(Debug, Clone)]
+struct ReversibleNationalCommit {
+    observation: NationalHistoryObservation,
+    retained: VecDeque<Arc<RetainedNationalFrame>>,
+    backfill_candidates: VecDeque<MrmsObject>,
+    detail: Option<DetailedPresentation>,
+}
+
+impl ReversibleNationalCommit {
+    fn matches(
+        &self,
+        generation: u64,
+        observation_time_unix_ms: i64,
+        content_sha256: &str,
+    ) -> bool {
+        self.observation.generation == generation
+            && self.observation.observation_time_unix_ms == observation_time_unix_ms
+            && self.observation.content_sha256 == content_sha256
+    }
+}
+
 impl DetailedPresentation {
     fn matches(
         &self,
@@ -130,6 +151,7 @@ struct NationalHistoryStore {
     staged: Option<StagedNationalFrame>,
     backfill_candidates: VecDeque<MrmsObject>,
     detail: Option<DetailedPresentation>,
+    reversible_commit: Option<ReversibleNationalCommit>,
     activity: NationalHistoryActivitySnapshot,
 }
 
@@ -142,6 +164,7 @@ impl Default for NationalHistoryStore {
             staged: None,
             backfill_candidates: VecDeque::new(),
             detail: None,
+            reversible_commit: None,
             activity: NationalHistoryActivitySnapshot::default(),
         }
     }
@@ -154,6 +177,7 @@ impl NationalHistoryStore {
         self.staged = None;
         self.backfill_candidates = backfill_candidates;
         self.detail = None;
+        self.reversible_commit = None;
     }
 
     fn ensure_generation(&self, generation: u64) -> Result<(), TransferError> {
@@ -171,6 +195,12 @@ impl NationalHistoryStore {
             return Err(TransferError::new(
                 "national_history_stage_busy",
                 "a National history mutation is already staged",
+            ));
+        }
+        if self.reversible_commit.is_some() {
+            return Err(TransferError::new(
+                "national_history_commit_unfinalized",
+                "the prior National history commit is still reversible",
             ));
         }
         Ok(())
@@ -226,7 +256,29 @@ impl NationalHistoryStore {
     }
 
     fn total_bytes(&self) -> usize {
-        self.retained_bytes() + self.staged_bytes() + self.detail_bytes()
+        self.retained_bytes()
+            + self.staged_bytes()
+            + self.detail_bytes()
+            + self.reversible_commit_bytes()
+    }
+
+    fn reversible_commit_bytes(&self) -> usize {
+        self.reversible_commit
+            .as_ref()
+            .map(|commit| {
+                commit
+                    .retained
+                    .iter()
+                    .filter(|prior| {
+                        !self
+                            .retained
+                            .iter()
+                            .any(|current| Arc::ptr_eq(current, prior))
+                    })
+                    .map(|frame| frame.retained_bytes())
+                    .sum()
+            })
+            .unwrap_or(0)
     }
 
     fn stage(
@@ -256,6 +308,12 @@ impl NationalHistoryStore {
         content_sha256: &str,
     ) -> Result<Option<NationalHistoryObservation>, TransferError> {
         self.ensure_generation(generation)?;
+        if self.reversible_commit.is_some() {
+            return Err(TransferError::new(
+                "national_history_commit_unfinalized",
+                "the prior National history commit is still reversible",
+            ));
+        }
         let staged = self.staged.as_ref().cloned().ok_or_else(|| {
             TransferError::new(
                 "national_history_stage_missing",
@@ -280,6 +338,12 @@ impl NationalHistoryStore {
                 "staged National observation is already retained",
             ));
         }
+        let reversible_commit = ReversibleNationalCommit {
+            observation: staged.frame.identity(),
+            retained: self.retained.clone(),
+            backfill_candidates: self.backfill_candidates.clone(),
+            detail: self.detail.clone(),
+        };
         match staged.kind {
             NationalHistoryMutationKind::Current => {
                 if !self.retained.is_empty() {
@@ -328,8 +392,71 @@ impl NationalHistoryStore {
         } else {
             None
         };
+        self.reversible_commit = Some(reversible_commit);
         debug_assert!(self.total_bytes() <= HISTORY_BACKEND_TARGET_BYTES);
         Ok(evicted)
+    }
+
+    fn finalize_commit(
+        &mut self,
+        generation: u64,
+        observation_time_unix_ms: i64,
+        content_sha256: &str,
+    ) -> Result<(), TransferError> {
+        self.ensure_generation(generation)?;
+        let reversible = self.reversible_commit.as_ref().ok_or_else(|| {
+            TransferError::new(
+                "national_history_commit_missing",
+                "no reversible National history commit is awaiting finalization",
+            )
+        })?;
+        if !reversible.matches(generation, observation_time_unix_ms, content_sha256) {
+            return Err(TransferError::new(
+                "national_history_commit_stale",
+                "finalization identity does not match the reversible National commit",
+            ));
+        }
+        self.reversible_commit = None;
+        Ok(())
+    }
+
+    fn rollback_mutation(
+        &mut self,
+        generation: u64,
+        observation_time_unix_ms: i64,
+        content_sha256: &str,
+    ) -> Result<(), TransferError> {
+        self.ensure_generation(generation)?;
+        if let Some(staged) = &self.staged {
+            if !staged
+                .frame
+                .matches(generation, observation_time_unix_ms, content_sha256)
+            {
+                return Err(TransferError::new(
+                    "national_history_rollback_stale",
+                    "rollback identity does not match the staged National observation",
+                ));
+            }
+            self.staged = None;
+            return Ok(());
+        }
+        let reversible = self.reversible_commit.take().ok_or_else(|| {
+            TransferError::new(
+                "national_history_rollback_missing",
+                "no matching National history mutation can be rolled back",
+            )
+        })?;
+        if !reversible.matches(generation, observation_time_unix_ms, content_sha256) {
+            self.reversible_commit = Some(reversible);
+            return Err(TransferError::new(
+                "national_history_rollback_stale",
+                "rollback identity does not match the reversible National commit",
+            ));
+        }
+        self.retained = reversible.retained;
+        self.backfill_candidates = reversible.backfill_candidates;
+        self.detail = reversible.detail;
+        Ok(())
     }
 
     fn snapshot(&self) -> NationalHistorySnapshot {
@@ -338,10 +465,12 @@ impl NationalHistoryStore {
             history_limit: self.retained_limit,
             retained: self.retained.iter().map(|frame| frame.identity()).collect(),
             staged: self.staged.as_ref().map(|staged| staged.frame.identity()),
+            mutation_reversible: self.reversible_commit.is_some(),
             pending_backfill_count: self.backfill_candidates.len(),
             retained_backend_bytes: self.retained_bytes(),
             staged_backend_bytes: self.staged_bytes(),
             detailed_cache_bytes: self.detail_bytes(),
+            reversible_commit_bytes: self.reversible_commit_bytes(),
             total_backend_bytes: self.total_bytes(),
             backend_target_bytes: HISTORY_BACKEND_TARGET_BYTES,
         }
@@ -382,10 +511,12 @@ pub struct NationalHistorySnapshot {
     pub history_limit: usize,
     pub retained: Vec<NationalHistoryObservation>,
     pub staged: Option<NationalHistoryObservation>,
+    pub mutation_reversible: bool,
     pub pending_backfill_count: usize,
     pub retained_backend_bytes: usize,
     pub staged_backend_bytes: usize,
     pub detailed_cache_bytes: usize,
+    pub reversible_commit_bytes: usize,
     pub total_backend_bytes: usize,
     pub backend_target_bytes: usize,
 }
@@ -605,10 +736,23 @@ pub fn commit_national_history_frame(
 pub fn rollback_national_history_frame(
     state: tauri::State<'_, NationalHistoryState>,
     generation: u64,
+    observation_time_unix_ms: i64,
+    content_sha256: String,
 ) -> Result<NationalHistorySnapshot, TransferError> {
     let mut store = lock_store(&state)?;
-    store.ensure_generation(generation)?;
-    store.staged = None;
+    store.rollback_mutation(generation, observation_time_unix_ms, &content_sha256)?;
+    Ok(store.snapshot())
+}
+
+#[tauri::command]
+pub fn finalize_national_history_frame(
+    state: tauri::State<'_, NationalHistoryState>,
+    generation: u64,
+    observation_time_unix_ms: i64,
+    content_sha256: String,
+) -> Result<NationalHistorySnapshot, TransferError> {
+    let mut store = lock_store(&state)?;
+    store.finalize_commit(generation, observation_time_unix_ms, &content_sha256)?;
     Ok(store.snapshot())
 }
 
@@ -1193,8 +1337,52 @@ mod tests {
         assert_eq!(retained_times(&store), vec![2_000]);
         assert!(store.staged.is_some());
 
-        store.staged = None;
+        store
+            .rollback_mutation(
+                staged.generation,
+                staged.observation_time_unix_ms,
+                &staged.content_sha256,
+            )
+            .unwrap();
         assert!(store.staged.is_none());
+    }
+
+    #[test]
+    fn reversible_commit_restores_the_evicted_frame_until_renderer_finalization() {
+        let mut store = test_store(20);
+        store.reset(7, VecDeque::new());
+        commit(&mut store, NationalHistoryMutationKind::Current, 1_000).unwrap();
+        for time in (2..=20).map(|value| value * 1_000) {
+            commit(&mut store, NationalHistoryMutationKind::Newer, time).unwrap();
+        }
+
+        let frame = retained_frame(7, 21_000);
+        let identity = frame.identity();
+        store
+            .stage(NationalHistoryMutationKind::Newer, frame)
+            .unwrap();
+        let evicted = store
+            .commit_staged(
+                identity.generation,
+                identity.observation_time_unix_ms,
+                &identity.content_sha256,
+            )
+            .unwrap();
+        assert_eq!(evicted.unwrap().observation_time_unix_ms, 1_000);
+        assert!(store.snapshot().reversible_commit_bytes > 0);
+
+        store
+            .rollback_mutation(
+                identity.generation,
+                identity.observation_time_unix_ms,
+                &identity.content_sha256,
+            )
+            .unwrap();
+        assert_eq!(
+            retained_times(&store),
+            (1..=20).map(|value| value * 1_000).collect::<Vec<_>>()
+        );
+        assert_eq!(store.snapshot().reversible_commit_bytes, 0);
     }
 
     #[test]
@@ -1258,11 +1446,17 @@ mod tests {
         let frame = retained_frame(store.generation.unwrap(), observation_time_unix_ms);
         let identity = frame.identity();
         store.stage(kind, frame)?;
-        store.commit_staged(
+        let evicted = store.commit_staged(
             identity.generation,
             identity.observation_time_unix_ms,
             &identity.content_sha256,
-        )
+        )?;
+        store.finalize_commit(
+            identity.generation,
+            identity.observation_time_unix_ms,
+            &identity.content_sha256,
+        )?;
+        Ok(evicted)
     }
 
     fn retained_frame(

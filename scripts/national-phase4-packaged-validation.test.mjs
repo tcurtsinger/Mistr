@@ -10,9 +10,11 @@ describe("National Phase 4 packaged acceptance", () => {
     const report = validReport();
     report.transitions.activityDelta.networkRequests = 1;
     report.activePlayback.renderer.presentationFactor = 1;
+    report.history.renderer.maximumUploadSliceMs = 4.1;
     expect(validateNationalPhase4Acceptance(report)).toEqual(expect.arrayContaining([
       "zero hot-path backend activity",
       "high-zoom playback quality lock",
+      "4 ms upload slice budget",
     ]));
   });
 });
@@ -40,6 +42,7 @@ function validReport() {
     peakGpuResourceBytes: 70_000_000,
     uploadCount: 560,
     uploadBytes: 64_000_000,
+    maximumUploadSliceMs: 1.3,
     contextEpoch: 1,
   };
   const activity = {
@@ -67,6 +70,8 @@ function validReport() {
         historyLimit: 20,
         retained,
         staged: null,
+        mutationReversible: false,
+        reversibleCommitBytes: 0,
         totalBackendBytes: 100_000_000,
         backendTargetBytes: 180_000_000,
       },
@@ -109,6 +114,29 @@ function validReport() {
       valueDbz: 60,
       observationTimeUnixMs: retained.at(-1).observationTimeUnixMs,
       contentSha256: retained.at(-1).contentSha256,
+    },
+    inspectionRefresh: {
+      initial: {
+        observationTimeUnixMs: retained.at(-1).observationTimeUnixMs,
+        contentSha256: retained.at(-1).contentSha256,
+        inspectionId: "inspection-newest-1",
+        longitude: -97,
+        latitude: 35,
+      },
+      oldest: {
+        observationTimeUnixMs: retained[0].observationTimeUnixMs,
+        contentSha256: retained[0].contentSha256,
+        inspectionId: "inspection-oldest",
+        longitude: -97,
+        latitude: 35,
+      },
+      restoredNewest: {
+        observationTimeUnixMs: retained.at(-1).observationTimeUnixMs,
+        contentSha256: retained.at(-1).contentSha256,
+        inspectionId: "inspection-newest-2",
+        longitude: -97,
+        latitude: 35,
+      },
     },
     transferSnapshot: { creditLimit: 2, heldCredits: 0, inFlightCredits: 0 },
     restoredSite: {

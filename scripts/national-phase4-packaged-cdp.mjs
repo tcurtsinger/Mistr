@@ -54,6 +54,28 @@ try {
     true,
     60_000,
   );
+  const initialInspection = await evaluate(
+    serialized(`window.__MISTR_NATIONAL_PHASE4__.inspect(${peak.longitude}, ${peak.latitude})`),
+    true,
+    60_000,
+  );
+  await evaluate(serialized("window.__MISTR_NATIONAL_PHASE4__.scrub(0)"), true, 30_000);
+  const refreshedOldestInspection = await evaluate(
+    serialized(`window.__MISTR_NATIONAL_PHASE4__.waitForInspection(${JSON.stringify(oldest.receipt.observationId)})`),
+    true,
+    60_000,
+  );
+  await evaluate(serialized("window.__MISTR_NATIONAL_PHASE4__.scrub(19)"), true, 30_000);
+  const restoredNewestInspection = await evaluate(
+    serialized(`window.__MISTR_NATIONAL_PHASE4__.waitForInspection(${JSON.stringify(newest.receipt.observationId)})`),
+    true,
+    60_000,
+  );
+  const inspectionRefresh = {
+    initial: initialInspection,
+    oldest: refreshedOldestInspection,
+    restoredNewest: restoredNewestInspection,
+  };
 
   await evaluate(`window.__MISTR_NATIONAL_PHASE4__.setCamera(${peak.longitude}, ${peak.latitude}, 8.6)`);
   await delay(250);
@@ -95,6 +117,7 @@ try {
     transitions,
     scrub: { oldest, newest },
     peak,
+    inspectionRefresh,
     detail,
     activePlayback,
     contextReset,

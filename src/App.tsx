@@ -288,6 +288,7 @@ export function App() {
     let nationalPlaybackController: NationalPlaybackController | null = null;
     let nationalObservations: NationalHistoryObservation[] = [];
     let latestNationalHistory: NationalHistorySnapshot | null = null;
+    let latestNationalInspection: NationalPointLookup | null = null;
     let nationalHistorySession = 0;
     let nationalMrmsSession: NationalMrmsSession<NationalPhase3Report> | null = null;
     let nationalRefinement: Promise<NationalHistoryWorkingSetResult | void> | null = null;
@@ -677,37 +678,21 @@ export function App() {
             setInspectionSelected(false);
             return;
           }
-          const inspectionId = globalThis.crypto.randomUUID();
-          inspectionRequestRef.current = inspectionId;
           inspectionPointRef.current = point;
-          interrogationObservationRef.current = paintedTruth.observationId;
+          interrogationObservationRef.current = null;
           setInspectionSelected(true);
           setInterrogation(null);
           placeInspectionMarker(instance, event.lngLat, inspectionMarkerRef);
-          void client.lookupNationalHistoryPoint({
-            generation: renderer.paintReceipt.generation,
-            observationTimeUnixMs: renderer.paintReceipt.observationTimeUnixMs,
-            contentSha256: renderer.paintReceipt.contentSha256,
-            inspectionId,
-            ...point,
-          }).then((lookup) => {
-            const currentPainted = radarSessionCoordinatorRef.current!.snapshot().painted;
-            if (
-              inspectionRequestRef.current !== inspectionId
-              || currentPainted?.source.kind !== "national"
-              || currentPainted.generation !== lookup.generation
-              || currentPainted.observationId !== paintedTruth.observationId
-            ) return;
-            setInterrogation(nationalPointInterrogation(lookup));
-          }).catch(() => {
-            if (inspectionRequestRef.current === inspectionId) setInterrogation(null);
-          });
+          // The shared refresh path also runs for every later playback/scrub
+          // receipt, so this exact value can never survive an observation cut.
+          void refreshNationalInterrogation(renderer.paintReceipt);
           return;
         }
         const paintedId = layer?.getSnapshot().lastPaintedObservationId;
         const paintedModel = paintedId ? modelsById.get(paintedId) : undefined;
         if (!paintedModel) {
           setInterrogation(null);
+          latestNationalInspection = null;
           setInspectionSelected(false);
           return;
         }
@@ -1318,6 +1303,62 @@ export function App() {
         return client;
       };
 
+      const refreshNationalInterrogation = async (
+        receipt: NationalPaintReceipt,
+      ): Promise<NationalPointLookup | null> => {
+        const point = inspectionPointRef.current;
+        if (!point || interrogationObservationRef.current === receipt.observationId) {
+          return latestNationalInspection;
+        }
+        const inspectionId = globalThis.crypto.randomUUID();
+        inspectionRequestRef.current = inspectionId;
+        interrogationObservationRef.current = receipt.observationId;
+        latestNationalInspection = null;
+        setInterrogation(null);
+        try {
+          const lookup = await activeClientForNational().lookupNationalHistoryPoint({
+            generation: receipt.generation,
+            observationTimeUnixMs: receipt.observationTimeUnixMs,
+            contentSha256: receipt.contentSha256,
+            inspectionId,
+            ...point,
+          });
+          const painted = radarSessionCoordinatorRef.current!.snapshot().painted;
+          const currentReceipt = nationalLayer?.getSnapshot().paintReceipt;
+          if (
+            inspectionRequestRef.current !== inspectionId
+            || painted?.source.kind !== "national"
+            || painted.generation !== receipt.generation
+            || painted.observationId !== receipt.observationId
+            || currentReceipt?.generation !== receipt.generation
+            || currentReceipt.observationId !== receipt.observationId
+            || currentReceipt.observationTimeUnixMs !== receipt.observationTimeUnixMs
+            || currentReceipt.contentSha256 !== receipt.contentSha256
+          ) return null;
+          latestNationalInspection = lookup;
+          setInterrogation(nationalPointInterrogation(lookup));
+          return lookup;
+        } catch {
+          if (inspectionRequestRef.current === inspectionId) setInterrogation(null);
+          return null;
+        }
+      };
+
+      const finalizeNationalHistoryCommit = async (
+        observation: NationalHistoryObservation,
+      ): Promise<NationalHistorySnapshot> => {
+        let lastError: unknown;
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          try {
+            return await activeClientForNational().finalizeNationalHistoryFrame(observation);
+          } catch (error) {
+            lastError = error;
+            if (attempt < 2) await waitMilliseconds(25 * (attempt + 1));
+          }
+        }
+        throw lastError;
+      };
+
       const acquireNationalResidentOnlyActivity = async (): Promise<() => void> => {
         nationalResidentOnlyReservations += 1;
         const acquisition = nationalAcquisitionOperation;
@@ -1527,6 +1568,8 @@ export function App() {
         }
         let resumePlayback = false;
         let workingSet: NationalHistoryWorkingSetResult | undefined;
+        let backendFinalized = false;
+        let rendererFinalized = false;
         activePlayback.markReplacementPending(true);
         try {
           await activeWorkingSet.waitForIdle();
@@ -1547,26 +1590,34 @@ export function App() {
             throw new Error("National history mutation completed without a paint receipt");
           }
           nationalHistoryOwnershipCheck(generation, historySession);
-          const committed = await activeClient.commitNationalHistoryFrame(preparation.observation);
+          await activeClient.commitNationalHistoryFrame(preparation.observation);
           nationalHistoryOwnershipCheck(generation, historySession);
           activeLayer.finalizeHistoryMutation(workingSet.receipt);
-          publishNationalHistory(committed.history, workingSet.receipt, resumePlayback);
+          rendererFinalized = true;
+          const finalizedHistory = await finalizeNationalHistoryCommit(
+            preparation.observation,
+          );
+          backendFinalized = true;
+          nationalHistoryOwnershipCheck(generation, historySession);
+          publishNationalHistory(finalizedHistory, workingSet.receipt, resumePlayback);
           setNationalRequestError(null);
           return workingSet;
         } catch (error) {
           activePlayback.markReplacementPending(false);
-          if (workingSet?.receipt) {
+          if (workingSet?.receipt && !rendererFinalized) {
             try {
               await activeLayer.rollbackHistoryMutation(workingSet.receipt);
             } catch {
               // The controller may already have rolled back a superseded paint.
             }
           }
-          try {
-            await activeClient.rollbackNationalHistoryFrame();
-          } catch {
-            // A newer generation may already own the backend. Preserve the
-            // original mutation error rather than relabeling it.
+          if (!backendFinalized && !rendererFinalized) {
+            try {
+              await activeClient.rollbackNationalHistoryFrame(preparation.observation);
+            } catch {
+              // A newer generation may already own the backend. Preserve the
+              // original mutation error rather than relabeling it.
+            }
           }
           activePlayback.resumeAfterMutation(resumePlayback);
           throw error;
@@ -1667,6 +1718,8 @@ export function App() {
               throw new RadarSourceSupersededError("National transition was superseded");
             }
           };
+          let backendFinalized = false;
+          let rendererFinalized = false;
           try {
             let historyWorkingSet: NationalHistoryWorkingSetResult | undefined;
             historyWorkingSet = await activeWorkingSet.stageInitialOverview(
@@ -1676,18 +1729,23 @@ export function App() {
             if (!historyWorkingSet.receipt) {
               throw new Error("National current frame completed without a paint receipt");
             }
-            const committed = await activeClient.commitNationalHistoryFrame(
+            await activeClient.commitNationalHistoryFrame(
               historyPreparation.observation,
             );
             ownershipCheck();
             activeLayer.finalizeHistoryMutation(historyWorkingSet.receipt);
+            rendererFinalized = true;
+            const finalizedHistory = await finalizeNationalHistoryCommit(
+              historyPreparation.observation,
+            );
+            backendFinalized = true;
             const workingSet = workingSetWithReceipt(historyWorkingSet);
             const preparation = phase3CompatibilityPreparation(historyPreparation);
             const renderer = activeLayer.getSnapshot();
             const report: NationalPhase3Report = { preparation, workingSet, renderer };
-            nationalObservations = [...committed.history.retained];
-            latestNationalHistory = committed.history;
-            setNationalHistory(committed.history);
+            nationalObservations = [...finalizedHistory.retained];
+            latestNationalHistory = finalizedHistory;
+            setNationalHistory(finalizedHistory);
             return {
               value: report,
               paint: {
@@ -1700,17 +1758,19 @@ export function App() {
             const receipt = activeLayer.getSnapshot().mutationAwaitingCommit
               ? activeLayer.getSnapshot().paintReceipt
               : undefined;
-            if (receipt) {
+            if (receipt && !rendererFinalized) {
               try {
                 await activeLayer.rollbackHistoryMutation(receipt);
               } catch {
                 // The renderer may already have rolled back during supersession.
               }
             }
-            try {
-              await activeClient.rollbackNationalHistoryFrame();
-            } catch {
-              // Preserve the acquisition/rendering failure that caused rollback.
+            if (!backendFinalized && !rendererFinalized) {
+              try {
+                await activeClient.rollbackNationalHistoryFrame(historyPreparation.observation);
+              } catch {
+                // Preserve the acquisition/rendering failure that caused rollback.
+              }
             }
             activeLayer.setPresentationEnabled(
               radarSessionCoordinatorRef.current!.snapshot().painted?.source.kind === "national",
@@ -1734,6 +1794,7 @@ export function App() {
                 setNationalPlayback(snapshot);
               },
               onPaint(receipt) {
+                void refreshNationalInterrogation(receipt);
                 radarSessionCoordinatorRef.current!.synchronizePaint({
                   source: { kind: "national", domain: "conus" },
                   generation: receipt.generation,
@@ -1761,6 +1822,7 @@ export function App() {
           })));
           setLiveHistoryStatus("loading");
           setInterrogation(null);
+          latestNationalInspection = null;
           setInspectionSelected(false);
           inspectionMarkerRef.current?.remove();
           inspectionMarkerRef.current = null;
@@ -2309,6 +2371,31 @@ export function App() {
         },
         setCamera(longitude, latitude, zoom) {
           instance.jumpTo({ center: [longitude, latitude], zoom, bearing: 0, pitch: 0 });
+        },
+        async inspect(longitude, latitude) {
+          if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) {
+            throw new TypeError("National inspection coordinates must be finite");
+          }
+          const receipt = nationalLayer?.getSnapshot().paintReceipt;
+          if (!receipt) throw new Error("National renderer has no authoritative receipt");
+          inspectionPointRef.current = { longitude, latitude };
+          interrogationObservationRef.current = null;
+          setInspectionSelected(true);
+          return refreshNationalInterrogation(receipt);
+        },
+        async waitForInspection(observationId, timeoutMs = 60_000) {
+          const started = performance.now();
+          while (true) {
+            const lookup = latestNationalInspection;
+            if (
+              lookup
+              && `${lookup.observationTimeUnixMs}:${lookup.contentSha256}` === observationId
+            ) return lookup;
+            if (performance.now() - started > timeoutMs) {
+              throw new Error(`National inspection did not refresh for ${observationId}`);
+            }
+            await waitMilliseconds(50);
+          }
         },
         activity: () => client?.nationalHistoryActivitySnapshot()
           ?? Promise.reject(new Error("National transfer client is unavailable")),
@@ -3354,6 +3441,8 @@ declare global {
     refineForCamera(): Promise<NationalPhase4Report>;
     resetContext(holdMs?: number): Promise<NationalPhase4ContextResetReport>;
     setCamera(longitude: number, latitude: number, zoom: number): void;
+    inspect(longitude: number, latitude: number): Promise<NationalPointLookup | null>;
+    waitForInspection(observationId: string, timeoutMs?: number): Promise<NationalPointLookup>;
     activity(): Promise<NationalHistoryActivitySnapshot>;
     transferSnapshot(): Promise<import("./packed-sweep/transferClient").TransferSnapshot>;
     sourceState(): import("./radar-session/RadarSessionCoordinator").RadarSessionSnapshot | null;

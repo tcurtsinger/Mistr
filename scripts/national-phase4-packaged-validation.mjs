@@ -13,7 +13,12 @@ export function validateNationalPhase4Acceptance(report) {
   if (history?.historyLimit !== 20 || retained.length !== 20) failures.push("20 retained observations");
   if (!strictlyIncreasing(times) || new Set(ids).size !== 20) failures.push("chronological unique history");
   if (!(times.at(-1) - times[0] >= 30 * 60_000)) failures.push("approximately 38 minute history span");
-  if (history?.staged !== null || !(history?.totalBackendBytes > 0 && history.totalBackendBytes <= history.backendTargetBytes)) failures.push("bounded committed backend history");
+  if (
+    history?.staged !== null
+    || history?.mutationReversible !== false
+    || history?.reversibleCommitBytes !== 0
+    || !(history?.totalBackendBytes > 0 && history.totalBackendBytes <= history.backendTargetBytes)
+  ) failures.push("bounded finalized backend history");
   if (
     renderer?.status !== "painted"
     || renderer?.mutationAwaitingCommit !== false
@@ -21,6 +26,7 @@ export function validateNationalPhase4Acceptance(report) {
     || !sameMembers(renderer?.commonResidentObservationIds ?? [], ids)
   ) failures.push("all-frame common GPU residency");
   if (!(renderer?.gpuResourceBytes > 0 && renderer.gpuResourceBytes < TARGET_BYTES && renderer.peakGpuResourceBytes < HARD_CEILING_BYTES)) failures.push("National GPU memory budget");
+  if (!(renderer?.maximumUploadSliceMs > 0 && renderer.maximumUploadSliceMs <= 4)) failures.push("4 ms upload slice budget");
   if (playback?.residentCount !== 20 || !ids.includes(playback?.selectedObservationId)) failures.push("20-frame playback timeline");
 
   const transitions = report.transitions;
@@ -78,6 +84,19 @@ export function validateNationalPhase4Acceptance(report) {
     || !Number.isFinite(peak?.valueDbz)
     || !ids.includes(`${peak?.observationTimeUnixMs}:${peak?.contentSha256}`)
   ) failures.push("exact retained-frame point lookup");
+
+  const inspection = report.inspectionRefresh;
+  if (
+    observationId(inspection?.initial) !== newestScrub?.receipt?.observationId
+    || observationId(inspection?.oldest) !== oldestScrub?.receipt?.observationId
+    || observationId(inspection?.restoredNewest) !== newestScrub?.receipt?.observationId
+    || inspection?.initial?.inspectionId === inspection?.oldest?.inspectionId
+    || inspection?.oldest?.inspectionId === inspection?.restoredNewest?.inspectionId
+    || inspection?.initial?.longitude !== inspection?.oldest?.longitude
+    || inspection?.initial?.latitude !== inspection?.oldest?.latitude
+    || inspection?.oldest?.longitude !== inspection?.restoredNewest?.longitude
+    || inspection?.oldest?.latitude !== inspection?.restoredNewest?.latitude
+  ) failures.push("inspection refresh across observation cuts");
 
   const credits = report.transferSnapshot;
   if (credits?.creditLimit !== 2 || credits?.heldCredits !== 0 || credits?.inFlightCredits !== 0) failures.push("shared two-credit release");

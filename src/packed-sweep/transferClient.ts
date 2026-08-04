@@ -181,10 +181,12 @@ export interface NationalHistorySnapshot {
   historyLimit: number;
   retained: NationalHistoryObservation[];
   staged: NationalHistoryObservation | null;
+  mutationReversible: boolean;
   pendingBackfillCount: number;
   retainedBackendBytes: number;
   stagedBackendBytes: number;
   detailedCacheBytes: number;
+  reversibleCommitBytes: number;
   totalBackendBytes: number;
   backendTargetBytes: number;
 }
@@ -588,8 +590,8 @@ export class PackedSweepTransferClient {
       },
     );
     assertNationalHistorySnapshot(result.history, observation.generation);
-    if (result.history.staged !== null) {
-      throw new TransferClientError("invoke_failed", "National history commit left a staged frame");
+    if (result.history.staged !== null || result.history.mutationReversible !== true) {
+      throw new TransferClientError("invoke_failed", "National history commit is not reversibly staged");
     }
     if (result.evicted) {
       assertNationalHistoryObservation(result.evicted, observation.generation);
@@ -602,16 +604,42 @@ export class PackedSweepTransferClient {
     return result;
   }
 
-  async rollbackNationalHistoryFrame(): Promise<NationalHistorySnapshot> {
-    this.assertSessionOpen();
-    if (!this.active || this.generation === 0) {
-      throw new TransferClientError("generation_not_active", "no generation is active");
+  async finalizeNationalHistoryFrame(
+    observation: NationalHistoryObservation,
+  ): Promise<NationalHistorySnapshot> {
+    assertNationalHistoryObservation(observation, observation.generation);
+    const result = await this.invoke<NationalHistorySnapshot>(
+      "finalize_national_history_frame",
+      {
+        generation: observation.generation,
+        observationTimeUnixMs: observation.observationTimeUnixMs,
+        contentSha256: observation.contentSha256,
+      },
+    );
+    assertNationalHistorySnapshot(result, observation.generation);
+    if (result.staged !== null || result.mutationReversible || result.reversibleCommitBytes !== 0) {
+      throw new TransferClientError("invoke_failed", "National history finalization remained reversible");
     }
+    return result;
+  }
+
+  async rollbackNationalHistoryFrame(
+    observation: NationalHistoryObservation,
+  ): Promise<NationalHistorySnapshot> {
+    this.assertSessionOpen();
+    assertNationalHistoryObservation(observation, observation.generation);
     const result = await this.invoke<NationalHistorySnapshot>(
       "rollback_national_history_frame",
-      { generation: this.generation },
+      {
+        generation: observation.generation,
+        observationTimeUnixMs: observation.observationTimeUnixMs,
+        contentSha256: observation.contentSha256,
+      },
     );
-    assertNationalHistorySnapshot(result, this.generation);
+    assertNationalHistorySnapshot(result, observation.generation);
+    if (result.staged !== null || result.mutationReversible || result.reversibleCommitBytes !== 0) {
+      throw new TransferClientError("invoke_failed", "National history rollback remained provisional");
+    }
     return result;
   }
 
@@ -1486,6 +1514,7 @@ function assertNationalHistorySnapshot(snapshot: NationalHistorySnapshot, genera
     snapshot.retainedBackendBytes,
     snapshot.stagedBackendBytes,
     snapshot.detailedCacheBytes,
+    snapshot.reversibleCommitBytes,
     snapshot.totalBackendBytes,
     snapshot.backendTargetBytes,
   ];
@@ -1493,6 +1522,7 @@ function assertNationalHistorySnapshot(snapshot: NationalHistorySnapshot, genera
     !Number.isSafeInteger(snapshot.generation)
     || snapshot.generation !== generation
     || (snapshot.historyLimit !== 20 && snapshot.historyLimit !== 30)
+    || typeof snapshot.mutationReversible !== "boolean"
     || snapshot.retained.length > snapshot.historyLimit
     || !Number.isSafeInteger(snapshot.pendingBackfillCount)
     || snapshot.pendingBackfillCount < 0
@@ -1503,6 +1533,7 @@ function assertNationalHistorySnapshot(snapshot: NationalHistorySnapshot, genera
     || snapshot.totalBackendBytes !== snapshot.retainedBackendBytes
       + snapshot.stagedBackendBytes
       + snapshot.detailedCacheBytes
+      + snapshot.reversibleCommitBytes
   ) {
     throw new TransferClientError("invoke_failed", "National history snapshot is invalid");
   }

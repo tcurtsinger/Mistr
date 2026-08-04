@@ -174,7 +174,7 @@
 
 ### D028 — Phase 4 commits history only after complete GPU paint
 
-**Decision:** Phase 4 keeps 20 exact chronological MRMS observations in Rust and one complete factor-4 presentation for every retained observation on the GPU. A current, predecessor, or strictly newer mutation remains provisional after its GPU fence receipt until the matching Rust history commit succeeds. Rejection restores the prior complete residency graph and painted observation.
+**Decision:** Phase 4 keeps 20 exact chronological MRMS observations in Rust and one complete factor-4 presentation for every retained observation on the GPU. A current, predecessor, or strictly newer mutation remains provisional after its GPU fence receipt. Rust applies it with an identity-bound reversible journal, including ownership of any evicted oldest frame; renderer finalization occurs before Rust seals the journal. Rejection or context loss before finalization restores the prior complete chronology, residency graph, and painted observation.
 
 **Reason:** Backend retention and visible GPU truth must change as one transaction. A download, decode, transfer, partial upload, or fence for a superseded generation cannot evict a valid timeline frame or change the UI.
 
