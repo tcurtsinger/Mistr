@@ -294,6 +294,7 @@ export function App() {
     let nationalMrmsSession: NationalMrmsSession<NationalPhase3Report> | null = null;
     let lastNationalRestorationAfterSiteFailure: Promise<NationalPhase3Report> | null = null;
     let failNextSiteFromNationalForDiagnostics = false;
+    let resetNextNationalAfterRendererFinalizeForDiagnostics = false;
     let nationalRefinement: Promise<NationalHistoryWorkingSetResult | void> | null = null;
     let nationalAcquisitionOperation: Promise<unknown> | null = null;
     let nationalResidentOnlyReservations = 0;
@@ -1413,6 +1414,14 @@ export function App() {
         throw lastError;
       };
 
+      const resetNationalAfterRendererFinalizeForDiagnostics = (
+        activeLayer: NationalGridLayer,
+      ) => {
+        if (!resetNextNationalAfterRendererFinalizeForDiagnostics) return;
+        resetNextNationalAfterRendererFinalizeForDiagnostics = false;
+        void activeLayer.simulateContextResetForTest(150).catch(() => {});
+      };
+
       const acquireNationalResidentOnlyActivity = async (): Promise<() => void> => {
         nationalResidentOnlyReservations += 1;
         const acquisition = nationalAcquisitionOperation;
@@ -1648,14 +1657,19 @@ export function App() {
           nationalHistoryOwnershipCheck(generation, historySession);
           activeLayer.finalizeHistoryMutation(workingSet.receipt);
           rendererFinalized = true;
+          resetNationalAfterRendererFinalizeForDiagnostics(activeLayer);
           const finalizedHistory = await finalizeNationalHistoryCommit(
             preparation.observation,
           );
           backendFinalized = true;
+          const authoritativeReceipt = await activeLayer.waitForAuthoritativeReceipt(
+            workingSet.receipt,
+          );
           nationalHistoryOwnershipCheck(generation, historySession);
-          publishNationalHistory(finalizedHistory, workingSet.receipt, resumePlayback);
+          const finalizedWorkingSet = { ...workingSet, receipt: authoritativeReceipt };
+          publishNationalHistory(finalizedHistory, authoritativeReceipt, resumePlayback);
           setNationalRequestError(null);
-          return workingSet;
+          return finalizedWorkingSet;
         } catch (error) {
           activePlayback.markReplacementPending(false);
           if (workingSet?.receipt && !rendererFinalized) {
@@ -1790,11 +1804,19 @@ export function App() {
             ownershipCheck();
             activeLayer.finalizeHistoryMutation(historyWorkingSet.receipt);
             rendererFinalized = true;
+            resetNationalAfterRendererFinalizeForDiagnostics(activeLayer);
             const finalizedHistory = await finalizeNationalHistoryCommit(
               historyPreparation.observation,
             );
             backendFinalized = true;
-            const workingSet = workingSetWithReceipt(historyWorkingSet);
+            const authoritativeReceipt = await activeLayer.waitForAuthoritativeReceipt(
+              historyWorkingSet.receipt,
+            );
+            ownershipCheck();
+            const workingSet = workingSetWithReceipt({
+              ...historyWorkingSet,
+              receipt: authoritativeReceipt,
+            });
             const preparation = phase3CompatibilityPreparation(historyPreparation);
             const renderer = activeLayer.getSnapshot();
             const report: NationalPhase3Report = { preparation, workingSet, renderer };
@@ -2330,6 +2352,7 @@ export function App() {
             throw new Error("National failed-Site recovery diagnostic is unavailable");
           }
           const before = radarSessionCoordinatorRef.current!.snapshot();
+          const rendererBeforeFailure = nationalLayer.getSnapshot();
           const backfillStartCountBefore = nationalBackfillStartCount;
           if (before.transition || before.painted?.source.kind !== "national") {
             throw new Error("National must be the settled painted source before recovery proof");
@@ -2340,6 +2363,7 @@ export function App() {
             throw new Error("National playback did not start before failed-Site recovery proof");
           }
           failNextSiteFromNationalForDiagnostics = true;
+          resetNextNationalAfterRendererFinalizeForDiagnostics = true;
           let failureMessage = "";
           try {
             await siteLevel2Session.start(normalizeRadarSite(site), { persistOnPaint: false });
@@ -2353,8 +2377,15 @@ export function App() {
             failNextSiteFromNationalForDiagnostics = false;
           }
           const restoration = lastNationalRestorationAfterSiteFailure;
-          if (!restoration) throw new Error("failed Site transition did not restart National");
-          await restoration;
+          if (!restoration) {
+            resetNextNationalAfterRendererFinalizeForDiagnostics = false;
+            throw new Error("failed Site transition did not restart National");
+          }
+          try {
+            await restoration;
+          } finally {
+            resetNextNationalAfterRendererFinalizeForDiagnostics = false;
+          }
           return {
             failureMessage,
             before,
@@ -2366,6 +2397,7 @@ export function App() {
             backfillStartCountAfter: nationalBackfillStartCount,
             playbackBeforeFailure,
             playbackAfterRestoration: nationalPlaybackController?.snapshot() ?? null,
+            rendererBeforeFailure,
           };
         },
         async waitForHistory(frameCount = 20, timeoutMs = 300_000) {
@@ -3256,6 +3288,7 @@ export interface NationalPhase4FailedSiteRecoveryReport {
   backfillStartCountAfter: number;
   playbackBeforeFailure: NationalPlaybackSnapshot;
   playbackAfterRestoration: NationalPlaybackSnapshot | null;
+  rendererBeforeFailure: NationalGridRendererSnapshot;
 }
 
 type Phase4State =

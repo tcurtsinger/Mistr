@@ -645,6 +645,33 @@ export class NationalGridLayer implements CustomLayerInterface {
     }
   }
 
+  async waitForAuthoritativeReceipt(
+    expected: NationalPaintReceipt,
+    timeoutMs = 60_000,
+  ): Promise<NationalPaintReceipt> {
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 120_000) {
+      throw new RangeError("National receipt wait must be between 100 and 120000 ms");
+    }
+    const started = performance.now();
+    while (true) {
+      const snapshot = this.getSnapshot();
+      const receipt = snapshot.paintReceipt;
+      if (
+        snapshot.status === "painted"
+        && !snapshot.mutationAwaitingCommit
+        && receipt
+        && sameNationalPresentationReceipt(receipt, expected)
+      ) return receipt;
+      if (snapshot.status === "error" || snapshot.status === "removed") {
+        throw new Error(snapshot.error ?? "National renderer cannot produce an authoritative receipt");
+      }
+      if (performance.now() - started > timeoutMs) {
+        throw new Error("National authoritative receipt recovery timed out");
+      }
+      await nextAnimationFrame();
+    }
+  }
+
   pruneDetailResidency(keepObservationIds: readonly string[]): void {
     const keep = new Set(keepObservationIds);
     const selected = this.getSnapshot().selectedObservationId;
@@ -1706,6 +1733,20 @@ function sameReceiptIdentity(
     && left.coverageVersion === right.coverageVersion
     && left.contextEpoch === right.contextEpoch
     && left.drawSequence === right.drawSequence;
+}
+
+export function sameNationalPresentationReceipt(
+  left: NationalPaintReceipt,
+  right: NationalPaintReceipt,
+): boolean {
+  return left.generation === right.generation
+    && left.observationId === right.observationId
+    && left.observationTimeUnixMs === right.observationTimeUnixMs
+    && left.contentSha256 === right.contentSha256
+    && left.presentationFactor === right.presentationFactor
+    && left.coverageVersion === right.coverageVersion
+    && left.coverageKind === right.coverageKind
+    && left.requiredChunkCount === right.requiredChunkCount;
 }
 
 function nextAnimationFrame(): Promise<void> {

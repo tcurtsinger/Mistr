@@ -118,6 +118,8 @@ export function validateNationalPhase4Acceptance(report) {
     || failedSite?.backfillStartCountAfter !== failedSite?.backfillStartCountBefore + 1
     || failedSite?.playbackBeforeFailure?.playing !== true
     || failedSite?.playbackAfterRestoration?.playing !== false
+    || failedSite?.renderer?.contextEpoch !== failedSite?.rendererBeforeFailure?.contextEpoch + 1
+    || failedSite?.renderer?.paintReceipt?.contextEpoch !== failedSite?.renderer?.contextEpoch
   ) failures.push("failed Site transition restores active National session");
   const site = report.restoredSite;
   if (
