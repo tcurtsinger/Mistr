@@ -194,6 +194,7 @@ export interface NationalHistorySnapshot {
 export interface NationalHistoryPrepareReport {
   kind: NationalHistoryMutationKind;
   observation: NationalHistoryObservation;
+  reused: boolean;
   discoveryMs: number;
   downloadMs: number;
   decodeAndLevelMs: number;
@@ -993,8 +994,19 @@ export class PackedSweepTransferClient {
         : command === "prepare_national_history_predecessor"
           ? "predecessor"
           : "newer";
+      const zeroCostReplay = report.reused === true
+        && expectedKind !== "current"
+        && report.discoveryMs === 0
+        && report.downloadMs === 0
+        && report.decodeAndLevelMs === 0
+        && report.acquisitionNetworkRequests === 0
+        && report.acquisitionResponseBytes === 0;
+      const measuredAcquisition = report.reused === false
+        && report.acquisitionNetworkRequests >= 1
+        && report.acquisitionResponseBytes >= 1;
       if (
         report.kind !== expectedKind
+        || typeof report.reused !== "boolean"
         || !report.history.staged
         || !sameNationalHistoryIdentity(report.history.staged, report.observation)
         || !Number.isFinite(report.discoveryMs)
@@ -1004,9 +1016,10 @@ export class PackedSweepTransferClient {
         || !Number.isFinite(report.decodeAndLevelMs)
         || report.decodeAndLevelMs < 0
         || !Number.isSafeInteger(report.acquisitionNetworkRequests)
-        || report.acquisitionNetworkRequests < 1
+        || report.acquisitionNetworkRequests < 0
         || !Number.isSafeInteger(report.acquisitionResponseBytes)
-        || report.acquisitionResponseBytes < 1
+        || report.acquisitionResponseBytes < 0
+        || (!zeroCostReplay && !measuredAcquisition)
       ) {
         throw new TransferClientError("invoke_failed", "National history preparation response is invalid");
       }

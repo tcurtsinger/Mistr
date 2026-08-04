@@ -303,7 +303,7 @@ Phase 4 adds bounded-history, transaction, residency, and playback tests without
 15. National playback controls remain disabled until renderer status is painted and every retained observation has complete common residency after recovery.
 16. The packaged Phase 3 regression must await an already-active camera refinement rather than returning a stale overview report while exact chunks are staging.
 17. Finalizing a strictly newer observation must release the prior current frame's optional exact-pyramid cache so later factor-1 preparation remains within the backend target even if polling wins the cadence race before refinement.
-18. Retrying predecessor or newer preparation after its response is lost must return the exact matching Rust stage with zero repeated acquisition; a different staged mutation kind remains a hard error.
+18. Retrying predecessor or newer preparation after its response is lost must return the exact matching Rust stage with `reused: true` and zero repeated acquisition; frontend validation accepts that all-zero metric shape, rejects unmarked zeros, and a different staged mutation kind remains a hard error.
 19. The final broker has two credits and zero held/in-flight ownership, and a National-to-KTLX transition ends with one settled Site timeline.
 
 The dedicated command is `npm run test:national:phase4:packaged`; reports and 4K screenshots are generated only under ignored `artifacts/national-phase-4/`. Phase 4 exit also requires `npm run verify`, documentation/public/whitespace checks, the merged National Phase 2 and 3 packaged gates, and unchanged selected-site Phase 4, 5, and 6 packaged regressions. Hidden `window.__MISTR_NATIONAL_PHASE4__` is evidence-only; all earlier diagnostic APIs remain required.

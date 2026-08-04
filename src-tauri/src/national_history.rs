@@ -617,6 +617,7 @@ pub struct NationalHistorySnapshot {
 pub struct NationalHistoryPrepareReport {
     pub kind: NationalHistoryMutationKind,
     pub observation: NationalHistoryObservation,
+    pub reused: bool,
     pub discovery_ms: f64,
     pub download_ms: f64,
     pub decode_and_level_ms: f64,
@@ -1260,6 +1261,7 @@ fn prepare_report(
     Ok(NationalHistoryPrepareReport {
         kind,
         observation: frame.identity(),
+        reused: false,
         discovery_ms,
         download_ms,
         decode_and_level_ms,
@@ -1277,6 +1279,7 @@ fn retry_prepare_report(
     Ok(NationalHistoryPrepareReport {
         kind,
         observation: frame.identity(),
+        reused: true,
         discovery_ms: 0.0,
         download_ms: 0.0,
         decode_and_level_ms: 0.0,
@@ -1542,6 +1545,7 @@ mod tests {
             let report = retry_prepare_report(&state, kind, retried).unwrap();
             assert_eq!(report.kind, kind);
             assert_eq!(report.observation.object_key, frame.evidence.object_key);
+            assert!(report.reused);
             assert_eq!(report.discovery_ms, 0.0);
             assert_eq!(report.download_ms, 0.0);
             assert_eq!(report.decode_and_level_ms, 0.0);
