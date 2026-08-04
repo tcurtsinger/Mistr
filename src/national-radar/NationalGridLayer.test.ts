@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   clearPriorWebGlErrors,
+  commonResidencyReadyForSelection,
   sameNationalPresentationReceipt,
   type NationalPaintReceipt,
 } from "./NationalGridLayer";
@@ -36,6 +37,29 @@ describe("National WebGL upload error isolation", () => {
       { ...recovered, coverageVersion: recovered.coverageVersion + 1 },
       original,
     )).toBe(false);
+  });
+
+  it("keeps the common-residency barrier closed until recovery paint completes", () => {
+    const completeResidents = {
+      mutationAwaitingCommit: false,
+      paintReceipt: receipt({ contextEpoch: 2 }),
+      residentObservationIds: ["older", "newer"],
+      commonResidentObservationIds: ["older", "newer"],
+    } as const;
+
+    expect(commonResidencyReadyForSelection({
+      ...completeResidents,
+      status: "recovering",
+    })).toBe(false);
+    expect(commonResidencyReadyForSelection({
+      ...completeResidents,
+      status: "painted",
+    })).toBe(true);
+    expect(commonResidencyReadyForSelection({
+      ...completeResidents,
+      status: "painted",
+      paintReceipt: undefined,
+    })).toBe(false);
   });
 });
 

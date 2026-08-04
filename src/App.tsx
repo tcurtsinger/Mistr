@@ -115,6 +115,7 @@ import {
   type LatestOnlyAsyncQueueSnapshot,
 } from "./national-radar/LatestOnlyAsyncQueue";
 import { runNationalBackfillLoop } from "./national-radar/NationalBackfillLoop";
+import { finalizeNationalHistoryUntilSettled } from "./national-radar/NationalFinalizeLoop";
 import { colorForReflectivity } from "./radar-renderer/palette";
 import { RadarChrome } from "./ui/RadarChrome";
 import {
@@ -1448,18 +1449,33 @@ export function App() {
       };
 
       const finalizeNationalHistoryCommit = async (
+        activeClient: PackedSweepTransferClient,
         observation: NationalHistoryObservation,
       ): Promise<NationalHistorySnapshot> => {
-        let lastError: unknown;
-        for (let attempt = 0; attempt < 3; attempt += 1) {
-          try {
-            return await activeClientForNational().finalizeNationalHistoryFrame(observation);
-          } catch (error) {
-            lastError = error;
-            if (attempt < 2) await waitMilliseconds(25 * (attempt + 1));
-          }
-        }
-        throw lastError;
+        return finalizeNationalHistoryUntilSettled({
+          shouldContinue: () => !cancelled,
+          finalize: () => activeClient.finalizeNationalHistoryFrame(observation),
+          async recoverFinalized() {
+            const snapshot = await activeClient.nationalHistorySnapshot();
+            return nationalHistoryContainsFinalizedObservation(snapshot, observation)
+              ? snapshot
+              : null;
+          },
+          isTerminal: (error) => (
+            nationalHistoryErrorCode(error) === "national_history_generation_stale"
+          ),
+          onFailure(error) {
+            setNationalRequestError(
+              `National history is sealing before acquisition can continue: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          },
+          waitBeforeRetry: (attempt) => waitMilliseconds(
+            Math.min(1_000, 25 * (2 ** (attempt - 1))),
+          ),
+          cancellationError: () => new RadarSourceSupersededError(
+            "National history finalization was cancelled during application teardown",
+          ),
+        });
       };
 
       const resetNationalAfterRendererFinalizeForDiagnostics = (
@@ -1707,6 +1723,7 @@ export function App() {
           rendererFinalized = true;
           resetNationalAfterRendererFinalizeForDiagnostics(activeLayer);
           const finalizedHistory = await finalizeNationalHistoryCommit(
+            activeClient,
             preparation.observation,
           );
           backendFinalized = true;
@@ -1867,6 +1884,7 @@ export function App() {
             rendererFinalized = true;
             resetNationalAfterRendererFinalizeForDiagnostics(activeLayer);
             const finalizedHistory = await finalizeNationalHistoryCommit(
+              activeClient,
               historyPreparation.observation,
             );
             backendFinalized = true;
@@ -3136,6 +3154,22 @@ function nationalHistoryErrorCode(error: unknown): string {
     && typeof error.code === "string"
     ? error.code
     : "unknown";
+}
+
+function nationalHistoryContainsFinalizedObservation(
+  snapshot: NationalHistorySnapshot,
+  observation: NationalHistoryObservation,
+): boolean {
+  return snapshot.generation === observation.generation
+    && snapshot.staged === null
+    && !snapshot.mutationReversible
+    && snapshot.reversibleCommitBytes === 0
+    && snapshot.retained.some((retained) => (
+      retained.generation === observation.generation
+      && retained.observationTimeUnixMs === observation.observationTimeUnixMs
+      && retained.contentSha256 === observation.contentSha256
+      && retained.objectKey === observation.objectKey
+    ));
 }
 
 function waitMilliseconds(milliseconds: number): Promise<void> {

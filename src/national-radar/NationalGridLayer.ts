@@ -631,10 +631,7 @@ export class NationalGridLayer implements CustomLayerInterface {
     const started = performance.now();
     while (true) {
       const snapshot = this.getSnapshot();
-      if (
-        snapshot.residentObservationIds.length > 0
-        && snapshot.commonResidentObservationIds.length === snapshot.residentObservationIds.length
-      ) return;
+      if (commonResidencyReadyForSelection(snapshot)) return;
       if (snapshot.status === "error" || snapshot.status === "removed") {
         throw new Error(snapshot.error ?? "National renderer cannot restore common residency");
       }
@@ -1337,6 +1334,23 @@ export class NationalGridLayer implements CustomLayerInterface {
   private emit() {
     this.options.onSnapshot?.(this.getSnapshot());
   }
+}
+
+export function commonResidencyReadyForSelection(
+  snapshot: Pick<
+    NationalGridRendererSnapshot,
+    | "status"
+    | "mutationAwaitingCommit"
+    | "paintReceipt"
+    | "residentObservationIds"
+    | "commonResidentObservationIds"
+  >,
+): boolean {
+  return snapshot.status === "painted"
+    && !snapshot.mutationAwaitingCommit
+    && snapshot.paintReceipt !== undefined
+    && snapshot.residentObservationIds.length > 0
+    && snapshot.commonResidentObservationIds.length === snapshot.residentObservationIds.length;
 }
 
 function cloneResidents(
