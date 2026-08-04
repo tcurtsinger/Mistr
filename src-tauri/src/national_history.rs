@@ -318,7 +318,7 @@ impl NationalHistoryStore {
         self.reversible_commit
             .as_ref()
             .map(|commit| {
-                commit
+                let retained_bytes = commit
                     .retained
                     .iter()
                     .filter(|prior| {
@@ -328,7 +328,19 @@ impl NationalHistoryStore {
                             .any(|current| Arc::ptr_eq(current, prior))
                     })
                     .map(|frame| frame.retained_bytes())
-                    .sum()
+                    .sum::<usize>();
+                let detail_bytes = commit
+                    .detail
+                    .as_ref()
+                    .filter(|prior| {
+                        !self
+                            .detail
+                            .as_ref()
+                            .is_some_and(|current| Arc::ptr_eq(&current.frame, &prior.frame))
+                    })
+                    .map(|detail| detail.frame.transfer_bytes())
+                    .unwrap_or(0);
+                retained_bytes.saturating_add(detail_bytes)
             })
             .unwrap_or(0)
     }
@@ -1609,6 +1621,82 @@ mod tests {
             (1..=20).map(|value| value * 1_000).collect::<Vec<_>>()
         );
         assert_eq!(store.snapshot().reversible_commit_bytes, 0);
+    }
+
+    #[test]
+    fn reversible_commit_accounts_for_replaced_detail_until_finalization() {
+        let mut store = test_store(20);
+        store.reset(7, VecDeque::new());
+        commit(&mut store, NationalHistoryMutationKind::Current, 1_000).unwrap();
+
+        let current = store.retained.back().unwrap().clone();
+        let current_identity = current.identity();
+        let mut prior_detail_frame = (*current.overview).clone();
+        prior_detail_frame.summary.presentation_factor = 1;
+        prior_detail_frame.manifest = vec![1; 7];
+        let prior_detail_frame = Arc::new(prior_detail_frame);
+        store.detail = Some(DetailedPresentation {
+            generation: current_identity.generation,
+            observation_time_unix_ms: current_identity.observation_time_unix_ms,
+            content_sha256: current_identity.content_sha256,
+            frame: prior_detail_frame.clone(),
+        });
+
+        let newer = retained_frame(7, 2_000);
+        let newer_identity = newer.identity();
+        store
+            .stage(NationalHistoryMutationKind::Newer, newer.clone())
+            .unwrap();
+        store
+            .commit_staged(
+                newer_identity.generation,
+                newer_identity.observation_time_unix_ms,
+                &newer_identity.content_sha256,
+            )
+            .unwrap();
+        assert_eq!(store.snapshot().reversible_commit_bytes, 0);
+
+        let mut replacement_detail_frame = (*newer.overview).clone();
+        replacement_detail_frame.summary.presentation_factor = 1;
+        replacement_detail_frame.manifest = vec![2; 11];
+        let replacement_detail_frame = Arc::new(replacement_detail_frame);
+        store.detail = Some(DetailedPresentation {
+            generation: newer_identity.generation,
+            observation_time_unix_ms: newer_identity.observation_time_unix_ms,
+            content_sha256: newer_identity.content_sha256.clone(),
+            frame: replacement_detail_frame.clone(),
+        });
+
+        let snapshot = store.snapshot();
+        assert_eq!(
+            snapshot.detailed_cache_bytes,
+            replacement_detail_frame.transfer_bytes()
+        );
+        assert_eq!(
+            snapshot.reversible_commit_bytes,
+            prior_detail_frame.transfer_bytes()
+        );
+        assert_eq!(
+            snapshot.total_backend_bytes,
+            snapshot.retained_backend_bytes
+                + snapshot.staged_backend_bytes
+                + replacement_detail_frame.transfer_bytes()
+                + prior_detail_frame.transfer_bytes()
+        );
+
+        store
+            .finalize_commit(
+                newer_identity.generation,
+                newer_identity.observation_time_unix_ms,
+                &newer_identity.content_sha256,
+            )
+            .unwrap();
+        let finalized = store.snapshot();
+        assert_eq!(finalized.reversible_commit_bytes, 0);
+        assert_eq!(
+            finalized.total_backend_bytes,
+            finalized.retained_backend_bytes + replacement_detail_frame.transfer_bytes()
+        );
     }
 
     #[test]
