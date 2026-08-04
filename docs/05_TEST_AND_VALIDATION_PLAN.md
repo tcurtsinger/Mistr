@@ -288,8 +288,8 @@ Phase 4 adds bounded-history, transaction, residency, and playback tests without
 
 1. Backend store tests prove current/predecessor/newer chronology, identity mismatch rejection without losing the staged transaction, 20-frame one-oldest eviction, and the same store/snapshot model at a non-shipping 30-frame limit.
 2. Working-set tests prove every lease releases, a complete GPU fence remains provisional until backend commit, and supersession after the fence repaints the prior presentation.
-3. Playback tests prove play and direct scrub select factor 4, fine refinement waits for pause/settle, overview camera changes do not create a refinement loop, and the same controller accepts the diagnostic 30-frame cap.
-4. Polling/backfill may run only outside a resident-only activity reservation. The measured 1,000-transition and scrub intervals require zero network, response, decode, IPC, point-decode, and upload deltas.
+3. Playback tests prove play and direct scrub select factor 4, direct scrub waits while common residency is incomplete after context loss, fine refinement waits for pause/settle, overview camera changes do not create a refinement loop, and the same controller accepts the diagnostic 30-frame cap.
+4. Polling/backfill may run only outside a resident-only activity reservation. The measured 1,000-transition and scrub intervals require zero network, response, decode, IPC, point-decode, and upload deltas. The packaged runner holds one outer evidence-only reservation across the initial history snapshot, transitions, scrubs, and exact inspection so a normal live rollover cannot make one assertion compare different valid timelines.
 5. The packaged release run retains 20 exact chronological observations, spans at least 30 minutes, and keeps every factor-4 common presentation GPU resident below the 200 MiB target and 256 MiB hard ceiling.
 6. Oldest/newest direct scrub and 1,000 chronological transitions require matching generation/observation/content/presentation receipts without disk, network, decode, IPC, or upload work.
 7. High-zoom pause refines the selected exact factor-1 viewport and bounded adjacent temporal window while all 20 common presentations remain complete. Active play returns atomically to factor 4 and keeps that quality locked.
@@ -299,7 +299,11 @@ Phase 4 adds bounded-history, transaction, residency, and playback tests without
 11. A forced Site failure after it cancels National must preserve the old National paint, pause and await active resident playback, start a newer National generation, restart backfill, and restore matching backend, renderer, coordinator, and transfer ownership before the normal successful Site handoff.
 12. A Site request that arrives during National acquisition/finalization must wait for that observed transaction before advancing the shared generation, then revalidate that its transition still owns source intent.
 13. Repeating detail preparation for the same generation, observation, hash, and factor must return the same cached packed frame without incrementing decoder work; mismatched factor or identity must miss the cache.
-14. The final broker has two credits and zero held/in-flight ownership, and a National-to-KTLX transition ends with one settled Site timeline.
+14. A transient predecessor prepare/commit failure must leave the candidate eligible, wait through capped jitter/backoff, and retry it before newer-only polling; a successful predecessor resets the backoff attempt and source supersession stops without another delay.
+15. National playback controls remain disabled until renderer status is painted and every retained observation has complete common residency after recovery.
+16. The packaged Phase 3 regression must await an already-active camera refinement rather than returning a stale overview report while exact chunks are staging.
+17. Finalizing a strictly newer observation must release the prior current frame's optional exact-pyramid cache so later factor-1 preparation remains within the backend target even if polling wins the cadence race before refinement.
+18. The final broker has two credits and zero held/in-flight ownership, and a National-to-KTLX transition ends with one settled Site timeline.
 
 The dedicated command is `npm run test:national:phase4:packaged`; reports and 4K screenshots are generated only under ignored `artifacts/national-phase-4/`. Phase 4 exit also requires `npm run verify`, documentation/public/whitespace checks, the merged National Phase 2 and 3 packaged gates, and unchanged selected-site Phase 4, 5, and 6 packaged regressions. Hidden `window.__MISTR_NATIONAL_PHASE4__` is evidence-only; all earlier diagnostic APIs remain required.
 

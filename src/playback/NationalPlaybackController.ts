@@ -172,6 +172,8 @@ export class NationalPlaybackController {
     this.clearRefinementTimer();
     const release = await this.acquireResidentOnlyActivity();
     try {
+      await this.layer.waitForCommonResidency();
+      this.assertActive();
       const receipt = await this.select(observationId(this.observations[index]), false);
       this.scheduleRefinement();
       return receipt;
@@ -213,6 +215,8 @@ export class NationalPlaybackController {
 
   snapshot(): NationalPlaybackSnapshot {
     const renderer = this.layer.getSnapshot();
+    const commonResidencyComplete = this.observations.length > 0
+      && renderer.commonResidentObservationIds.length === this.observations.length;
     const paintedId = this.lastReceipt?.observationId ?? renderer.paintReceipt?.observationId;
     const painted = this.observations.find((observation) => observationId(observation) === paintedId);
     return {
@@ -228,7 +232,9 @@ export class NationalPlaybackController {
       qualityLockFactor: renderer.playbackQualityFactor,
       refining: this.refinementTimer !== null,
       ...(this.operation ? { holdReason: "AWAITING_GPU_PAINT" } : {}),
-      ...(renderer.status === "recovering" ? { holdReason: "GPU_RECOVERY_REHYDRATING" } : {}),
+      ...(renderer.status === "recovering" || !commonResidencyComplete
+        ? { holdReason: "GPU_RECOVERY_REHYDRATING" }
+        : {}),
     };
   }
 

@@ -99,6 +99,8 @@ type RadarSourceKey =
 
 Archive and live Level II observations for one station both satisfy the same top-level Site intent. Their exact provider source remains in observation provenance and paint truth. `PackedGrid v1` retains the MRMS product, domain, provider, object key, content hash, measured time, grid transform, scaling/status metadata, presentation level, and chunk geometry without representing the observation as a polar sweep. Every National chunk, complete-coverage GPU receipt, history identity, and exact point lookup repeats the same observation identity. At reduced presentation levels, the first and last grid coordinates are the centers of the complete source-cell footprints represented by those reduced cells; they are not copied unchanged from the factor-1 cell centers.
 
+National history keeps the immutable compressed provider object as exact durable truth. An exact numeric pyramid retained from current-frame preparation is only a bounded acceleration cache. Once a strictly newer frame finalizes, the superseded pyramid is released; later detail or interrogation for that older observation safely re-decodes its retained object. This prevents an old 64 MiB-class pyramid from overlapping the 49 MiB factor-1 packed cache and falsely exhausting the 180 MiB history target.
+
 ## 4. Acquisition modes
 
 ### 4.1 Fixture mode

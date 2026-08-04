@@ -12,6 +12,7 @@ const target = await waitForTarget();
 const socket = new WebSocket(target.webSocketDebuggerUrl);
 await openWebSocketWithTimeout(socket);
 const client = new CdpClient(socket);
+let residentEvidenceHeld = false;
 
 try {
   await call("Runtime.enable");
@@ -27,10 +28,20 @@ try {
 
   const startedAt = new Date().toISOString();
   await evaluate(serialized("window.__MISTR_NATIONAL_PHASE4__.startNational()"), true, 300_000);
-  const history = await evaluate(
+  await evaluate(
     serialized("window.__MISTR_NATIONAL_PHASE4__.waitForHistory(20, 600000)"),
     true,
     660_000,
+  );
+  await evaluate(
+    "window.__MISTR_NATIONAL_PHASE4__.beginResidentEvidence()",
+    true,
+    300_000,
+  );
+  residentEvidenceHeld = true;
+  const history = await evaluate(
+    serialized("window.__MISTR_NATIONAL_PHASE4__.report()"),
+    true,
   );
   const historyScreenshot = await captureScreenshot();
 
@@ -76,6 +87,8 @@ try {
     oldest: refreshedOldestInspection,
     restoredNewest: restoredNewestInspection,
   };
+  await evaluate("window.__MISTR_NATIONAL_PHASE4__.endResidentEvidence()");
+  residentEvidenceHeld = false;
 
   await evaluate(`window.__MISTR_NATIONAL_PHASE4__.setCamera(${peak.longitude}, ${peak.latitude}, 8.6)`);
   await delay(250);
@@ -162,6 +175,9 @@ try {
   }, null, 2));
   if (report.failures.length > 0) process.exitCode = 1;
 } finally {
+  if (residentEvidenceHeld) {
+    await evaluate("window.__MISTR_NATIONAL_PHASE4__?.endResidentEvidence()").catch(() => {});
+  }
   client.close();
 }
 

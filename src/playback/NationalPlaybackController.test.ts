@@ -12,6 +12,7 @@ class FakeNationalLayer {
   presentationFactor = 4;
   qualityLock: number | undefined;
   selectFactors: number[] = [];
+  commonResidencyReady = true;
 
   constructor(private readonly observations: readonly NationalHistoryObservation[]) {
     this.selected = observationId(observations.at(-1)!);
@@ -33,7 +34,7 @@ class FakeNationalLayer {
       coverageComplete: true,
       residentChunkCount: ids.length,
       residentObservationIds: ids,
-      commonResidentObservationIds: ids,
+      commonResidentObservationIds: this.commonResidencyReady ? ids : ids.slice(0, 1),
       detailedObservationIds: [],
       selectedObservationId: this.selected,
       playbackQualityFactor: this.qualityLock,
@@ -110,6 +111,34 @@ describe("NationalPlaybackController", () => {
     await controller.scrub(0);
     expect(layer.selectFactors.at(-1)).toBe(4);
     expect(controller.snapshot().selectedObservationId).toBe(observationId(observations[0]));
+  });
+
+  it("holds a direct scrub until context recovery restores every common resident", async () => {
+    const observations = frames(3);
+    const layer = new FakeNationalLayer(observations);
+    let finishRecovery!: () => void;
+    const recovery = new Promise<void>((resolve) => {
+      finishRecovery = resolve;
+    });
+    const waitForCommonResidency = vi
+      .spyOn(layer, "waitForCommonResidency")
+      .mockImplementation(() => recovery);
+    const controller = new NationalPlaybackController(layer, observations);
+    controller.establishInitialPaint(layer.receipt());
+    layer.commonResidencyReady = false;
+
+    const scrub = controller.scrub(0);
+    await vi.waitFor(() => expect(waitForCommonResidency).toHaveBeenCalledOnce());
+    expect(layer.selectFactors).toEqual([]);
+    expect(controller.snapshot().holdReason).toBe("GPU_RECOVERY_REHYDRATING");
+
+    layer.commonResidencyReady = true;
+    finishRecovery();
+    const receipt = await scrub;
+
+    expect(receipt.observationId).toBe(observationId(observations[0]));
+    expect(layer.selectFactors).toEqual([4]);
+    controller.dispose();
   });
 
   it("requests fine detail only after playback is paused and selection settles", async () => {

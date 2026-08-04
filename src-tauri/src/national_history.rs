@@ -467,7 +467,25 @@ impl NationalHistoryStore {
                 "matching reversible National history commit disappeared",
             ));
         };
+        let appended_newest = self.retained.len() > 1
+            && self.retained.back().is_some_and(|frame| {
+                frame.matches(
+                    finalized.observation.generation,
+                    finalized.observation.observation_time_unix_ms,
+                    &finalized.observation.content_sha256,
+                )
+            });
         self.last_finalized_commit = Some(finalized.observation);
+        if appended_newest {
+            for frame in &self.retained {
+                let mut exact = frame
+                    .exact_pyramid
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                *exact = None;
+                frame.exact_pyramid.clear_poison();
+            }
+        }
         Ok(())
     }
 
@@ -911,11 +929,18 @@ pub async fn prepare_national_history_presentation(
         if let Ok(mut exact) = retained.exact_pyramid.lock() {
             *exact = None;
         }
-        if store.total_bytes() > HISTORY_BACKEND_TARGET_BYTES {
+        let total_bytes = store.total_bytes();
+        if total_bytes > HISTORY_BACKEND_TARGET_BYTES {
+            let retained_bytes = store.retained_bytes();
+            let staged_bytes = store.staged_bytes();
+            let detail_bytes = store.detail_bytes();
+            let reversible_bytes = store.reversible_commit_bytes();
             store.detail = None;
             return Err(TransferError::new(
                 "national_history_backend_budget",
-                "fine presentation exceeded the bounded backend cache target",
+                format!(
+                    "fine presentation requires {total_bytes} backend bytes; target is {HISTORY_BACKEND_TARGET_BYTES} (retained {retained_bytes}, staged {staged_bytes}, detail {detail_bytes}, reversible {reversible_bytes})"
+                ),
             ));
         }
     }
@@ -1376,8 +1401,9 @@ fn elapsed_ms(started: Instant) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mrms::MRMS_HOST;
-    use crate::packed_grid::PackedGridManifestSummary;
+    use crate::mrms::{MRMS_HOST, MrmsGridDefinition, MrmsRowOrientation, MrmsValueEncoding};
+    use crate::packed_grid::{NumericGridLevel, PackedGridManifestSummary};
+    use std::collections::BTreeMap;
 
     #[test]
     fn commits_current_and_strictly_older_predecessors_chronologically() {
@@ -1577,6 +1603,20 @@ mod tests {
         assert_eq!(store.activity.decoder_runs, 0);
     }
 
+    #[test]
+    fn finalizing_a_newer_observation_drops_the_superseded_exact_pyramid_cache() {
+        let mut store = test_store(20);
+        store.reset(7, VecDeque::new());
+        commit(&mut store, NationalHistoryMutationKind::Current, 1_000).unwrap();
+        let prior_current = store.retained.back().unwrap().clone();
+        *prior_current.exact_pyramid.lock().unwrap() = Some(test_exact_pyramid(1_000));
+        assert!(prior_current.exact_pyramid.lock().unwrap().is_some());
+
+        commit(&mut store, NationalHistoryMutationKind::Newer, 2_000).unwrap();
+
+        assert!(prior_current.exact_pyramid.lock().unwrap().is_none());
+    }
+
     fn test_store(retained_limit: usize) -> NationalHistoryStore {
         NationalHistoryStore {
             retained_limit,
@@ -1679,6 +1719,42 @@ mod tests {
                 summary,
             }),
             exact_pyramid: Arc::new(Mutex::new(None)),
+        })
+    }
+
+    fn test_exact_pyramid(observation_time_unix_ms: i64) -> Arc<MrmsNumericPyramid> {
+        Arc::new(MrmsNumericPyramid {
+            object_key: format!("test/{observation_time_unix_ms}.grib2.gz"),
+            observation_time_unix_ms,
+            content_sha256: [1; 32],
+            grid: MrmsGridDefinition {
+                width: 1,
+                height: 1,
+                first_latitude_degrees: 1.0,
+                first_longitude_degrees: 1.0,
+                last_latitude_degrees: 1.0,
+                last_longitude_degrees: 1.0,
+                longitude_step_degrees: 1.0,
+                latitude_step_degrees: 1.0,
+                row_orientation: MrmsRowOrientation::NorthToSouth,
+            },
+            encoding: MrmsValueEncoding {
+                bit_depth: 16,
+                reference_value_bits: (-9_990.0f32).to_bits(),
+                binary_scale: 0,
+                decimal_scale: 1,
+                missing_raw: 9_000,
+                no_coverage_raw: 0,
+            },
+            levels: BTreeMap::from([(
+                1,
+                NumericGridLevel {
+                    factor: 1,
+                    width: 1,
+                    height: 1,
+                    raw_codes: vec![10_000],
+                },
+            )]),
         })
     }
 }
