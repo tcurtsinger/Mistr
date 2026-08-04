@@ -151,6 +151,7 @@ describe("SiteLevel2Session", () => {
 
   it("does not let a superseded selected-site request commit", async () => {
     const coordinator = new RadarSessionCoordinator();
+    const failed = vi.fn();
     const completions = new Map<string, (result: {
       value: string;
       paint: RadarPaintIdentity;
@@ -170,6 +171,7 @@ describe("SiteLevel2Session", () => {
         expect(coordinator.snapshot().requestedSource).toEqual(siteRadarSource(siteIcao));
         expect(coordinator.snapshot().transition?.generation).toBe(requestGeneration);
       }),
+      onTransitionFailed: failed,
     });
 
     const first = session.start("KAMX");
@@ -179,6 +181,7 @@ describe("SiteLevel2Session", () => {
     completions.get("KOKX")?.({ value: "new", paint: sitePaint("KOKX", 2, "new") });
     await expect(second).resolves.toBe("new");
     expect(coordinator.snapshot().painted?.source).toEqual(siteRadarSource("KOKX"));
+    expect(failed).not.toHaveBeenCalled();
   });
 
   it("preserves a provider error code when a rejected request was superseded", async () => {
@@ -213,5 +216,40 @@ describe("SiteLevel2Session", () => {
     expect(rejected).toBe(providerError);
     expect((rejected as typeof providerError).code).toBe("live_sweep_failed");
     expect(isRadarSourceSuperseded(rejected)).toBe(true);
+  });
+
+  it("reports only a current selected-site failure after coordinator rollback", async () => {
+    const coordinator = new RadarSessionCoordinator();
+    coordinator.establishPaintedSource({
+      source: { kind: "national", domain: "conus" },
+      generation: 4,
+      observationId: "national-current",
+    });
+    const providerError = new Error("site acquisition failed");
+    const failed = vi.fn((error: unknown, generation: number, siteIcao: string) => {
+      expect(error).toBe(providerError);
+      expect(generation).toBe(5);
+      expect(siteIcao).toBe("KTLX");
+      expect(coordinator.snapshot()).toMatchObject({
+        painted: {
+          source: { kind: "national", domain: "conus" },
+          generation: 4,
+          observationId: "national-current",
+        },
+        transition: undefined,
+        lastFailure: "site acquisition failed",
+      });
+    });
+    const session = new SiteLevel2Session<string>({
+      coordinator,
+      nextGeneration: () => 5,
+      acquireAndPaint: async () => {
+        throw providerError;
+      },
+      onTransitionFailed: failed,
+    });
+
+    await expect(session.start("KTLX")).rejects.toBe(providerError);
+    expect(failed).toHaveBeenCalledOnce();
   });
 });

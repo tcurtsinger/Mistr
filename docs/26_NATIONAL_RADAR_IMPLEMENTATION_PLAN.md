@@ -4,7 +4,7 @@
 |---|---|
 | Decision date | 2026-08-03 |
 | Last plan amendment | 2026-08-03 — 20-observation retained history, level-of-detail GPU working set, theoretical-domain encoding, time-sliced uploads, and cross-source freshness evidence |
-| Status | Approved plan; Phases 1 and 2 merged in PRs #15/#16; Phase 3 static National source active on `codex/mistr-national-static-renderer` for review |
+| Status | Approved plan; Phases 1 through 3 merged in PRs #15/#16/#17; Phase 4 bounded National history active on `codex/mistr-national-history` for review |
 | Planned source | NOAA Multi-Radar/Multi-Sensor System (MRMS) `MergedBaseReflectivityQC` |
 | Initial geographic scope | Contiguous United States (CONUS) |
 | Initial retained history | 20 exact observations, approximately 38 minutes at the normal two-minute publication cadence |
@@ -16,7 +16,7 @@ This document defines the next Mistr radar milestone: a truthful, bounded Nation
 
 The plan deliberately avoids the failure modes demonstrated by GustAVO's national/site radar path. National radar will not be assembled from individual Level II sites inside Mistr, represented as a large set of animated MapLibre tile sources, or automatically substituted for site radar at a zoom threshold. It will be a separate NOAA-produced gridded observation type with the same generation, ownership, paint-receipt, playback, recovery, and UI-truth standards already required by Mistr.
 
-This remains the governing phased contract. The owner authorized and merged Phase 1 through PR #15, then authorized and merged Phase 2 through PR #16 at `d87f27f`. The owner separately authorized Phase 3 on 2026-08-03. Phase 3 authorization extends only to one static current National observation, its renderer/working set, exact point interrogation, atomic source handoff, and visible source controls; it does not authorize National polling, history, playback, scrubbing, or playback-quality locking.
+This remains the governing phased contract. The owner authorized and merged Phase 1 through PR #15, Phase 2 through PR #16, and Phase 3 through PR #17 at `be4b05b`. The owner separately authorized Phase 4 on 2026-08-03. Phase 4 authorization extends only to bounded rolling National history, polling, all-frame residency, playback/scrubbing quality locking, paused detail refinement, exact retained-frame interrogation, and recovery; it does not authorize the Phase 5 long-session/platform hardening matrix.
 
 ## 2. Accepted product decisions
 
@@ -109,7 +109,7 @@ The existing `Smooth` and `Native` choices apply to National:
 
 Smooth must not interpolate through missing or no-coverage values, and it must not change the native dBZ value reported by map interrogation. A map click retains the existing small reticle and reports the exact source-native value in the bottom bar. Changing source or observation clears or recomputes the result so stale dBZ is never labeled as current.
 
-Because an overview frame may not carry every base-grid cell in frontend memory, National interrogation uses a bounded Rust-owned point lookup against the exact retained observation. The request and response carry the painted observation, generation, and geographic inspection identity. The UI accepts the value only if all three still match current paint truth; a late lookup from an older frame or source is discarded.
+Because an overview frame may not carry every base-grid cell in frontend memory, National interrogation uses a bounded Rust-owned point lookup against the exact retained observation. The request and response carry the painted observation, generation, and geographic inspection identity. The UI accepts the value only if all three still match current paint truth; a late lookup from an older frame or source is discarded. Playback may have only one exact lookup active and one latest-only pending receipt, preventing older observation cuts from forming an unbounded decode queue. Replacing or cancelling that pending receipt settles its caller immediately with no value; callers do not share one drain promise or remain retained behind work that has made their identity obsolete.
 
 Recenter fits the full supported CONUS domain when National is painted and fits measured radar coverage when Site is painted. User pan and zoom remain unrestricted afterward.
 
@@ -507,7 +507,7 @@ Exit gate: Mistr can acquire and transfer exact National observations safely, bu
 
 ### Phase 3 — Static end-to-end National source
 
-**Active branch status:** implemented and packaged-validated for review on `codex/mistr-national-static-renderer`. It exposes one complete current CONUS observation only; Phase 4 history and playback remain absent.
+**Merged status:** implemented, packaged-validated, reviewed, and merged through PR #17 at `be4b05b`. Merged `main` exposes one complete current CONUS observation only.
 
 Deliverables:
 
@@ -531,20 +531,28 @@ Phase 3 packaged evidence at 3840 by 2160 paints the complete 28-chunk factor-4 
 
 ### Phase 4 — Bounded rolling National history
 
+**Active branch status:** implemented and packaged-validated for review on `codex/mistr-national-history`. It extends the merged one-frame product without beginning Phase 5.
+
 Deliverables:
 
-- newest-first paint and bounded predecessor backfill;
+- newest-first paint and bounded predecessor backfill, with the unconsumed candidate retried through capped jitter/backoff after a transient failure and the exact Rust stage returned idempotently with an explicit reused marker when a completed preparation response is lost;
 - 20 exact retained chronological observations, approximately 38 minutes;
 - all 20 observations resident at the selected normal-CONUS overview level;
 - selected-frame and temporal-window detail residency at higher zoom;
+- overlapping callers join the active camera refinement rather than returning stale overview state;
+- strictly newer finalization releases superseded exact-pyramid acceleration state before later detail preparation, without discarding the immutable retained object;
 - a deterministic all-frame playback quality lock at higher zoom;
-- non-stuttering play and direct scrubbing at the common complete level, with selected-frame refinement only after pause or scrub settle;
-- strictly newer polling, append, and one-frame eviction;
+- non-stuttering play and direct scrubbing at the common complete level, with play/scrub waiting and product controls disabled until context recovery has restored all-frame common residency and completed its repaint/fence, and selected-frame refinement only after pause or scrub settle;
+- transaction-bound backend sealing after renderer finalization, with capped-delay retries continuing without a fixed attempt cutoff and identity-matching snapshot recovery for a lost successful response;
+- transaction-bound backend rollback before renderer finalization, with the same capped-delay/no-fixed-cutoff rule and exact snapshot proof that provisional state and the candidate are gone;
+- strictly newer polling, append, and one-frame eviction, with recovered no-newer inventory clearing stale errors and bounded local backoff preserving the loop through a transient delay-command failure;
 - truthful partial-history and recoverable-error status;
 - visible-first context recovery without network dependence;
 - rapid source-switch and supersession coverage.
 
 Exit gate: all 20 retained observations play and scrub entirely from GPU residency at the normal CONUS overview with bounded memory and zero hot-path acquisition, decode, disk, IPC, or upload activity. At high zoom, all frames maintain normal cadence and consistent visual quality at the common complete level; finer selected-frame detail stages only after playback pauses or scrubbing settles. The prior frame is held only when the target lacks the common level itself.
+
+Twelve passing Phase 4 packaged runs across review hardening at 3840 by 2160, including four consecutive runs of the final 32-row renderer after identity-bound rollback settlement and upload hardening, retain 20 exact chronological observations spanning 37.70 to 38.10 minutes, keep every complete factor-4 overview resident, complete 1,000 transitions plus oldest/newest direct scrubs with zero network/decode/IPC/upload activity, and record at most 65,201,668 bytes of GPU allocation with a 2.20 ms maximum passing upload slice across initial staging, detail, and both recovery passes. Two review-fix runs correctly rejected 4.40/5.50 ms recovery slices at 96/64 rows; the unchanged 4 ms threshold remained enforced, and the final 32-row renderer passed four consecutive runs at 1.70/1.90/1.80/2.10 ms. One evidence-only resident reservation binds the initial history, transitions, scrubs, and exact inspection to the same timeline while normal live polling remains enabled outside that window. High-zoom playback locks to the complete factor-4 level while paused selection and its bounded adjacent temporal window refine to exact factor-1 viewport detail; matching prepared detail is reused across camera moves. Persistent inspection refresh is proven across newest-to-oldest-to-newest cuts; active playback keeps one lookup in flight, coalesces pending cuts to the newest receipt, immediately settles replaced/cancelled pending callers, and drains the queue after pause. A successful National repaint clears a stale playback/recovery error. A Site request closes National playback input, waits observed acquisition/finalization, playback selection, refinement, and working-set activity before transfer cancellation, then revalidates current intent. Real context loss restores all 20 common residents from retained CPU bytes at epoch 2 with zero backend activity; play and direct scrub share the barrier that requires full common residency plus the recovered repaint/fence before selection resumes. The backend ledger counts a uniquely journal-owned prior detailed frame while replacement detail exists, so finalization retries cannot hide memory from the 180 MiB target. Deterministic tests also prove a failed predecessor remains eligible and retries through capped jitter/backoff, a repeated predecessor/newer preparation returns its explicitly reused matching Rust stage after a lost response, ambiguous rollback keeps retrying until Rust or exact snapshot proof resolves it, an irreversible renderer mutation keeps sealing beyond three failures or accepts a matching non-reversible snapshot, a healthy no-newer inventory clears a stale error, and a failed delay command uses bounded local fallback without ending polling. A forced Site failure begins with National playback active, waits that controller before restoring a newer active National generation, forces another context loss after renderer finalization, publishes the recovered same-presentation receipt, and restarts backfill while retaining the old painted fallback. Duplicate backend finalization is idempotent for the last sealed identity. Both shared credits return, and a later successful transition safely hands National back to KTLX. Complete evidence is in [National Phase 4 History and Playback](phase-reports/NATIONAL_PHASE_4_HISTORY_PLAYBACK.md).
 
 ### Phase 5 — Packaged Windows/WebView2 hardening
 
@@ -713,6 +721,14 @@ The owner separately authorized Phase 3 after that merge. The Phase 3 branch:
 2. preserved the two protected untracked SVG files without modification;
 3. implements only the static National session, numeric-grid renderer, bounded overview/detail working sets, exact point interrogation, explicit source UI, source-aware recenter, and context recovery;
 4. retains all Site diagnostic APIs and the single global two-credit broker; and
-5. will stop at the Phase 3 exit gate after full source/packaged regressions, commit, push, and a Ready-for-review PR.
+5. stopped at the Phase 3 exit gate, opened Ready-for-review PR #17, and was merged by the owner at `be4b05b`.
 
-Phase 4 remains blocked on Phase 3 review, owner merge, and separate owner authorization.
+The owner separately authorized Phase 4 after that merge. The Phase 4 branch:
+
+1. started from merged commit `be4b05b` after verifying `main` and `origin/main` matched;
+2. preserved the two protected untracked SVG files without modification;
+3. implements only bounded current/predecessor/newer National history, 20 common overview residents, common-quality playback/scrub, paused/settled detail, exact retained-frame lookup, and all-frame recovery;
+4. retains every Phase 2/3 National and Phase 4/5/6 Site diagnostic API plus the single global two-credit broker; and
+5. stops at the Phase 4 exit gate after full source/packaged regressions, commit, push, and a Ready-for-review PR.
+
+Phase 5 remains blocked on Phase 4 review, owner merge, and separate owner authorization.

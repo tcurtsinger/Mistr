@@ -27,6 +27,10 @@ import {
   type Phase4ActivitySnapshot,
   type Phase5LiveTransferEvidence,
   type NationalPhase3PrepareReport,
+  type NationalHistoryActivitySnapshot,
+  type NationalHistoryObservation,
+  type NationalHistoryPrepareReport,
+  type NationalHistorySnapshot,
   type NationalPointLookup,
   type LiveSweepCursor,
   type TransferTiming,
@@ -35,6 +39,10 @@ import {
   ResidentPlaybackController,
   type PlaybackStateSnapshot,
 } from "./playback/ResidentPlaybackController";
+import {
+  NationalPlaybackController,
+  type NationalPlaybackSnapshot,
+} from "./playback/NationalPlaybackController";
 import {
   FramePerformanceMonitor,
   summarizeDurations,
@@ -98,9 +106,24 @@ import {
   type NationalPaintReceipt,
 } from "./national-radar/NationalGridLayer";
 import {
-  NationalWorkingSetController,
-  type NationalWorkingSetResult,
-} from "./national-radar/NationalWorkingSetController";
+  NationalHistoryWorkingSetController,
+  observationId as nationalObservationId,
+  type NationalHistoryWorkingSetResult,
+} from "./national-radar/NationalHistoryWorkingSetController";
+import {
+  LatestOnlyAsyncQueue,
+  type LatestOnlyAsyncQueueSnapshot,
+} from "./national-radar/LatestOnlyAsyncQueue";
+import { runNationalBackfillLoop } from "./national-radar/NationalBackfillLoop";
+import { finalizeNationalHistoryUntilSettled } from "./national-radar/NationalFinalizeLoop";
+import {
+  nationalPollingFallbackDelayMs,
+  runNationalPollingLoop,
+} from "./national-radar/NationalPollingLoop";
+import {
+  rollbackNationalHistoryUntilSettled,
+  snapshotProvesNationalHistoryRollback,
+} from "./national-radar/NationalRollbackLoop";
 import { colorForReflectivity } from "./radar-renderer/palette";
 import { RadarChrome } from "./ui/RadarChrome";
 import {
@@ -146,9 +169,10 @@ export function App() {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<MapLibreMap | null>(null);
   const playbackControllerRef = useRef<ResidentPlaybackController | null>(null);
+  const nationalPlaybackControllerRef = useRef<NationalPlaybackController | null>(null);
   const radarLayerRef = useRef<RadarCustomLayer | null>(null);
   const nationalLayerRef = useRef<NationalGridLayer | null>(null);
-  const nationalWorkingSetRef = useRef<NationalWorkingSetController | null>(null);
+  const nationalWorkingSetRef = useRef<NationalHistoryWorkingSetController | null>(null);
   const startupSourceRef = useRef(restoreRadarSource());
   const radarSessionCoordinatorRef = useRef<RadarSessionCoordinator | null>(null);
   if (!radarSessionCoordinatorRef.current) {
@@ -187,6 +211,8 @@ export function App() {
   );
   const [requestedSourceKind, setRequestedSourceKind] = useState<"site" | "national" | undefined>();
   const [nationalPhase3, setNationalPhase3] = useState<NationalPhase3Report | null>(null);
+  const [nationalPlayback, setNationalPlayback] = useState<NationalPlaybackSnapshot | null>(null);
+  const [nationalHistory, setNationalHistory] = useState<NationalHistorySnapshot | null>(null);
   const [timelineFrames, setTimelineFrames] = useState<TimelineFrame[]>([]);
   const [liveHistoryStatus, setLiveHistoryStatus] = useState<LiveHistoryStatus | undefined>();
   const [displayMode, setDisplayMode] = useState<RadarDisplayMode>(restoreRadarDisplayMode);
@@ -272,14 +298,31 @@ export function App() {
     let client: PackedSweepTransferClient | null = null;
     let siteLevel2Session: SiteLevel2Session<Phase5Report> | null = null;
     let nationalLayer: NationalGridLayer | null = null;
-    let nationalWorkingSet: NationalWorkingSetController | null = null;
+    let nationalWorkingSet: NationalHistoryWorkingSetController | null = null;
+    let nationalPlaybackController: NationalPlaybackController | null = null;
+    let nationalObservations: NationalHistoryObservation[] = [];
+    let latestNationalHistory: NationalHistorySnapshot | null = null;
+    let latestNationalInspection: NationalPointLookup | null = null;
+    let nationalInspectionLookupQueueForCleanup: LatestOnlyAsyncQueue<
+      NationalInspectionLookupRequest,
+      NationalPointLookup | null
+    > | null = null;
+    let nationalHistorySession = 0;
+    let nationalBackfillStartCount = 0;
     let nationalMrmsSession: NationalMrmsSession<NationalPhase3Report> | null = null;
-    let nationalRefinement: Promise<NationalWorkingSetResult> | null = null;
+    let lastNationalRestorationAfterSiteFailure: Promise<NationalPhase3Report> | null = null;
+    let failNextSiteFromNationalForDiagnostics = false;
+    let resetNextNationalAfterRendererFinalizeForDiagnostics = false;
+    let nationalRefinement: Promise<NationalHistoryWorkingSetResult | void> | null = null;
+    let nationalAcquisitionOperation: Promise<unknown> | null = null;
+    let nationalResidentOnlyReservations = 0;
+    let nationalPhase4EvidenceRelease: (() => void) | null = null;
     let nationalCoverageVersion = 0;
     let lastNationalCameraKey = nationalCameraKey(instance);
     let pendingNationalCameraKey: string | null = null;
     let nationalMoveHandler: (() => void) | null = null;
     let latestNationalPhase3: NationalPhase3Report | null = null;
+    let staticNationalDiagnostic = false;
     let clickHandler: ((event: MapMouseEvent) => void) | null = null;
     let latestReport: Phase4Report | null = null;
     let activeScenario: Promise<Phase4ScenarioReport> | null = null;
@@ -658,37 +701,21 @@ export function App() {
             setInspectionSelected(false);
             return;
           }
-          const inspectionId = globalThis.crypto.randomUUID();
-          inspectionRequestRef.current = inspectionId;
           inspectionPointRef.current = point;
-          interrogationObservationRef.current = paintedTruth.observationId;
+          interrogationObservationRef.current = null;
           setInspectionSelected(true);
           setInterrogation(null);
           placeInspectionMarker(instance, event.lngLat, inspectionMarkerRef);
-          void client.lookupNationalPoint({
-            generation: renderer.paintReceipt.generation,
-            observationTimeUnixMs: renderer.paintReceipt.observationTimeUnixMs,
-            contentSha256: renderer.paintReceipt.contentSha256,
-            inspectionId,
-            ...point,
-          }).then((lookup) => {
-            const currentPainted = radarSessionCoordinatorRef.current!.snapshot().painted;
-            if (
-              inspectionRequestRef.current !== inspectionId
-              || currentPainted?.source.kind !== "national"
-              || currentPainted.generation !== lookup.generation
-              || currentPainted.observationId !== paintedTruth.observationId
-            ) return;
-            setInterrogation(nationalPointInterrogation(lookup));
-          }).catch(() => {
-            if (inspectionRequestRef.current === inspectionId) setInterrogation(null);
-          });
+          // The shared refresh path also runs for every later playback/scrub
+          // receipt, so this exact value can never survive an observation cut.
+          void refreshNationalInterrogation(renderer.paintReceipt);
           return;
         }
         const paintedId = layer?.getSnapshot().lastPaintedObservationId;
         const paintedModel = paintedId ? modelsById.get(paintedId) : undefined;
         if (!paintedModel) {
           setInterrogation(null);
+          latestNationalInspection = null;
           setInspectionSelected(false);
           return;
         }
@@ -1042,7 +1069,6 @@ export function App() {
         setLiveHistoryStatus(undefined);
         const report = await acquireLive(site, false, 180, "after", requestedGeneration);
         if (!cancelled && pollingSession === livePollingSession) {
-          setLiveHistoryStatus("loading");
           continueLiveBackfillAndPolling(site, pollingSession, historyLimit);
         }
         return report;
@@ -1060,10 +1086,39 @@ export function App() {
       ): Promise<Phase5Report> => {
         if (!client) throw new Error("selected-site transfer client is unavailable");
         const activeClient = client;
+        const assertSiteTransitionStillCurrent = () => {
+          const transition = radarSessionCoordinatorRef.current!.snapshot().transition;
+          if (
+            transition?.generation !== generation
+            || transition.requestedSource.kind !== "site"
+            || transition.requestedSource.siteIcao !== site
+          ) {
+            throw new RadarSourceSupersededError(
+              "Site transition was superseded while National activity settled",
+            );
+          }
+        };
+        const nationalOperation = nationalAcquisitionOperation;
+        if (nationalOperation) await nationalOperation.catch(() => {});
+        assertSiteTransitionStillCurrent();
+        queuedScrubRef.current = null;
+        const playbackToSettle = nationalPlaybackController;
+        if (playbackToSettle) await playbackToSettle.pauseAndWait(false);
+        const refinementToSettle = nationalRefinement;
+        if (refinementToSettle) await refinementToSettle.catch(() => {});
+        await nationalWorkingSet?.waitForIdle();
+        assertSiteTransitionStillCurrent();
         transferGeneration = generation;
         livePollingSession += 1;
+        nationalHistorySession += 1;
+        nationalCoverageVersion += 1;
+        nationalWorkingSet?.cancel();
         const pollingSession = livePollingSession;
         await activeClient.begin(generation);
+        if (failNextSiteFromNationalForDiagnostics) {
+          failNextSiteFromNationalForDiagnostics = false;
+          throw new Error("diagnostic Site transition failure after National cancellation");
+        }
         const lease = await activeClient.requestPhase5Live(site, false, 180);
         let createdLayer: RadarCustomLayer | null = null;
         let createdController: ResidentPlaybackController | null = null;
@@ -1171,13 +1226,65 @@ export function App() {
         if (nationalLayer && instance.getLayer(nationalLayer.id)) instance.removeLayer(nationalLayer.id);
         nationalLayer = null;
         nationalWorkingSet = null;
+        nationalPlaybackController?.dispose();
+        nationalPlaybackController = null;
+        nationalPlaybackControllerRef.current = null;
+        nationalObservations = [];
+        latestNationalHistory = null;
+        nationalHistorySession += 1;
         nationalLayerRef.current = null;
         nationalWorkingSetRef.current = null;
         latestNationalPhase3 = null;
         setNationalPhase3(null);
+        setNationalPlayback(null);
+        setNationalHistory(null);
         continueLiveBackfillAndPolling(model.siteIcao, pollingSession);
         radarSessionCoordinatorRef.current!.synchronizePaint(
           radarPaintIdentity(model, receipt),
+        );
+      };
+
+      const restoreNationalAfterSiteFailure = (generation: number) => {
+        const sourceState = radarSessionCoordinatorRef.current!.snapshot();
+        if (
+          cancelled
+          || transferGeneration !== generation
+          || sourceState.transition
+          || sourceState.painted?.source.kind !== "national"
+        ) return;
+        const session = nationalMrmsSession;
+        if (!session) {
+          setNationalRequestError("National radar could not restart after the Site request failed");
+          return;
+        }
+        const restoration = (async () => {
+          const playbackToSettle = nationalPlaybackController;
+          if (playbackToSettle) {
+            await playbackToSettle.pauseAndWait(false).catch(() => {});
+          }
+          await nationalWorkingSet?.waitForIdle();
+          const current = radarSessionCoordinatorRef.current!.snapshot();
+          if (
+            cancelled
+            || transferGeneration !== generation
+            || current.transition
+            || current.painted?.source.kind !== "national"
+          ) {
+            throw new RadarSourceSupersededError(
+              "National restoration was superseded while resident playback settled",
+            );
+          }
+          return session.start();
+        })();
+        lastNationalRestorationAfterSiteFailure = restoration;
+        void restoration.then(
+          () => setNationalRequestError(null),
+          (error: unknown) => {
+            if (isRadarSourceSuperseded(error)) return;
+            setNationalRequestError(
+              `National radar restart failed: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          },
         );
       };
 
@@ -1209,6 +1316,9 @@ export function App() {
           };
         },
         onPaintAccepted: (report) => acceptSiteBootstrap(report),
+        onTransitionFailed: (_error, generation) => {
+          restoreNationalAfterSiteFailure(generation);
+        },
       });
       siteLevel2SessionRef.current = siteLevel2Session;
       const removeSiteAfterNationalPaint = () => {
@@ -1254,6 +1364,7 @@ export function App() {
           displayMode: displayModeRef.current,
           recoveryBeforeLayerId: radarContextAnchorLayerId(instance.getStyle().layers ?? []),
           onSnapshot(renderer) {
+            setPlaybackError((current) => playbackErrorAfterRendererStatus(current, renderer.status));
             if (renderer.displayMode !== displayModeRef.current) {
               displayModeRef.current = renderer.displayMode;
               setDisplayMode(renderer.displayMode);
@@ -1262,6 +1373,9 @@ export function App() {
             if (latestNationalPhase3) {
               latestNationalPhase3 = { ...latestNationalPhase3, renderer };
               setNationalPhase3(latestNationalPhase3);
+            }
+            if (nationalPlaybackController) {
+              setNationalPlayback(nationalPlaybackController.snapshot());
             }
             if (renderer.status === "painted" && pendingNationalCameraKey) {
               const currentCameraKey = nationalCameraKey(instance);
@@ -1274,7 +1388,10 @@ export function App() {
             }
           },
         });
-        nationalWorkingSet = new NationalWorkingSetController(activeClientForNational(), nationalLayer);
+        nationalWorkingSet = new NationalHistoryWorkingSetController(
+          activeClientForNational(),
+          nationalLayer,
+        );
         const beforeId = radarContextAnchorLayerId(instance.getStyle().layers ?? []);
         addLayer(instance, nationalLayer, beforeId);
         nationalLayerRef.current = nationalLayer;
@@ -1286,26 +1403,198 @@ export function App() {
         return client;
       };
 
-      const refineNationalForCamera = () => {
+      const nationalInspectionLookupQueue = new LatestOnlyAsyncQueue<
+        NationalInspectionLookupRequest,
+        NationalPointLookup | null
+      >(async (request) => {
+        if (
+          inspectionRequestRef.current !== request.inspectionId
+          || !inspectionPointRef.current
+        ) return null;
+        try {
+          const lookup = await activeClientForNational().lookupNationalHistoryPoint({
+            generation: request.receipt.generation,
+            observationTimeUnixMs: request.receipt.observationTimeUnixMs,
+            contentSha256: request.receipt.contentSha256,
+            inspectionId: request.inspectionId,
+            longitude: request.longitude,
+            latitude: request.latitude,
+          });
+          const painted = radarSessionCoordinatorRef.current!.snapshot().painted;
+          const currentReceipt = nationalLayer?.getSnapshot().paintReceipt;
+          if (
+            inspectionRequestRef.current !== request.inspectionId
+            || painted?.source.kind !== "national"
+            || painted.generation !== request.receipt.generation
+            || painted.observationId !== request.receipt.observationId
+            || currentReceipt?.generation !== request.receipt.generation
+            || currentReceipt.observationId !== request.receipt.observationId
+            || currentReceipt.observationTimeUnixMs !== request.receipt.observationTimeUnixMs
+            || currentReceipt.contentSha256 !== request.receipt.contentSha256
+          ) return null;
+          latestNationalInspection = lookup;
+          setInterrogation(nationalPointInterrogation(lookup));
+          return lookup;
+        } catch {
+          if (inspectionRequestRef.current === request.inspectionId) setInterrogation(null);
+          return null;
+        }
+      });
+      nationalInspectionLookupQueueForCleanup = nationalInspectionLookupQueue;
+
+      const refreshNationalInterrogation = async (
+        receipt: NationalPaintReceipt,
+      ): Promise<NationalPointLookup | null> => {
+        const point = inspectionPointRef.current;
+        if (!point) return null;
+        if (interrogationObservationRef.current === receipt.observationId) {
+          if (latestNationalInspection) return latestNationalInspection;
+          await nationalInspectionLookupQueue.waitForIdle();
+          return interrogationObservationRef.current === receipt.observationId
+            ? latestNationalInspection
+            : null;
+        }
+        const inspectionId = globalThis.crypto.randomUUID();
+        inspectionRequestRef.current = inspectionId;
+        interrogationObservationRef.current = receipt.observationId;
+        latestNationalInspection = null;
+        setInterrogation(null);
+        const result = await nationalInspectionLookupQueue.enqueue({
+          receipt,
+          inspectionId,
+          ...point,
+        });
+        return inspectionRequestRef.current === inspectionId ? result : null;
+      };
+
+      const finalizeNationalHistoryCommit = async (
+        activeClient: PackedSweepTransferClient,
+        observation: NationalHistoryObservation,
+      ): Promise<NationalHistorySnapshot> => {
+        return finalizeNationalHistoryUntilSettled({
+          shouldContinue: () => !cancelled,
+          finalize: () => activeClient.finalizeNationalHistoryFrame(observation),
+          async recoverFinalized() {
+            const snapshot = await activeClient.nationalHistorySnapshot();
+            return nationalHistoryContainsFinalizedObservation(snapshot, observation)
+              ? snapshot
+              : null;
+          },
+          isTerminal: (error) => (
+            nationalHistoryErrorCode(error) === "national_history_generation_stale"
+          ),
+          onFailure(error) {
+            setNationalRequestError(
+              `National history is sealing before acquisition can continue: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          },
+          waitBeforeRetry: (attempt) => waitMilliseconds(
+            Math.min(1_000, 25 * (2 ** (attempt - 1))),
+          ),
+          cancellationError: () => new RadarSourceSupersededError(
+            "National history finalization was cancelled during application teardown",
+          ),
+        });
+      };
+
+      const rollbackNationalHistoryCommit = async (
+        activeClient: PackedSweepTransferClient,
+        observation: NationalHistoryObservation,
+      ): Promise<NationalHistorySnapshot> => {
+        return rollbackNationalHistoryUntilSettled({
+          shouldContinue: () => !cancelled,
+          rollback: () => activeClient.rollbackNationalHistoryFrame(observation),
+          async recoverRolledBack() {
+            const snapshot = await activeClient.nationalHistorySnapshot();
+            return snapshotProvesNationalHistoryRollback(snapshot, observation)
+              ? snapshot
+              : null;
+          },
+          isTerminal: (error) => (
+            nationalHistoryErrorCode(error) === "national_history_generation_stale"
+          ),
+          onFailure(error) {
+            setNationalRequestError(
+              `National history is rolling back before acquisition can continue: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          },
+          waitBeforeRetry: (attempt) => waitMilliseconds(
+            Math.min(1_000, 25 * (2 ** (attempt - 1))),
+          ),
+          cancellationError: () => new RadarSourceSupersededError(
+            "National history rollback was cancelled during application teardown",
+          ),
+        });
+      };
+
+      const resetNationalAfterRendererFinalizeForDiagnostics = (
+        activeLayer: NationalGridLayer,
+      ) => {
+        if (!resetNextNationalAfterRendererFinalizeForDiagnostics) return;
+        resetNextNationalAfterRendererFinalizeForDiagnostics = false;
+        void activeLayer.simulateContextResetForTest(150).catch(() => {});
+      };
+
+      const acquireNationalResidentOnlyActivity = async (): Promise<() => void> => {
+        nationalResidentOnlyReservations += 1;
+        const acquisition = nationalAcquisitionOperation;
+        if (acquisition) await acquisition.catch(() => {});
+        const refinement = nationalRefinement;
+        if (refinement) await refinement.catch(() => {});
+        await nationalWorkingSet?.waitForIdle();
+        let released = false;
+        return () => {
+          if (released) return;
+          released = true;
+          nationalResidentOnlyReservations = Math.max(0, nationalResidentOnlyReservations - 1);
+        };
+      };
+
+      const runNationalAcquisition = async <T,>(operation: () => Promise<T>): Promise<T> => {
+        while (nationalResidentOnlyReservations > 0) {
+          await waitMilliseconds(100);
+        }
+        const pending = operation();
+        nationalAcquisitionOperation = pending;
+        try {
+          return await pending;
+        } finally {
+          if (nationalAcquisitionOperation === pending) nationalAcquisitionOperation = null;
+        }
+      };
+
+      const refineNationalForCamera = (): Promise<NationalHistoryWorkingSetResult | void> | null => {
+        if (nationalRefinement) return nationalRefinement;
         if (
           !nationalLayer
           || !nationalWorkingSet
-          || nationalRefinement
           || radarSessionCoordinatorRef.current!.snapshot().painted?.source.kind !== "national"
-        ) return;
+          || nationalPlaybackController?.snapshot().playing
+        ) return null;
         const layerSnapshot = nationalLayer.getSnapshot();
         if (layerSnapshot.status !== "painted") {
           pendingNationalCameraKey = nationalCameraKey(instance);
-          return;
+          return null;
         }
         const expectedGeneration = layerSnapshot.generation;
-        if (!expectedGeneration) return;
+        const selectedObservationId = layerSnapshot.selectedObservationId;
+        const selectedObservation = nationalObservations.find(
+          (observation) => nationalObservationId(observation) === selectedObservationId,
+        );
+        if (!expectedGeneration || !selectedObservation) return null;
+        if (instance.getZoom() < 7.5) {
+          nationalPlaybackController?.notifyCameraChanged(false);
+          return null;
+        }
         nationalCoverageVersion += 1;
         const cameraVersion = nationalCoverageVersion;
+        const bounds = mapBounds(instance);
+        const timelineIds = nationalObservations.map(nationalObservationId);
         const ownershipCheck = () => {
           const painted = radarSessionCoordinatorRef.current!.snapshot().painted;
           if (
             cameraVersion !== nationalCoverageVersion
+            || nationalResidentOnlyReservations > 0
             || transferGeneration !== expectedGeneration
             || painted?.source.kind !== "national"
             || painted.generation !== expectedGeneration
@@ -1313,33 +1602,63 @@ export function App() {
             throw new RadarSourceSupersededError("National camera refinement was superseded");
           }
         };
-        const currentFactor = nationalLayer.getSnapshot().presentationFactor;
-        const operation = instance.getZoom() >= 7.5
-          ? nationalWorkingSet.stageDetailedViewport(
-              mapBounds(instance),
-              ownershipCheck,
-            )
-          : currentFactor === 4
-            ? null
-            : nationalWorkingSet.stageCompleteOverview(ownershipCheck);
-        if (!operation) return;
-        nationalRefinement = operation;
-        void operation.then((workingSet) => {
+        const operation = (async () => {
+          await nationalWorkingSet!.waitForIdle();
+          ownershipCheck();
+          const workingSet = await nationalWorkingSet!.stageSelectedDetail(
+            selectedObservation,
+            bounds,
+            timelineIds,
+            ownershipCheck,
+            async () => {
+              if (nationalPlaybackController?.snapshot().playing) {
+                await nationalPlaybackController.pauseAndWait(false);
+              }
+            },
+          );
+          if (!workingSet.receipt) {
+            throw new Error("selected National refinement completed without a paint receipt");
+          }
+          nationalPlaybackController?.acceptRefinement(workingSet.receipt);
           if (latestNationalPhase3) {
             latestNationalPhase3 = {
               ...latestNationalPhase3,
-              workingSet,
+              workingSet: workingSetWithReceipt(workingSet),
               renderer: nationalLayer?.getSnapshot() ?? latestNationalPhase3.renderer,
             };
             setNationalPhase3(latestNationalPhase3);
           }
-        }).catch(() => {
+
+          const selectedIndex = nationalObservations.findIndex(
+            (observation) => nationalObservationId(observation) === selectedObservationId,
+          );
+          const temporalWindow = nationalObservations.filter((_, index) => (
+            Math.abs(index - selectedIndex) <= 1
+          ));
+          for (const observation of temporalWindow) {
+            if (nationalObservationId(observation) === selectedObservationId) continue;
+            ownershipCheck();
+            await nationalWorkingSet!.prefetchDetail(
+              observation,
+              bounds,
+              timelineIds,
+              ownershipCheck,
+            );
+          }
+          nationalLayer?.pruneDetailResidency(temporalWindow.map(nationalObservationId));
+          return workingSet;
+        })();
+        nationalRefinement = operation;
+        void operation.catch(() => {
           // The prior complete presentation remains authoritative. A later
           // moveend retries the current camera rather than exposing a partial.
         }).finally(() => {
           nationalRefinement = null;
-          if (cameraVersion !== nationalCoverageVersion) refineNationalForCamera();
+          if (cameraVersion !== nationalCoverageVersion) {
+            globalThis.queueMicrotask(() => refineNationalForCamera());
+          }
         });
+        return operation;
       };
       nationalMoveHandler = () => {
         if (radarSessionCoordinatorRef.current!.snapshot().painted?.source.kind !== "national") return;
@@ -1353,9 +1672,220 @@ export function App() {
         pendingNationalCameraKey = null;
         nationalCoverageVersion += 1;
         nationalWorkingSet?.cancel();
-        refineNationalForCamera();
+        nationalPlaybackController?.notifyCameraChanged(instance.getZoom() >= 7.5);
       };
       instance.on("moveend", nationalMoveHandler);
+
+      const publishNationalHistory = (
+        history: NationalHistorySnapshot,
+        receipt: NationalPaintReceipt,
+        resumePlayback: boolean,
+      ) => {
+        nationalObservations = [...history.retained];
+        latestNationalHistory = history;
+        setNationalHistory(history);
+        setTimelineFrames(nationalObservations.map((observation) => ({
+          observationId: nationalObservationId(observation),
+          observedAtUnixMs: observation.observationTimeUnixMs,
+        })));
+        setLiveHistoryStatus(
+          history.retained.length >= history.historyLimit
+            ? "full"
+            : history.pendingBackfillCount > 0 ? "loading" : "partial",
+        );
+        nationalPlaybackController?.acceptHistory(nationalObservations, receipt);
+        nationalPlaybackController?.resumeAfterMutation(resumePlayback);
+      };
+
+      const nationalHistoryOwnershipCheck = (generation: number, historySession: number) => {
+        const painted = radarSessionCoordinatorRef.current!.snapshot().painted;
+        if (
+          cancelled
+          || historySession !== nationalHistorySession
+          || transferGeneration !== generation
+          || painted?.source.kind !== "national"
+          || painted.generation !== generation
+        ) {
+          throw new RadarSourceSupersededError("National history work was superseded");
+        }
+      };
+
+      const commitNationalHistoryMutation = async (
+        preparation: NationalHistoryPrepareReport,
+        historySession: number,
+      ) => {
+        const activeClient = activeClientForNational();
+        const activeWorkingSet = nationalWorkingSet;
+        const activePlayback = nationalPlaybackController;
+        const activeLayer = nationalLayer;
+        if (!activeWorkingSet || !activePlayback || !activeLayer) {
+          throw new Error("National history renderer is unavailable");
+        }
+        const generation = preparation.observation.generation;
+        const before = [...nationalObservations];
+        const candidateId = nationalObservationId(preparation.observation);
+        const proposed = preparation.kind === "predecessor"
+          ? [preparation.observation, ...before]
+          : [...before, preparation.observation].slice(-20);
+        const playbackBefore = activePlayback.snapshot();
+        const previousNewestId = before.length > 0
+          ? nationalObservationId(before.at(-1)!)
+          : candidateId;
+        let selectedObservationId = playbackBefore.selectedObservationId;
+        if (
+          preparation.kind === "newer"
+          && !playbackBefore.playing
+          && selectedObservationId === previousNewestId
+        ) {
+          selectedObservationId = candidateId;
+        }
+        if (!proposed.some((observation) => nationalObservationId(observation) === selectedObservationId)) {
+          selectedObservationId = nationalObservationId(proposed[0]);
+        }
+        let resumePlayback = false;
+        let workingSet: NationalHistoryWorkingSetResult | undefined;
+        let backendFinalized = false;
+        let rendererFinalized = false;
+        activePlayback.markReplacementPending(true);
+        try {
+          await activeWorkingSet.waitForIdle();
+          nationalHistoryOwnershipCheck(generation, historySession);
+          workingSet = await activeWorkingSet.stageHistoryOverview(
+            preparation.observation,
+            proposed.map(nationalObservationId),
+            selectedObservationId,
+            () => nationalHistoryOwnershipCheck(generation, historySession),
+            async () => {
+              resumePlayback = activePlayback.snapshot().playing
+                ? await activePlayback.pauseAndWait(false)
+                : false;
+              nationalHistoryOwnershipCheck(generation, historySession);
+            },
+          );
+          if (!workingSet.receipt) {
+            throw new Error("National history mutation completed without a paint receipt");
+          }
+          nationalHistoryOwnershipCheck(generation, historySession);
+          await activeClient.commitNationalHistoryFrame(preparation.observation);
+          nationalHistoryOwnershipCheck(generation, historySession);
+          activeLayer.finalizeHistoryMutation(workingSet.receipt);
+          rendererFinalized = true;
+          resetNationalAfterRendererFinalizeForDiagnostics(activeLayer);
+          const finalizedHistory = await finalizeNationalHistoryCommit(
+            activeClient,
+            preparation.observation,
+          );
+          backendFinalized = true;
+          const authoritativeReceipt = await activeLayer.waitForAuthoritativeReceipt(
+            workingSet.receipt,
+          );
+          nationalHistoryOwnershipCheck(generation, historySession);
+          const finalizedWorkingSet = { ...workingSet, receipt: authoritativeReceipt };
+          publishNationalHistory(finalizedHistory, authoritativeReceipt, resumePlayback);
+          setNationalRequestError(null);
+          return finalizedWorkingSet;
+        } catch (error) {
+          activePlayback.markReplacementPending(false);
+          if (workingSet?.receipt && !rendererFinalized) {
+            try {
+              await activeLayer.rollbackHistoryMutation(workingSet.receipt);
+            } catch {
+              // The controller may already have rolled back a superseded paint.
+            }
+          }
+          if (!backendFinalized && !rendererFinalized) {
+            try {
+              await rollbackNationalHistoryCommit(activeClient, preparation.observation);
+            } catch {
+              // A newer generation may already own the backend. Preserve the
+              // original mutation error rather than relabeling it.
+            }
+          }
+          activePlayback.resumeAfterMutation(resumePlayback);
+          throw error;
+        }
+      };
+
+      const runNationalPolling = async (generation: number, historySession: number) => {
+        await runNationalPollingLoop({
+          shouldContinue: () => !cancelled && historySession === nationalHistorySession,
+          poll: () => runNationalAcquisition(async () => {
+            nationalHistoryOwnershipCheck(generation, historySession);
+            const preparation = await activeClientForNational().prepareNationalHistoryNewer();
+            nationalHistoryOwnershipCheck(generation, historySession);
+            await commitNationalHistoryMutation(preparation, historySession);
+          }),
+          classifyError(error) {
+            if (isRadarSourceSuperseded(error)) return "superseded";
+            return nationalHistoryErrorCode(error) === "mrms_not_strictly_newer"
+              ? "not_strictly_newer"
+              : "failure";
+          },
+          onHealthyPoll() {
+            setNationalRequestError(null);
+          },
+          onFailure(error) {
+            setNationalRequestError(error instanceof Error ? error.message : String(error));
+          },
+          async requestDelayMs(attempt) {
+            const delay = await activeClientForNational().nationalHistoryPollDelay(
+              attempt,
+              Date.now() % Number.MAX_SAFE_INTEGER,
+            );
+            return delay.totalMs;
+          },
+          wait: waitMilliseconds,
+        });
+      };
+
+      const runNationalBackfill = async (generation: number) => {
+        nationalBackfillStartCount += 1;
+        const historySession = nationalHistorySession + 1;
+        nationalHistorySession = historySession;
+        setLiveHistoryStatus("loading");
+        try {
+          const result = await runNationalBackfillLoop({
+            shouldContinue: () => !cancelled && historySession === nationalHistorySession,
+            prepare: () => runNationalAcquisition(async () => {
+              nationalHistoryOwnershipCheck(generation, historySession);
+              return activeClientForNational().prepareNationalHistoryPredecessor();
+            }),
+            commit: async (preparation) => {
+              await runNationalAcquisition(
+                () => commitNationalHistoryMutation(preparation, historySession),
+              );
+            },
+            reachedLimit: () => nationalObservations.length >= 20,
+            isSuperseded: isRadarSourceSuperseded,
+            onFailure(error) {
+              setLiveHistoryStatus(nationalObservations.length >= 20 ? "full" : "loading");
+              setNationalRequestError(error instanceof Error ? error.message : String(error));
+            },
+            async waitBeforeRetry(attempt) {
+              try {
+                const delay = await activeClientForNational().nationalHistoryPollDelay(
+                  attempt,
+                  Date.now() % Number.MAX_SAFE_INTEGER,
+                );
+                await waitMilliseconds(delay.totalMs);
+              } catch (error) {
+                nationalHistoryOwnershipCheck(generation, historySession);
+                setNationalRequestError(error instanceof Error ? error.message : String(error));
+                await waitMilliseconds(nationalPollingFallbackDelayMs(attempt));
+              }
+              nationalHistoryOwnershipCheck(generation, historySession);
+            },
+          });
+          if (result === "superseded") return;
+          nationalHistoryOwnershipCheck(generation, historySession);
+          setLiveHistoryStatus(nationalObservations.length >= 20 ? "full" : "partial");
+          await runNationalPolling(generation, historySession);
+        } catch (error) {
+          if (isRadarSourceSuperseded(error)) return;
+          setLiveHistoryStatus(nationalObservations.length >= 20 ? "full" : "partial");
+          setNationalRequestError(error instanceof Error ? error.message : String(error));
+        }
+      };
 
       nationalMrmsSession = new NationalMrmsSession({
         coordinator: radarSessionCoordinatorRef.current!,
@@ -1368,9 +1898,13 @@ export function App() {
           const activeClient = activeClientForNational();
           transferGeneration = generation;
           livePollingSession += 1;
+          nationalHistorySession += 1;
           await activeClient.begin(generation);
-          const preparation = await activeClient.prepareNationalPhase3();
-          if (preparation.generation !== generation || transferGeneration !== generation) {
+          const historyPreparation = await activeClient.prepareNationalHistoryCurrent();
+          if (
+            historyPreparation.observation.generation !== generation
+            || transferGeneration !== generation
+          ) {
             throw new RadarSourceSupersededError("National preparation was superseded");
           }
           ensureNationalLayer();
@@ -1387,19 +1921,72 @@ export function App() {
               throw new RadarSourceSupersededError("National transition was superseded");
             }
           };
+          let backendFinalized = false;
+          let rendererFinalized = false;
           try {
-            const workingSet = await activeWorkingSet.stageCompleteOverview(ownershipCheck);
+            let historyWorkingSet: NationalHistoryWorkingSetResult | undefined;
+            historyWorkingSet = await activeWorkingSet.stageInitialOverview(
+              historyPreparation.observation,
+              ownershipCheck,
+            );
+            if (!historyWorkingSet.receipt) {
+              throw new Error("National current frame completed without a paint receipt");
+            }
+            await activeClient.commitNationalHistoryFrame(
+              historyPreparation.observation,
+            );
+            ownershipCheck();
+            activeLayer.finalizeHistoryMutation(historyWorkingSet.receipt);
+            rendererFinalized = true;
+            resetNationalAfterRendererFinalizeForDiagnostics(activeLayer);
+            const finalizedHistory = await finalizeNationalHistoryCommit(
+              activeClient,
+              historyPreparation.observation,
+            );
+            backendFinalized = true;
+            const authoritativeReceipt = await activeLayer.waitForAuthoritativeReceipt(
+              historyWorkingSet.receipt,
+            );
+            ownershipCheck();
+            const workingSet = workingSetWithReceipt({
+              ...historyWorkingSet,
+              receipt: authoritativeReceipt,
+            });
+            const preparation = phase3CompatibilityPreparation(historyPreparation);
             const renderer = activeLayer.getSnapshot();
             const report: NationalPhase3Report = { preparation, workingSet, renderer };
+            nationalObservations = [...finalizedHistory.retained];
+            latestNationalHistory = finalizedHistory;
+            setNationalHistory(finalizedHistory);
             return {
               value: report,
               paint: {
                 source: { kind: "national", domain: "conus" },
-                generation: workingSet.receipt.generation,
-                observationId: workingSet.receipt.observationId,
+                generation: historyWorkingSet.receipt.generation,
+                observationId: historyWorkingSet.receipt.observationId,
               },
             };
           } catch (error) {
+            const receipt = activeLayer.getSnapshot().mutationAwaitingCommit
+              ? activeLayer.getSnapshot().paintReceipt
+              : undefined;
+            if (receipt && !rendererFinalized) {
+              try {
+                await activeLayer.rollbackHistoryMutation(receipt);
+              } catch {
+                // The renderer may already have rolled back during supersession.
+              }
+            }
+            if (!backendFinalized && !rendererFinalized) {
+              try {
+                await rollbackNationalHistoryCommit(
+                  activeClient,
+                  historyPreparation.observation,
+                );
+              } catch {
+                // Preserve the acquisition/rendering failure that caused rollback.
+              }
+            }
             activeLayer.setPresentationEnabled(
               radarSessionCoordinatorRef.current!.snapshot().painted?.source.kind === "national",
             );
@@ -1409,18 +1996,61 @@ export function App() {
         onPaintAccepted: (report) => {
           latestNationalPhase3 = report;
           setNationalPhase3(report);
-          setTimelineFrames([{
-            observationId: report.workingSet.receipt.observationId,
-            observedAtUnixMs: report.workingSet.receipt.observationTimeUnixMs,
-          }]);
+          const currentObservation = nationalObservations[0];
+          if (!currentObservation) {
+            throw new Error("National source painted without a retained current observation");
+          }
+          nationalPlaybackController?.dispose();
+          nationalPlaybackController = new NationalPlaybackController(
+            nationalLayer!,
+            nationalObservations,
+            {
+              onState(snapshot) {
+                setNationalPlayback(snapshot);
+              },
+              onPaint(receipt) {
+                void refreshNationalInterrogation(receipt);
+                radarSessionCoordinatorRef.current!.synchronizePaint({
+                  source: { kind: "national", domain: "conus" },
+                  generation: receipt.generation,
+                  observationId: receipt.observationId,
+                });
+                if (latestNationalPhase3) {
+                  latestNationalPhase3 = {
+                    ...latestNationalPhase3,
+                    renderer: nationalLayer?.getSnapshot() ?? latestNationalPhase3.renderer,
+                  };
+                  setNationalPhase3(latestNationalPhase3);
+                }
+              },
+              onRefinementRequested() {
+                void refineNationalForCamera();
+              },
+              acquireResidentOnlyActivity: acquireNationalResidentOnlyActivity,
+            },
+          );
+          nationalPlaybackControllerRef.current = nationalPlaybackController;
+          nationalPlaybackController.establishInitialPaint(report.workingSet.receipt);
+          setTimelineFrames(nationalObservations.map((observation) => ({
+            observationId: nationalObservationId(observation),
+            observedAtUnixMs: observation.observationTimeUnixMs,
+          })));
+          setLiveHistoryStatus("loading");
           setInterrogation(null);
+          latestNationalInspection = null;
           setInspectionSelected(false);
           inspectionMarkerRef.current?.remove();
           inspectionMarkerRef.current = null;
           inspectionPointRef.current = null;
           interrogationObservationRef.current = null;
+          inspectionRequestRef.current = null;
+          nationalInspectionLookupQueue.cancelPending();
           removeSiteAfterNationalPaint();
+          setLiveHistoryStatus(staticNationalDiagnostic ? "partial" : "loading");
           focusNational(instance);
+          if (!staticNationalDiagnostic) {
+            void runNationalBackfill(report.workingSet.receipt.generation);
+          }
         },
         onTransitionFailed: (_error, generation) => {
           resumeSitePollingAfterNationalFailure(generation);
@@ -1782,13 +2412,20 @@ export function App() {
       };
       globalThis.__MISTR_NATIONAL_PHASE3__ = {
         report: () => latestNationalPhase3,
-        startNational: () => nationalMrmsSession?.start()
-          ?? Promise.reject(new Error("National session is unavailable")),
+        async startNational() {
+          if (!nationalMrmsSession) throw new Error("National session is unavailable");
+          staticNationalDiagnostic = true;
+          try {
+            return await nationalMrmsSession.start();
+          } finally {
+            staticNationalDiagnostic = false;
+          }
+        },
         startSite: (site = "KTLX") => siteLevel2Session?.start(normalizeRadarSite(site))
           ?? Promise.reject(new Error("Site session is unavailable")),
         async refineForCamera() {
-          nationalMoveHandler?.();
-          await nationalRefinement;
+          const refinement = refineNationalForCamera();
+          await refinement;
           if (!latestNationalPhase3) throw new Error("National radar is not painted");
           return latestNationalPhase3;
         },
@@ -1802,7 +2439,7 @@ export function App() {
           if (!client || !latestNationalPhase3) throw new Error("National radar is not painted");
           const receipt = latestNationalPhase3.renderer.paintReceipt;
           if (!receipt) throw new Error("National renderer has no authoritative receipt");
-          return client.lookupNationalPoint({
+          return client.lookupNationalHistoryPoint({
             generation: receipt.generation,
             observationTimeUnixMs: receipt.observationTimeUnixMs,
             contentSha256: receipt.contentSha256,
@@ -1815,7 +2452,7 @@ export function App() {
           if (!client || !latestNationalPhase3) throw new Error("National radar is not painted");
           const receipt = latestNationalPhase3.renderer.paintReceipt;
           if (!receipt) throw new Error("National renderer has no authoritative receipt");
-          return client.findNationalPeakPoint({
+          return client.findNationalHistoryPeakPoint({
             generation: receipt.generation,
             observationTimeUnixMs: receipt.observationTimeUnixMs,
             contentSha256: receipt.contentSha256,
@@ -1839,6 +2476,218 @@ export function App() {
             }
           }
         },
+      };
+      globalThis.__MISTR_NATIONAL_PHASE4__ = {
+        report: () => ({
+          history: latestNationalHistory,
+          renderer: nationalLayer?.getSnapshot() ?? null,
+          playback: nationalPlaybackController?.snapshot() ?? null,
+          inspectionQueue: nationalInspectionLookupQueue.snapshot(),
+        }),
+        startNational: () => nationalMrmsSession?.start()
+          ?? Promise.reject(new Error("National session is unavailable")),
+        startSite: (site = "KTLX") => siteLevel2Session?.start(normalizeRadarSite(site))
+          ?? Promise.reject(new Error("Site session is unavailable")),
+        async proveFailedSiteRestoresNational(site = "KTLX") {
+          if (!client || !siteLevel2Session || !nationalLayer || !nationalPlaybackController) {
+            throw new Error("National failed-Site recovery diagnostic is unavailable");
+          }
+          const before = radarSessionCoordinatorRef.current!.snapshot();
+          const rendererBeforeFailure = nationalLayer.getSnapshot();
+          const backfillStartCountBefore = nationalBackfillStartCount;
+          if (before.transition || before.painted?.source.kind !== "national") {
+            throw new Error("National must be the settled painted source before recovery proof");
+          }
+          await nationalPlaybackController.play();
+          const playbackBeforeFailure = nationalPlaybackController.snapshot();
+          if (!playbackBeforeFailure.playing) {
+            throw new Error("National playback did not start before failed-Site recovery proof");
+          }
+          failNextSiteFromNationalForDiagnostics = true;
+          resetNextNationalAfterRendererFinalizeForDiagnostics = true;
+          let failureMessage = "";
+          try {
+            await siteLevel2Session.start(normalizeRadarSite(site), { persistOnPaint: false });
+            throw new Error("diagnostic Site transition unexpectedly succeeded");
+          } catch (error) {
+            failureMessage = error instanceof Error ? error.message : String(error);
+            if (failureMessage !== "diagnostic Site transition failure after National cancellation") {
+              throw error;
+            }
+          } finally {
+            failNextSiteFromNationalForDiagnostics = false;
+          }
+          const restoration = lastNationalRestorationAfterSiteFailure;
+          if (!restoration) {
+            resetNextNationalAfterRendererFinalizeForDiagnostics = false;
+            throw new Error("failed Site transition did not restart National");
+          }
+          try {
+            await restoration;
+          } finally {
+            resetNextNationalAfterRendererFinalizeForDiagnostics = false;
+          }
+          return {
+            failureMessage,
+            before,
+            after: radarSessionCoordinatorRef.current!.snapshot(),
+            history: latestNationalHistory,
+            renderer: nationalLayer.getSnapshot(),
+            transfer: await client.transferSnapshot(),
+            backfillStartCountBefore,
+            backfillStartCountAfter: nationalBackfillStartCount,
+            playbackBeforeFailure,
+            playbackAfterRestoration: nationalPlaybackController?.snapshot() ?? null,
+            rendererBeforeFailure,
+          };
+        },
+        async waitForHistory(frameCount = 20, timeoutMs = 300_000) {
+          if (!Number.isSafeInteger(frameCount) || frameCount < 1 || frameCount > 20) {
+            throw new RangeError("National history wait requires 1 to 20 observations");
+          }
+          const started = performance.now();
+          while ((latestNationalHistory?.retained.length ?? 0) < frameCount) {
+            if (performance.now() - started > timeoutMs) {
+              throw new Error(`National history did not reach ${frameCount} observations`);
+            }
+            await waitMilliseconds(100);
+          }
+          return this.report();
+        },
+        async beginResidentEvidence() {
+          if (nationalPhase4EvidenceRelease) {
+            throw new Error("National resident evidence is already reserved");
+          }
+          nationalPhase4EvidenceRelease = await acquireNationalResidentOnlyActivity();
+        },
+        endResidentEvidence() {
+          const release = nationalPhase4EvidenceRelease;
+          nationalPhase4EvidenceRelease = null;
+          release?.();
+        },
+        play() {
+          return nationalPlaybackController?.play()
+            ?? Promise.reject(new Error("National playback is unavailable"));
+        },
+        pause() {
+          nationalPlaybackController?.pause();
+        },
+        scrub(index) {
+          return nationalPlaybackController?.scrub(index)
+            ?? Promise.reject(new Error("National playback is unavailable"));
+        },
+        async scrubWithEvidence(index) {
+          if (!client || !nationalPlaybackController || !nationalLayer) {
+            throw new Error("National playback diagnostics are unavailable");
+          }
+          const release = await acquireNationalResidentOnlyActivity();
+          try {
+            const activityBefore = await client.nationalHistoryActivitySnapshot();
+            const rendererBefore = nationalLayer.getSnapshot();
+            const receipt = await nationalPlaybackController.scrub(index);
+            const activityAfter = await client.nationalHistoryActivitySnapshot();
+            return {
+              index,
+              receipt,
+              activityBefore,
+              activityAfter,
+              activityDelta: subtractNationalActivity(activityAfter, activityBefore),
+              rendererBefore,
+              rendererAfter: nationalLayer.getSnapshot(),
+            };
+          } finally {
+            release();
+          }
+        },
+        async runTransitions(count = 1_000) {
+          if (!client || !nationalPlaybackController || !nationalLayer) {
+            throw new Error("National playback diagnostics are unavailable");
+          }
+          const release = await acquireNationalResidentOnlyActivity();
+          try {
+            const activityBefore = await client.nationalHistoryActivitySnapshot();
+            const rendererBefore = nationalLayer.getSnapshot();
+            const receipts = await nationalPlaybackController.runTransitions(count);
+            const activityAfter = await client.nationalHistoryActivitySnapshot();
+            const rendererAfter = nationalLayer.getSnapshot();
+            return {
+              requestedTransitions: count,
+              completedTransitions: receipts.length,
+              activityBefore,
+              activityAfter,
+              activityDelta: subtractNationalActivity(activityAfter, activityBefore),
+              rendererBefore,
+              rendererAfter,
+              receipts,
+            };
+          } finally {
+            release();
+          }
+        },
+        async refineForCamera() {
+          const requested = refineNationalForCamera();
+          if (requested) await requested;
+          else if (nationalRefinement) await nationalRefinement;
+          return this.report();
+        },
+        async resetContext(holdMs = 100) {
+          if (!client || !nationalLayer) throw new Error("National renderer is unavailable");
+          const release = await acquireNationalResidentOnlyActivity();
+          try {
+            const activityBefore = await client.nationalHistoryActivitySnapshot();
+            const before = nationalLayer.getSnapshot();
+            const receipt = await nationalLayer.simulateContextResetForTest(holdMs);
+            await nationalLayer.waitForCommonResidency();
+            const activityAfter = await client.nationalHistoryActivitySnapshot();
+            return {
+              before,
+              receipt,
+              after: nationalLayer.getSnapshot(),
+              activityBefore,
+              activityAfter,
+              activityDelta: subtractNationalActivity(activityAfter, activityBefore),
+            };
+          } finally {
+            release();
+          }
+        },
+        setCamera(longitude, latitude, zoom) {
+          instance.jumpTo({ center: [longitude, latitude], zoom, bearing: 0, pitch: 0 });
+        },
+        async inspect(longitude, latitude) {
+          if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) {
+            throw new TypeError("National inspection coordinates must be finite");
+          }
+          const receipt = nationalLayer?.getSnapshot().paintReceipt;
+          if (!receipt) throw new Error("National renderer has no authoritative receipt");
+          inspectionPointRef.current = { longitude, latitude };
+          interrogationObservationRef.current = null;
+          setInspectionSelected(true);
+          return refreshNationalInterrogation(receipt);
+        },
+        async waitForInspection(observationId, timeoutMs = 60_000) {
+          const started = performance.now();
+          while (true) {
+            const lookup = latestNationalInspection;
+            if (
+              lookup
+              && `${lookup.observationTimeUnixMs}:${lookup.contentSha256}` === observationId
+            ) return lookup;
+            if (performance.now() - started > timeoutMs) {
+              throw new Error(`National inspection did not refresh for ${observationId}`);
+            }
+            await waitMilliseconds(50);
+          }
+        },
+        async waitForInspectionIdle() {
+          await nationalInspectionLookupQueue.waitForIdle();
+          return nationalInspectionLookupQueue.snapshot();
+        },
+        activity: () => client?.nationalHistoryActivitySnapshot()
+          ?? Promise.reject(new Error("National transfer client is unavailable")),
+        transferSnapshot: () => client?.transferSnapshot()
+          ?? Promise.reject(new Error("National transfer client is unavailable")),
+        sourceState: () => radarSessionCoordinatorRef.current?.snapshot() ?? null,
       };
       // The packaged archive is a safe first paint, not a permanent demo mode.
       // Every launch proceeds to the stored painted source; a fresh profile
@@ -1891,9 +2740,18 @@ export function App() {
       if (globalThis.__MISTR_PHASE6__) delete globalThis.__MISTR_PHASE6__;
       if (globalThis.__MISTR_NATIONAL_PHASE2__) delete globalThis.__MISTR_NATIONAL_PHASE2__;
       if (globalThis.__MISTR_NATIONAL_PHASE3__) delete globalThis.__MISTR_NATIONAL_PHASE3__;
+      if (globalThis.__MISTR_NATIONAL_PHASE4__) delete globalThis.__MISTR_NATIONAL_PHASE4__;
       if (siteLevel2SessionRef.current === siteLevel2Session) siteLevel2SessionRef.current = null;
       if (nationalMrmsSessionRef.current === nationalMrmsSession) nationalMrmsSessionRef.current = null;
+      nationalHistorySession += 1;
+      nationalPhase4EvidenceRelease?.();
+      nationalPhase4EvidenceRelease = null;
+      nationalPlaybackController?.dispose();
+      if (nationalPlaybackControllerRef.current === nationalPlaybackController) {
+        nationalPlaybackControllerRef.current = null;
+      }
       nationalWorkingSet?.cancel();
+      nationalInspectionLookupQueueForCleanup?.cancelPending();
       if (nationalLayer && instance.getLayer(nationalLayer.id)) instance.removeLayer(nationalLayer.id);
       nationalLayerRef.current = null;
       nationalWorkingSetRef.current = null;
@@ -1906,20 +2764,25 @@ export function App() {
     };
   }, [radarHostReady, runtime.shell]);
 
-  const playback = phase4.kind === "complete" ? phase4.report.playback : undefined;
-  const frameIndex = paintedFrameIndex(timelineFrames, playback);
   const nationalActive = paintedRadarSource.kind === "national";
-  const displayedAtUnixMs = nationalActive
-    ? nationalPhase3?.workingSet.receipt.observationTimeUnixMs
-    : playback?.playheadObservedAtUnixMs ?? phase5.display.lastComplete?.observedAtUnixMs;
-  const playbackStatus = nationalActive
-    ? "NATIONAL CURRENT"
-    : playbackPresentation(
-        playback,
-        frameIndex,
-        timelineFrames.length,
-        liveHistoryStatus,
-      );
+  const nationalCommonResidencyReady = nationalActive
+    && nationalPhase3?.renderer.status === "painted"
+    && nationalPhase3.renderer.commonResidentObservationIds.length
+      === (nationalHistory?.retained.length ?? 0)
+    && (nationalHistory?.retained.length ?? 0) > 0;
+  const sitePlayback = phase4.kind === "complete" ? phase4.report.playback : undefined;
+  const playback = nationalActive ? nationalPlayback ?? undefined : sitePlayback;
+  const frameIndex = paintedFrameIndex(timelineFrames, playback);
+  const displayedAtUnixMs = playback?.playheadObservedAtUnixMs
+    ?? (nationalActive
+      ? nationalPhase3?.workingSet.receipt.observationTimeUnixMs
+      : phase5.display.lastComplete?.observedAtUnixMs);
+  const playbackStatus = playbackPresentation(
+    playback,
+    frameIndex,
+    timelineFrames.length,
+    liveHistoryStatus,
+  );
   const initializationError = phase4.kind === "error" ? phase4.message : null;
   const rendererError = nationalActive
     ? nationalPhase3?.renderer.status === "error"
@@ -1930,11 +2793,9 @@ export function App() {
       : null;
   const mapError = mapReadinessError(mapState);
   const radarUnavailableError = initializationError ?? rendererError;
-  const displayedFrameIsLatestLive = nationalActive || (
-    paintedSourceKind === "nexrad_level2_chunks"
-    && timelineFrames.length > 0
+  const displayedFrameIsLatestLive = timelineFrames.length > 0
     && frameIndex === timelineFrames.length - 1
-  );
+    && (nationalActive || paintedSourceKind === "nexrad_level2_chunks");
   const frameAge = frameAgePresentation(
     displayedAtUnixMs,
     nowUnixMs,
@@ -2003,14 +2864,24 @@ export function App() {
             kind: "info" as const,
             message: "Basemap unavailable. Radar remains available.",
           }
-        : liveHistoryStatus === "loading" && paintedSourceKind === "nexrad_level2_chunks"
+        : liveHistoryStatus === "loading"
+          && (nationalActive || paintedSourceKind === "nexrad_level2_chunks")
           ? {
               kind: "info" as const,
-              message: `Current ${displayedSite} radar is ready. Loading recent scans.`,
+              message: nationalActive
+                ? "Current National radar is ready. Loading recent observations."
+                : `Current ${displayedSite} radar is ready. Loading recent scans.`,
             }
           : undefined);
 
   const togglePlayback = () => {
+    if (nationalActive) {
+      const controller = nationalPlaybackControllerRef.current;
+      if (!controller) return;
+      if (controller.snapshot().playing) controller.pause();
+      else controller.play();
+      return;
+    }
     const controller = playbackControllerRef.current;
     if (!controller) return;
     if (controller.snapshot().playing) controller.pause();
@@ -2026,7 +2897,11 @@ export function App() {
         while (queuedScrubRef.current !== null) {
           const nextIndex = queuedScrubRef.current;
           queuedScrubRef.current = null;
-          await playbackControllerRef.current?.scrub(nextIndex);
+          if (nationalActive) {
+            await nationalPlaybackControllerRef.current?.scrub(nextIndex);
+          } else {
+            await playbackControllerRef.current?.scrub(nextIndex);
+          }
         }
       } catch (error) {
         setPlaybackError(error instanceof Error ? error.message : String(error));
@@ -2142,9 +3017,12 @@ export function App() {
         onScrub={queueScrub}
         onSelectSite={selectSite}
         onTogglePlayback={togglePlayback}
-        playbackReady={Boolean(playbackControllerRef.current)
-          && !nationalActive
-          && phase4.kind === "complete"
+        playbackReady={(nationalActive
+          ? Boolean(nationalPlaybackControllerRef.current)
+            && (nationalHistory?.retained.length ?? 0) > 1
+            && nationalCommonResidencyReady
+            && !pendingSite
+          : Boolean(playbackControllerRef.current) && phase4.kind === "complete")
           && !rendererError
           && !playback?.residentReplacementPending}
         playing={playback?.playing ?? false}
@@ -2278,6 +3156,97 @@ function nationalPointInterrogation(lookup: NationalPointLookup): GateInterrogat
     value: lookup.valueDbz,
     units: "dBZ",
     color: valid ? colorForReflectivity(lookup.valueDbz!) : [0, 0, 0, 0],
+  };
+}
+
+function workingSetWithReceipt(
+  workingSet: NationalHistoryWorkingSetResult,
+): NationalHistoryWorkingSetResult & { receipt: NationalPaintReceipt } {
+  if (!workingSet.receipt) {
+    throw new Error("National working set has no authoritative paint receipt");
+  }
+  return { ...workingSet, receipt: workingSet.receipt };
+}
+
+function phase3CompatibilityPreparation(
+  report: NationalHistoryPrepareReport,
+): NationalPhase3PrepareReport {
+  const observation = report.observation;
+  return {
+    generation: observation.generation,
+    objectKey: observation.objectKey,
+    observationTimeUnixMs: observation.observationTimeUnixMs,
+    compressedSha256: observation.contentSha256,
+    normalizedSha256: observation.contentSha256,
+    compressedBytes: observation.compressedBytes,
+    retainedBackendBytes: report.history.totalBackendBytes,
+    presentationFactors: [1, 2, 4],
+    presentationGpuBytes: [
+      {
+        presentationFactor: 1,
+        chunkCount: 392,
+        transferBytes: 49_000_000,
+        projectedGpuBytes: 49_000_000,
+      },
+      {
+        presentationFactor: 2,
+        chunkCount: 98,
+        transferBytes: 12_250_000,
+        projectedGpuBytes: 12_250_000,
+      },
+      {
+        presentationFactor: 4,
+        chunkCount: observation.overviewChunkCount,
+        transferBytes: observation.overviewGpuBytes,
+        projectedGpuBytes: observation.overviewGpuBytes,
+      },
+    ],
+    discoveryMs: report.discoveryMs,
+    downloadMs: report.downloadMs,
+    decodeAndLevelMs: report.decodeAndLevelMs,
+  };
+}
+
+function nationalHistoryErrorCode(error: unknown): string {
+  return typeof error === "object"
+    && error !== null
+    && "code" in error
+    && typeof error.code === "string"
+    ? error.code
+    : "unknown";
+}
+
+function nationalHistoryContainsFinalizedObservation(
+  snapshot: NationalHistorySnapshot,
+  observation: NationalHistoryObservation,
+): boolean {
+  return snapshot.generation === observation.generation
+    && snapshot.staged === null
+    && !snapshot.mutationReversible
+    && snapshot.reversibleCommitBytes === 0
+    && snapshot.retained.some((retained) => (
+      retained.generation === observation.generation
+      && retained.observationTimeUnixMs === observation.observationTimeUnixMs
+      && retained.contentSha256 === observation.contentSha256
+      && retained.objectKey === observation.objectKey
+    ));
+}
+
+function waitMilliseconds(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => globalThis.setTimeout(resolve, milliseconds));
+}
+
+function subtractNationalActivity(
+  after: NationalHistoryActivitySnapshot,
+  before: NationalHistoryActivitySnapshot,
+): NationalHistoryActivitySnapshot {
+  return {
+    networkRequests: after.networkRequests - before.networkRequests,
+    responseBytes: after.responseBytes - before.responseBytes,
+    decoderRuns: after.decoderRuns - before.decoderRuns,
+    bulkIpcTransfers: after.bulkIpcTransfers - before.bulkIpcTransfers,
+    bulkIpcBytes: after.bulkIpcBytes - before.bulkIpcBytes,
+    pointLookupDecodes: after.pointLookupDecodes - before.pointLookupDecodes,
   };
 }
 
@@ -2447,7 +3416,7 @@ export interface Phase4Report {
 
 export interface NationalPhase3Report {
   preparation: NationalPhase3PrepareReport;
-  workingSet: NationalWorkingSetResult;
+  workingSet: NationalHistoryWorkingSetResult & { receipt: NationalPaintReceipt };
   renderer: NationalGridRendererSnapshot;
 }
 
@@ -2455,6 +3424,61 @@ export interface NationalPhase3ContextResetReport {
   before: NationalGridRendererSnapshot;
   receipt: NationalPaintReceipt;
   after: NationalGridRendererSnapshot;
+}
+
+export interface NationalPhase4Report {
+  history: NationalHistorySnapshot | null;
+  renderer: NationalGridRendererSnapshot | null;
+  playback: NationalPlaybackSnapshot | null;
+  inspectionQueue: LatestOnlyAsyncQueueSnapshot;
+}
+
+interface NationalInspectionLookupRequest {
+  receipt: NationalPaintReceipt;
+  inspectionId: string;
+  longitude: number;
+  latitude: number;
+}
+
+export interface NationalPhase4TransitionReport {
+  requestedTransitions: number;
+  completedTransitions: number;
+  activityBefore: NationalHistoryActivitySnapshot;
+  activityAfter: NationalHistoryActivitySnapshot;
+  activityDelta: NationalHistoryActivitySnapshot;
+  rendererBefore: NationalGridRendererSnapshot;
+  rendererAfter: NationalGridRendererSnapshot;
+  receipts: NationalPaintReceipt[];
+}
+
+export interface NationalPhase4ScrubReport {
+  index: number;
+  receipt: NationalPaintReceipt;
+  activityBefore: NationalHistoryActivitySnapshot;
+  activityAfter: NationalHistoryActivitySnapshot;
+  activityDelta: NationalHistoryActivitySnapshot;
+  rendererBefore: NationalGridRendererSnapshot;
+  rendererAfter: NationalGridRendererSnapshot;
+}
+
+export interface NationalPhase4ContextResetReport extends NationalPhase3ContextResetReport {
+  activityBefore: NationalHistoryActivitySnapshot;
+  activityAfter: NationalHistoryActivitySnapshot;
+  activityDelta: NationalHistoryActivitySnapshot;
+}
+
+export interface NationalPhase4FailedSiteRecoveryReport {
+  failureMessage: string;
+  before: RadarSessionSnapshot;
+  after: RadarSessionSnapshot;
+  history: NationalHistorySnapshot | null;
+  renderer: NationalGridRendererSnapshot;
+  transfer: import("./packed-sweep/transferClient").TransferSnapshot;
+  backfillStartCountBefore: number;
+  backfillStartCountAfter: number;
+  playbackBeforeFailure: NationalPlaybackSnapshot;
+  playbackAfterRestoration: NationalPlaybackSnapshot | null;
+  rendererBeforeFailure: NationalGridRendererSnapshot;
 }
 
 type Phase4State =
@@ -2737,6 +3761,29 @@ declare global {
     transferSnapshot(): Promise<import("./packed-sweep/transferClient").TransferSnapshot>;
     sourceState(): import("./radar-session/RadarSessionCoordinator").RadarSessionSnapshot | null;
     isolateRadarForEvidence(): void;
+  };
+  var __MISTR_NATIONAL_PHASE4__: undefined | {
+    report(): NationalPhase4Report;
+    startNational(): Promise<NationalPhase3Report>;
+    startSite(site?: string): Promise<Phase5Report>;
+    proveFailedSiteRestoresNational(site?: string): Promise<NationalPhase4FailedSiteRecoveryReport>;
+    waitForHistory(frameCount?: number, timeoutMs?: number): Promise<NationalPhase4Report>;
+    beginResidentEvidence(): Promise<void>;
+    endResidentEvidence(): void;
+    play(): Promise<void>;
+    pause(): void;
+    scrub(index: number): Promise<NationalPaintReceipt>;
+    scrubWithEvidence(index: number): Promise<NationalPhase4ScrubReport>;
+    runTransitions(count?: number): Promise<NationalPhase4TransitionReport>;
+    refineForCamera(): Promise<NationalPhase4Report>;
+    resetContext(holdMs?: number): Promise<NationalPhase4ContextResetReport>;
+    setCamera(longitude: number, latitude: number, zoom: number): void;
+    inspect(longitude: number, latitude: number): Promise<NationalPointLookup | null>;
+    waitForInspection(observationId: string, timeoutMs?: number): Promise<NationalPointLookup>;
+    waitForInspectionIdle(): Promise<LatestOnlyAsyncQueueSnapshot>;
+    activity(): Promise<NationalHistoryActivitySnapshot>;
+    transferSnapshot(): Promise<import("./packed-sweep/transferClient").TransferSnapshot>;
+    sourceState(): import("./radar-session/RadarSessionCoordinator").RadarSessionSnapshot | null;
   };
 }
 

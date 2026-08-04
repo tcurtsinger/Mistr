@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { clearPriorWebGlErrors } from "./NationalGridLayer";
+import {
+  clearPriorWebGlErrors,
+  commonResidencyReadyForSelection,
+  sameNationalPresentationReceipt,
+  type NationalPaintReceipt,
+} from "./NationalGridLayer";
 
 describe("National WebGL upload error isolation", () => {
   it("drains sticky errors left by shared-context rendering before an upload", () => {
@@ -18,4 +23,64 @@ describe("National WebGL upload error isolation", () => {
     );
     expect(getError).toHaveBeenCalledTimes(32);
   });
+
+  it("accepts a recovery receipt only for the same painted presentation", () => {
+    const original = receipt({ contextEpoch: 1, drawSequence: 8 });
+    const recovered = receipt({ contextEpoch: 2, drawSequence: 9 });
+
+    expect(sameNationalPresentationReceipt(recovered, original)).toBe(true);
+    expect(sameNationalPresentationReceipt(
+      { ...recovered, observationId: "newer-observation" },
+      original,
+    )).toBe(false);
+    expect(sameNationalPresentationReceipt(
+      { ...recovered, coverageVersion: recovered.coverageVersion + 1 },
+      original,
+    )).toBe(false);
+  });
+
+  it("keeps the common-residency barrier closed until recovery paint completes", () => {
+    const completeResidents = {
+      mutationAwaitingCommit: false,
+      paintReceipt: receipt({ contextEpoch: 2 }),
+      residentObservationIds: ["older", "newer"],
+      commonResidentObservationIds: ["older", "newer"],
+    } as const;
+
+    expect(commonResidencyReadyForSelection({
+      ...completeResidents,
+      status: "recovering",
+    })).toBe(false);
+    expect(commonResidencyReadyForSelection({
+      ...completeResidents,
+      status: "painted",
+    })).toBe(true);
+    expect(commonResidencyReadyForSelection({
+      ...completeResidents,
+      status: "painted",
+      paintReceipt: undefined,
+    })).toBe(false);
+  });
 });
+
+function receipt(overrides: Partial<NationalPaintReceipt>): NationalPaintReceipt {
+  return {
+    generation: 7,
+    observationId: "observation",
+    observationTimeUnixMs: 1_785_000_000_000,
+    contentSha256: "ab".repeat(32),
+    presentationFactor: 4,
+    coverageVersion: 3,
+    coverageKind: "complete_domain",
+    requiredChunkCount: 28,
+    contextEpoch: 1,
+    drawSequence: 1,
+    completedAtUnixMs: 1_785_000_001_000,
+    stagingDurationMs: 10,
+    maximumUploadSliceMs: 1,
+    uploadedBytes: 3_000_000,
+    framebufferWidth: 3840,
+    framebufferHeight: 2160,
+    ...overrides,
+  };
+}

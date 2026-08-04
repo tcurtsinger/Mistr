@@ -172,6 +172,18 @@
 
 **Reason:** Static end-to-end paint, interrogation, handoff, and recovery are reviewable independently from the substantially larger Phase 4 history/residency/quality-lock subsystem.
 
+### D028 — Phase 4 commits history only after complete GPU paint
+
+**Decision:** Phase 4 keeps 20 exact chronological MRMS observations in Rust and one complete factor-4 presentation for every retained observation on the GPU. A current, predecessor, or strictly newer mutation remains provisional after its GPU fence receipt. Rust applies it with an identity-bound reversible journal, including ownership of any evicted oldest frame; renderer finalization occurs before Rust seals the journal. Rejection or context loss before finalization restores the prior complete chronology, residency graph, and painted observation.
+
+**Reason:** Backend retention and visible GPU truth must change as one transaction. A download, decode, transfer, partial upload, or fence for a superseded generation cannot evict a valid timeline frame or change the UI.
+
+### D029 — Phase 4 interaction suspends acquisition and locks common quality
+
+**Decision:** Playback and active dragging reserve the resident working set, wait for in-flight acquisition/refinement to settle, and then perform no network, disk, decode, bulk IPC, or texture-upload work. Every transition uses factor 4. Fine factor-1 detail is limited to a paused/settled selected frame and its bounded adjacent temporal window; camera changes during playback atomically remain on the already-complete common factor-4 set.
+
+**Reason:** The retained loop must play at normal cadence without I/O stalls or visible coarse/detail alternation, while still permitting exact paused inspection under the 256 MiB hard GPU ceiling.
+
 ## 2. Decisions required before implementation
 
 ### Q001 — Level II decoder dependency

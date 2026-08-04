@@ -164,6 +164,76 @@ export interface NationalPhase3PrepareReport {
   decodeAndLevelMs: number;
 }
 
+export type NationalHistoryMutationKind = "current" | "predecessor" | "newer";
+
+export interface NationalHistoryObservation {
+  generation: number;
+  objectKey: string;
+  observationTimeUnixMs: number;
+  contentSha256: string;
+  compressedBytes: number;
+  overviewChunkCount: number;
+  overviewGpuBytes: number;
+}
+
+export interface NationalHistorySnapshot {
+  generation: number;
+  historyLimit: number;
+  retained: NationalHistoryObservation[];
+  staged: NationalHistoryObservation | null;
+  mutationReversible: boolean;
+  pendingBackfillCount: number;
+  retainedBackendBytes: number;
+  stagedBackendBytes: number;
+  detailedCacheBytes: number;
+  reversibleCommitBytes: number;
+  totalBackendBytes: number;
+  backendTargetBytes: number;
+}
+
+export interface NationalHistoryPrepareReport {
+  kind: NationalHistoryMutationKind;
+  observation: NationalHistoryObservation;
+  reused: boolean;
+  discoveryMs: number;
+  downloadMs: number;
+  decodeAndLevelMs: number;
+  acquisitionNetworkRequests: number;
+  acquisitionResponseBytes: number;
+  history: NationalHistorySnapshot;
+}
+
+export interface NationalHistoryCommitReport {
+  history: NationalHistorySnapshot;
+  evicted: NationalHistoryObservation | null;
+}
+
+export interface NationalHistoryPresentationReport {
+  observation: NationalHistoryObservation;
+  presentationFactor: 1 | 2;
+  chunkCount: number;
+  transferBytes: number;
+  projectedGpuBytes: number;
+  decodeAndLevelMs: number;
+  history: NationalHistorySnapshot;
+}
+
+export interface NationalHistoryActivitySnapshot {
+  networkRequests: number;
+  responseBytes: number;
+  decoderRuns: number;
+  bulkIpcTransfers: number;
+  bulkIpcBytes: number;
+  pointLookupDecodes: number;
+}
+
+export interface NationalPollDelay {
+  attempt: number;
+  backoffMs: number;
+  jitterMs: number;
+  totalMs: number;
+}
+
 export interface NationalPointLookup {
   inspectionId: string;
   generation: number;
@@ -491,6 +561,210 @@ export class PackedSweepTransferClient {
     }
   }
 
+  async prepareNationalHistoryCurrent(): Promise<NationalHistoryPrepareReport> {
+    const report = await this.invokeNationalHistoryPreparation("prepare_national_history_current");
+    if (!report) throw new TransferClientError("invoke_failed", "current National frame is missing");
+    return report;
+  }
+
+  async prepareNationalHistoryPredecessor(): Promise<NationalHistoryPrepareReport | null> {
+    return this.invokeNationalHistoryPreparation("prepare_national_history_predecessor", true);
+  }
+
+  async prepareNationalHistoryNewer(): Promise<NationalHistoryPrepareReport> {
+    const report = await this.invokeNationalHistoryPreparation("prepare_national_history_newer");
+    if (!report) throw new TransferClientError("invoke_failed", "newer National frame is missing");
+    return report;
+  }
+
+  async commitNationalHistoryFrame(
+    observation: NationalHistoryObservation,
+  ): Promise<NationalHistoryCommitReport> {
+    this.assertNationalHistoryIdentity(observation);
+    const result = await this.invoke<NationalHistoryCommitReport>(
+      "commit_national_history_frame",
+      {
+        session: this.session,
+        generation: observation.generation,
+        observationTimeUnixMs: observation.observationTimeUnixMs,
+        contentSha256: observation.contentSha256,
+      },
+    );
+    assertNationalHistorySnapshot(result.history, observation.generation);
+    if (result.history.staged !== null || result.history.mutationReversible !== true) {
+      throw new TransferClientError("invoke_failed", "National history commit is not reversibly staged");
+    }
+    if (result.evicted) {
+      assertNationalHistoryObservation(result.evicted, observation.generation);
+      if (result.history.retained.some((retained) => (
+        sameNationalHistoryIdentity(retained, result.evicted!)
+      ))) {
+        throw new TransferClientError("invoke_failed", "evicted National observation remains retained");
+      }
+    }
+    return result;
+  }
+
+  async finalizeNationalHistoryFrame(
+    observation: NationalHistoryObservation,
+  ): Promise<NationalHistorySnapshot> {
+    assertNationalHistoryObservation(observation, observation.generation);
+    const result = await this.invoke<NationalHistorySnapshot>(
+      "finalize_national_history_frame",
+      {
+        generation: observation.generation,
+        observationTimeUnixMs: observation.observationTimeUnixMs,
+        contentSha256: observation.contentSha256,
+      },
+    );
+    assertNationalHistorySnapshot(result, observation.generation);
+    if (result.staged !== null || result.mutationReversible || result.reversibleCommitBytes !== 0) {
+      throw new TransferClientError("invoke_failed", "National history finalization remained reversible");
+    }
+    return result;
+  }
+
+  async rollbackNationalHistoryFrame(
+    observation: NationalHistoryObservation,
+  ): Promise<NationalHistorySnapshot> {
+    this.assertSessionOpen();
+    assertNationalHistoryObservation(observation, observation.generation);
+    const result = await this.invoke<NationalHistorySnapshot>(
+      "rollback_national_history_frame",
+      {
+        generation: observation.generation,
+        observationTimeUnixMs: observation.observationTimeUnixMs,
+        contentSha256: observation.contentSha256,
+      },
+    );
+    assertNationalHistorySnapshot(result, observation.generation);
+    if (result.staged !== null || result.mutationReversible || result.reversibleCommitBytes !== 0) {
+      throw new TransferClientError("invoke_failed", "National history rollback remained provisional");
+    }
+    return result;
+  }
+
+  async prepareNationalHistoryPresentation(
+    observation: NationalHistoryObservation,
+    presentationFactor: 1 | 2,
+  ): Promise<NationalHistoryPresentationReport> {
+    this.assertNationalHistoryIdentity(observation);
+    if (presentationFactor !== 1 && presentationFactor !== 2) {
+      throw new RangeError("fine presentation factor must be 1 or 2");
+    }
+    const result = await this.invoke<NationalHistoryPresentationReport>(
+      "prepare_national_history_presentation",
+      {
+        session: this.session,
+        generation: observation.generation,
+        observationTimeUnixMs: observation.observationTimeUnixMs,
+        contentSha256: observation.contentSha256,
+        presentationFactor,
+      },
+    );
+    if (
+      result.presentationFactor !== presentationFactor
+      || !sameNationalHistoryIdentity(result.observation, observation)
+      || !Number.isSafeInteger(result.chunkCount)
+      || result.chunkCount < 1
+      || !Number.isSafeInteger(result.transferBytes)
+      || result.transferBytes < 1
+      || !Number.isSafeInteger(result.projectedGpuBytes)
+      || result.projectedGpuBytes < 1
+      || !Number.isFinite(result.decodeAndLevelMs)
+      || result.decodeAndLevelMs < 0
+    ) {
+      throw new TransferClientError("stale_response", "fine National preparation response is invalid");
+    }
+    assertNationalHistorySnapshot(result.history, observation.generation);
+    return result;
+  }
+
+  async requestNationalHistoryManifest(
+    observation: NationalHistoryObservation,
+    presentationFactor: 1 | 2 | 4 = 4,
+  ): Promise<PackedGridLease<PackedGridManifest>> {
+    this.assertNationalHistoryIdentity(observation);
+    assertPresentationFactor(presentationFactor);
+    return this.requestNationalRaw(
+      "request_national_history_manifest",
+      {
+        observationTimeUnixMs: observation.observationTimeUnixMs,
+        contentSha256: observation.contentSha256,
+        presentationFactor,
+      },
+      async (response) => parsePackedGridManifest(response),
+    );
+  }
+
+  async requestNationalHistoryChunk(
+    observation: NationalHistoryObservation,
+    chunkIndex: number,
+    presentationFactor: 1 | 2 | 4 = 4,
+  ): Promise<PackedGridLease<PackedGridChunk>> {
+    this.assertNationalHistoryIdentity(observation);
+    if (!Number.isSafeInteger(chunkIndex) || chunkIndex < 0) {
+      throw new RangeError("chunkIndex must be a non-negative safe integer");
+    }
+    assertPresentationFactor(presentationFactor);
+    return this.requestNationalRaw(
+      "request_national_history_chunk",
+      {
+        observationTimeUnixMs: observation.observationTimeUnixMs,
+        contentSha256: observation.contentSha256,
+        presentationFactor,
+        chunkIndex,
+      },
+      parsePackedGridChunk,
+    );
+  }
+
+  async nationalHistorySnapshot(): Promise<NationalHistorySnapshot> {
+    this.assertSessionOpen();
+    if (!this.active || this.generation === 0) {
+      throw new TransferClientError("generation_not_active", "no generation is active");
+    }
+    const result = await this.invoke<NationalHistorySnapshot>("national_history_snapshot");
+    assertNationalHistorySnapshot(result, this.generation);
+    return result;
+  }
+
+  async nationalHistoryActivitySnapshot(): Promise<NationalHistoryActivitySnapshot> {
+    this.assertSessionOpen();
+    const result = await this.invoke<NationalHistoryActivitySnapshot>(
+      "national_history_activity_snapshot",
+    );
+    assertNationalHistoryActivity(result);
+    return result;
+  }
+
+  async nationalHistoryPollDelay(attempt: number, jitterSeed: number): Promise<NationalPollDelay> {
+    if (!Number.isSafeInteger(attempt) || attempt < 0 || attempt > 0xffff_ffff) {
+      throw new RangeError("poll attempt must be a non-negative u32 integer");
+    }
+    if (!Number.isSafeInteger(jitterSeed) || jitterSeed < 0) {
+      throw new RangeError("poll jitter seed must be a non-negative safe integer");
+    }
+    const result = await this.invoke<NationalPollDelay>(
+      "national_history_poll_delay",
+      { attempt, jitterSeed },
+    );
+    if (
+      result.attempt !== attempt
+      || !Number.isSafeInteger(result.backoffMs)
+      || result.backoffMs < 15_000
+      || result.backoffMs > 120_000
+      || !Number.isSafeInteger(result.jitterMs)
+      || result.jitterMs < 0
+      || result.jitterMs > 5_000
+      || !Number.isSafeInteger(result.totalMs)
+      || result.totalMs !== result.backoffMs + result.jitterMs
+    ) {
+      throw new TransferClientError("invoke_failed", "National poll delay response is invalid");
+    }
+    return result;
+  }
+
   async requestNationalManifest(
     presentationFactor = 4,
   ): Promise<PackedGridLease<PackedGridManifest>> {
@@ -561,6 +835,87 @@ export class PackedSweepTransferClient {
     return result;
   }
 
+  async lookupNationalHistoryPoint(request: {
+    generation: number;
+    observationTimeUnixMs: number;
+    contentSha256: string;
+    inspectionId: string;
+    longitude: number;
+    latitude: number;
+  }): Promise<NationalPointLookup> {
+    this.assertSessionOpen();
+    const session = this.session;
+    if (!this.active || this.generation !== request.generation) {
+      throw new TransferClientError("generation_not_active", "National history generation is not active");
+    }
+    assertGeneration(request.generation);
+    if (!Number.isSafeInteger(request.observationTimeUnixMs) || request.observationTimeUnixMs <= 0) {
+      throw new TypeError("observationTimeUnixMs must be a positive safe integer");
+    }
+    if (!/^[0-9a-f]{64}$/.test(request.contentSha256)) {
+      throw new TypeError("contentSha256 must be a lowercase SHA-256 digest");
+    }
+    if (!request.inspectionId || request.inspectionId.length > 128) {
+      throw new TypeError("inspectionId must contain 1 to 128 characters");
+    }
+    if (!Number.isFinite(request.longitude) || !Number.isFinite(request.latitude)) {
+      throw new TypeError("inspection coordinates must be finite");
+    }
+    const result = await this.invoke<NationalPointLookup>("lookup_national_history_point", request);
+    assertNationalPointLookup(result);
+    if (
+      !this.active
+      || this.session !== session
+      || this.generation !== request.generation
+      || result.generation !== request.generation
+      || result.observationTimeUnixMs !== request.observationTimeUnixMs
+      || result.contentSha256 !== request.contentSha256
+      || result.inspectionId !== request.inspectionId
+    ) {
+      throw new TransferClientError("stale_response", "National history point lookup was superseded");
+    }
+    return result;
+  }
+
+  async findNationalHistoryPeakPoint(request: {
+    generation: number;
+    observationTimeUnixMs: number;
+    contentSha256: string;
+    inspectionId: string;
+  }): Promise<NationalPointLookup> {
+    this.assertSessionOpen();
+    const session = this.session;
+    if (!this.active || this.generation !== request.generation) {
+      throw new TransferClientError("generation_not_active", "National history generation is not active");
+    }
+    assertGeneration(request.generation);
+    if (!Number.isSafeInteger(request.observationTimeUnixMs) || request.observationTimeUnixMs <= 0) {
+      throw new TypeError("observationTimeUnixMs must be a positive safe integer");
+    }
+    if (!/^[0-9a-f]{64}$/.test(request.contentSha256)) {
+      throw new TypeError("contentSha256 must be a lowercase SHA-256 digest");
+    }
+    if (!request.inspectionId || request.inspectionId.length > 128) {
+      throw new TypeError("inspectionId must contain 1 to 128 characters");
+    }
+    const result = await this.invoke<NationalPointLookup>("find_national_history_peak_point", request);
+    assertNationalPointLookup(result);
+    if (
+      !this.active
+      || this.session !== session
+      || this.generation !== request.generation
+      || result.generation !== request.generation
+      || result.observationTimeUnixMs !== request.observationTimeUnixMs
+      || result.contentSha256 !== request.contentSha256
+      || result.inspectionId !== request.inspectionId
+      || result.status !== "valid"
+      || result.valueDbz === null
+    ) {
+      throw new TransferClientError("stale_response", "National history peak lookup was superseded");
+    }
+    return result;
+  }
+
   async findNationalPeakPoint(request: {
     generation: number;
     observationTimeUnixMs: number;
@@ -602,8 +957,92 @@ export class PackedSweepTransferClient {
     return result;
   }
 
+  private async invokeNationalHistoryPreparation(
+    command:
+      | "prepare_national_history_current"
+      | "prepare_national_history_predecessor"
+      | "prepare_national_history_newer",
+    nullable = false,
+  ): Promise<NationalHistoryPrepareReport | null> {
+    this.assertSessionOpen();
+    const session = this.session;
+    const generation = this.generation;
+    if (!this.active || generation === 0) {
+      throw new TransferClientError("generation_not_active", "no generation is active");
+    }
+    try {
+      const report = await this.invoke<NationalHistoryPrepareReport | null>(command, {
+        session,
+        generation,
+      });
+      if (report === null) {
+        if (nullable) return null;
+        throw new TransferClientError("invoke_failed", "National history preparation returned no frame");
+      }
+      if (
+        !this.active
+        || this.session !== session
+        || this.generation !== generation
+        || report.observation.generation !== generation
+      ) {
+        throw new TransferClientError("stale_response", "National history preparation was superseded");
+      }
+      assertNationalHistorySnapshot(report.history, generation);
+      this.assertNationalHistoryIdentity(report.observation);
+      const expectedKind: NationalHistoryMutationKind = command === "prepare_national_history_current"
+        ? "current"
+        : command === "prepare_national_history_predecessor"
+          ? "predecessor"
+          : "newer";
+      const zeroCostReplay = report.reused === true
+        && expectedKind !== "current"
+        && report.discoveryMs === 0
+        && report.downloadMs === 0
+        && report.decodeAndLevelMs === 0
+        && report.acquisitionNetworkRequests === 0
+        && report.acquisitionResponseBytes === 0;
+      const measuredAcquisition = report.reused === false
+        && report.acquisitionNetworkRequests >= 1
+        && report.acquisitionResponseBytes >= 1;
+      if (
+        report.kind !== expectedKind
+        || typeof report.reused !== "boolean"
+        || !report.history.staged
+        || !sameNationalHistoryIdentity(report.history.staged, report.observation)
+        || !Number.isFinite(report.discoveryMs)
+        || report.discoveryMs < 0
+        || !Number.isFinite(report.downloadMs)
+        || report.downloadMs < 0
+        || !Number.isFinite(report.decodeAndLevelMs)
+        || report.decodeAndLevelMs < 0
+        || !Number.isSafeInteger(report.acquisitionNetworkRequests)
+        || report.acquisitionNetworkRequests < 0
+        || !Number.isSafeInteger(report.acquisitionResponseBytes)
+        || report.acquisitionResponseBytes < 0
+        || (!zeroCostReplay && !measuredAcquisition)
+      ) {
+        throw new TransferClientError("invoke_failed", "National history preparation response is invalid");
+      }
+      return report;
+    } catch (error) {
+      throw normalizeInvokeError(error);
+    }
+  }
+
+  private assertNationalHistoryIdentity(observation: NationalHistoryObservation) {
+    this.assertSessionOpen();
+    if (!this.active || this.generation !== observation.generation) {
+      throw new TransferClientError("generation_not_active", "National history identity is not active");
+    }
+    assertNationalHistoryObservation(observation, observation.generation);
+  }
+
   private async requestNationalRaw<T extends PackedGridManifest | PackedGridChunk>(
-    command: "request_national_packed_grid_manifest" | "request_national_packed_grid_chunk",
+    command:
+      | "request_national_packed_grid_manifest"
+      | "request_national_packed_grid_chunk"
+      | "request_national_history_manifest"
+      | "request_national_history_chunk",
     extraArguments: Record<string, unknown>,
     parse: (response: ArrayBuffer) => Promise<T>,
   ): Promise<PackedGridLease<T>> {
@@ -1057,6 +1496,93 @@ function assertNationalPointLookup(result: NationalPointLookup) {
       "National point lookup response violates the exact grid/value contract",
     );
   }
+}
+
+const NATIONAL_OBJECT_KEY = /^CONUS\/MergedBaseReflectivityQC_00\.50\/\d{8}\/MRMS_MergedBaseReflectivityQC_00\.50_\d{8}-\d{6}\.grib2\.gz$/;
+
+function assertNationalHistoryObservation(
+  observation: NationalHistoryObservation,
+  generation: number,
+) {
+  if (
+    !Number.isSafeInteger(observation.generation)
+    || observation.generation !== generation
+    || !NATIONAL_OBJECT_KEY.test(observation.objectKey)
+    || !Number.isSafeInteger(observation.observationTimeUnixMs)
+    || observation.observationTimeUnixMs <= 0
+    || !/^[0-9a-f]{64}$/.test(observation.contentSha256)
+    || !Number.isSafeInteger(observation.compressedBytes)
+    || observation.compressedBytes < 1
+    || !Number.isSafeInteger(observation.overviewChunkCount)
+    || observation.overviewChunkCount < 1
+    || !Number.isSafeInteger(observation.overviewGpuBytes)
+    || observation.overviewGpuBytes < 1
+  ) {
+    throw new TransferClientError("invoke_failed", "National history observation identity is invalid");
+  }
+}
+
+function assertNationalHistorySnapshot(snapshot: NationalHistorySnapshot, generation: number) {
+  const byteFields = [
+    snapshot.retainedBackendBytes,
+    snapshot.stagedBackendBytes,
+    snapshot.detailedCacheBytes,
+    snapshot.reversibleCommitBytes,
+    snapshot.totalBackendBytes,
+    snapshot.backendTargetBytes,
+  ];
+  if (
+    !Number.isSafeInteger(snapshot.generation)
+    || snapshot.generation !== generation
+    || (snapshot.historyLimit !== 20 && snapshot.historyLimit !== 30)
+    || typeof snapshot.mutationReversible !== "boolean"
+    || snapshot.retained.length > snapshot.historyLimit
+    || !Number.isSafeInteger(snapshot.pendingBackfillCount)
+    || snapshot.pendingBackfillCount < 0
+    || snapshot.pendingBackfillCount >= snapshot.historyLimit
+    || byteFields.some((bytes) => !Number.isSafeInteger(bytes) || bytes < 0)
+    || snapshot.backendTargetBytes <= 0
+    || snapshot.totalBackendBytes > snapshot.backendTargetBytes
+    || snapshot.totalBackendBytes !== snapshot.retainedBackendBytes
+      + snapshot.stagedBackendBytes
+      + snapshot.detailedCacheBytes
+      + snapshot.reversibleCommitBytes
+  ) {
+    throw new TransferClientError("invoke_failed", "National history snapshot is invalid");
+  }
+  let priorTime = 0;
+  const identities = new Set<string>();
+  for (const observation of snapshot.retained) {
+    assertNationalHistoryObservation(observation, generation);
+    const identity = `${observation.observationTimeUnixMs}:${observation.contentSha256}`;
+    if (observation.observationTimeUnixMs <= priorTime || identities.has(identity)) {
+      throw new TransferClientError("invoke_failed", "National retained history is not chronological and unique");
+    }
+    priorTime = observation.observationTimeUnixMs;
+    identities.add(identity);
+  }
+  if (snapshot.staged) {
+    assertNationalHistoryObservation(snapshot.staged, generation);
+    if (snapshot.retained.some((retained) => sameNationalHistoryIdentity(retained, snapshot.staged!))) {
+      throw new TransferClientError("invoke_failed", "staged National history duplicates retained history");
+    }
+  }
+}
+
+function assertNationalHistoryActivity(activity: NationalHistoryActivitySnapshot) {
+  if (Object.values(activity).some((value) => !Number.isSafeInteger(value) || value < 0)) {
+    throw new TransferClientError("invoke_failed", "National history activity response is invalid");
+  }
+}
+
+function sameNationalHistoryIdentity(
+  left: NationalHistoryObservation,
+  right: NationalHistoryObservation,
+): boolean {
+  return left.generation === right.generation
+    && left.observationTimeUnixMs === right.observationTimeUnixMs
+    && left.contentSha256 === right.contentSha256
+    && left.objectKey === right.objectKey;
 }
 
 function errorCode(error: unknown): string {

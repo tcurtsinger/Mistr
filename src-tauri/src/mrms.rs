@@ -258,6 +258,30 @@ impl MrmsClient {
                 "requested history count must be in 1..=30".into(),
             ));
         }
+        let mut candidates = self.discover_latest_up_to(now, count).await?;
+        if candidates.len() < count {
+            return Err(MrmsError::InvalidInventory(format!(
+                "current and previous UTC prefixes contain {} valid objects; {count} required",
+                candidates.len()
+            )));
+        }
+        Ok(candidates.split_off(candidates.len() - count))
+    }
+
+    /// Returns as many as `count` current observations as are safely available,
+    /// while still requiring at least one exact object. Product startup uses
+    /// this bounded form so a temporarily short prior-day inventory can paint
+    /// the newest observation and report partial history truthfully.
+    pub async fn discover_latest_up_to(
+        &self,
+        now: DateTime<Utc>,
+        count: usize,
+    ) -> Result<Vec<MrmsObject>, MrmsError> {
+        if !(1..=30).contains(&count) {
+            return Err(MrmsError::InvalidInventory(
+                "requested history count must be in 1..=30".into(),
+            ));
+        }
         let current_date = now.date_naive();
         let mut candidates = self.list_day(current_date).await?;
         reject_future_objects(&mut candidates, now);
@@ -271,13 +295,15 @@ impl MrmsClient {
         }
         candidates.sort_by_key(|object| (object.observation_time_unix_ms, object.key.clone()));
         candidates.dedup_by(|left, right| left.key == right.key);
-        if candidates.len() < count {
-            return Err(MrmsError::InvalidInventory(format!(
-                "current and previous UTC prefixes contain {} valid objects; {count} required",
-                candidates.len()
-            )));
+        if candidates.is_empty() {
+            return Err(MrmsError::InvalidInventory(
+                "current and previous UTC prefixes contain no valid objects".into(),
+            ));
         }
-        Ok(candidates.split_off(candidates.len() - count))
+        if candidates.len() > count {
+            candidates = candidates.split_off(candidates.len() - count);
+        }
+        Ok(candidates)
     }
 
     pub async fn list_day(&self, date: NaiveDate) -> Result<Vec<MrmsObject>, MrmsError> {

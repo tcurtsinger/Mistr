@@ -23,6 +23,7 @@
     "test:phase6:packaged": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-phase6-packaged.ps1",
     "test:national:phase2:packaged": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-national-phase2-packaged.ps1",
     "test:national:phase3:packaged": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-national-phase3-packaged.ps1",
+    "test:national:phase4:packaged": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-national-phase4-packaged.ps1",
     "test:alpha:readiness": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-alpha-readiness-packaged.ps1",
     "test:alpha:soak": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-alpha-live-soak.ps1",
     "test:alpha:installers": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-alpha-installer-validation.ps1",

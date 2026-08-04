@@ -14,6 +14,11 @@ export interface SiteLevel2SessionOptions<T> {
   readonly nextGeneration: () => number;
   readonly acquireAndPaint: SiteLevel2AcquireAndPaint<T>;
   readonly onPaintAccepted?: (value: T, paint: RadarPaintIdentity) => void;
+  readonly onTransitionFailed?: (
+    error: unknown,
+    generation: number,
+    siteIcao: string,
+  ) => void;
 }
 
 export type SiteLevel2AcquireAndPaint<T> = (
@@ -35,12 +40,14 @@ export class SiteLevel2Session<T> {
   private readonly nextGeneration: () => number;
   private readonly acquireAndPaint: SiteLevel2SessionOptions<T>["acquireAndPaint"];
   private readonly onPaintAccepted?: SiteLevel2SessionOptions<T>["onPaintAccepted"];
+  private readonly onTransitionFailed?: SiteLevel2SessionOptions<T>["onTransitionFailed"];
 
   constructor(options: SiteLevel2SessionOptions<T>) {
     this.coordinator = options.coordinator;
     this.nextGeneration = options.nextGeneration;
     this.acquireAndPaint = options.acquireAndPaint;
     this.onPaintAccepted = options.onPaintAccepted;
+    this.onTransitionFailed = options.onTransitionFailed;
   }
 
   async start(siteIcao: string, options: SiteLevel2StartOptions = {}): Promise<T> {
@@ -78,6 +85,9 @@ export class SiteLevel2Session<T> {
     } catch (error) {
       const wasCurrent = this.coordinator.isCurrent(transition);
       this.coordinator.failTransition(transition, error);
+      if (wasCurrent) {
+        this.onTransitionFailed?.(error, transition.generation, source.siteIcao);
+      }
       if (!wasCurrent && !(error instanceof RadarSourceSupersededError)) {
         throw markSuperseded(error, transition.id);
       }

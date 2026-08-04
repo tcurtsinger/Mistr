@@ -2,6 +2,7 @@ pub mod acquisition;
 pub mod chunk_assembly;
 pub mod live_pipeline;
 pub mod mrms;
+pub mod national_history;
 pub mod national_phase2;
 pub mod packed_grid;
 pub mod packed_sweep;
@@ -14,6 +15,7 @@ use tauri::{Manager, webview::PageLoadEvent};
 pub fn run() {
     tauri::Builder::default()
         .manage(phase2_ipc::TransferBroker::default())
+        .manage(national_history::NationalHistoryState::default())
         .manage(national_phase2::NationalPhase2State::default())
         .setup(|app| {
             let resource_root = app.path().resource_dir()?;
@@ -52,6 +54,20 @@ pub fn run() {
             national_phase2::request_national_packed_grid_chunk,
             national_phase2::lookup_national_grid_point,
             national_phase2::find_national_peak_point,
+            national_history::prepare_national_history_current,
+            national_history::prepare_national_history_predecessor,
+            national_history::prepare_national_history_newer,
+            national_history::commit_national_history_frame,
+            national_history::finalize_national_history_frame,
+            national_history::rollback_national_history_frame,
+            national_history::prepare_national_history_presentation,
+            national_history::request_national_history_manifest,
+            national_history::request_national_history_chunk,
+            national_history::lookup_national_history_point,
+            national_history::find_national_history_peak_point,
+            national_history::national_history_snapshot,
+            national_history::national_history_activity_snapshot,
+            national_history::national_history_poll_delay,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Mistr");

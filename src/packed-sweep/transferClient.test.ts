@@ -104,6 +104,187 @@ describe("PackedSweepTransferClient", () => {
     ]);
   });
 
+  it("binds and seals a reversible National history commit by exact identity", async () => {
+    const observation = {
+      generation: 7,
+      objectKey: "CONUS/MergedBaseReflectivityQC_00.50/20260803/MRMS_MergedBaseReflectivityQC_00.50_20260803-162812.grib2.gz",
+      observationTimeUnixMs: 1_785_775_692_000,
+      contentSha256: "ab".repeat(32),
+      compressedBytes: 1_000,
+      overviewChunkCount: 28,
+      overviewGpuBytes: 3_100_000,
+    };
+    let commitArguments: Record<string, unknown> | undefined;
+    let finalizeArguments: Record<string, unknown> | undefined;
+    const invoke: InvokeFunction = async <T>(command: string, arguments_?: Record<string, unknown>) => {
+      if (command === "open_phase2_transfer_session") return snapshot(0) as T;
+      if (command === "begin_phase2_generation") return snapshot(7) as T;
+      if (command === "commit_national_history_frame") {
+        commitArguments = arguments_;
+        return {
+          history: {
+            generation: 7,
+            historyLimit: 20,
+            retained: [observation],
+            staged: null,
+            mutationReversible: true,
+            pendingBackfillCount: 19,
+            retainedBackendBytes: 4_000_000,
+            stagedBackendBytes: 0,
+            detailedCacheBytes: 0,
+            reversibleCommitBytes: 0,
+            totalBackendBytes: 4_000_000,
+            backendTargetBytes: 180 * 1024 * 1024,
+          },
+          evicted: null,
+        } as T;
+      }
+      if (command === "finalize_national_history_frame") {
+        finalizeArguments = arguments_;
+        return {
+          generation: 7,
+          historyLimit: 20,
+          retained: [observation],
+          staged: null,
+          mutationReversible: false,
+          pendingBackfillCount: 19,
+          retainedBackendBytes: 4_000_000,
+          stagedBackendBytes: 0,
+          detailedCacheBytes: 0,
+          reversibleCommitBytes: 0,
+          totalBackendBytes: 4_000_000,
+          backendTargetBytes: 180 * 1024 * 1024,
+        } as T;
+      }
+      throw new Error(`unexpected command ${command}`);
+    };
+    const client = new PackedSweepTransferClient(invoke);
+    await client.open();
+    await client.begin(7);
+
+    await client.commitNationalHistoryFrame(observation);
+    await client.finalizeNationalHistoryFrame(observation);
+
+    expect(commitArguments).toEqual({
+      session: 1,
+      generation: 7,
+      observationTimeUnixMs: observation.observationTimeUnixMs,
+      contentSha256: observation.contentSha256,
+    });
+    expect(finalizeArguments).toEqual({
+      generation: 7,
+      observationTimeUnixMs: observation.observationTimeUnixMs,
+      contentSha256: observation.contentSha256,
+    });
+  });
+
+  it("accepts only an explicitly reused zero-cost National preparation report", async () => {
+    const staged = {
+      generation: 7,
+      objectKey: "CONUS/MergedBaseReflectivityQC_00.50/20260803/MRMS_MergedBaseReflectivityQC_00.50_20260803-162612.grib2.gz",
+      observationTimeUnixMs: 1_785_575_572_000,
+      contentSha256: "cd".repeat(32),
+      compressedBytes: 1_000,
+      overviewChunkCount: 28,
+      overviewGpuBytes: 3_100_000,
+    };
+    const current = {
+      ...staged,
+      objectKey: "CONUS/MergedBaseReflectivityQC_00.50/20260803/MRMS_MergedBaseReflectivityQC_00.50_20260803-162812.grib2.gz",
+      observationTimeUnixMs: 1_785_575_692_000,
+      contentSha256: "ab".repeat(32),
+    };
+    let reused = true;
+    const invoke: InvokeFunction = async <T>(command: string) => {
+      if (command === "open_phase2_transfer_session") return snapshot(0) as T;
+      if (command === "begin_phase2_generation") return snapshot(7) as T;
+      if (command === "prepare_national_history_predecessor") {
+        return {
+          kind: "predecessor",
+          observation: staged,
+          reused,
+          discoveryMs: 0,
+          downloadMs: 0,
+          decodeAndLevelMs: 0,
+          acquisitionNetworkRequests: 0,
+          acquisitionResponseBytes: 0,
+          history: {
+            generation: 7,
+            historyLimit: 20,
+            retained: [current],
+            staged,
+            mutationReversible: false,
+            pendingBackfillCount: 18,
+            retainedBackendBytes: 4_000_000,
+            stagedBackendBytes: 4_000_000,
+            detailedCacheBytes: 0,
+            reversibleCommitBytes: 0,
+            totalBackendBytes: 8_000_000,
+            backendTargetBytes: 180 * 1024 * 1024,
+          },
+        } as T;
+      }
+      throw new Error(`unexpected command ${command}`);
+    };
+    const client = new PackedSweepTransferClient(invoke);
+    await client.open();
+    await client.begin(7);
+
+    await expect(client.prepareNationalHistoryPredecessor()).resolves.toMatchObject({
+      reused: true,
+      acquisitionNetworkRequests: 0,
+      acquisitionResponseBytes: 0,
+    });
+
+    reused = false;
+    await expect(client.prepareNationalHistoryPredecessor()).rejects.toMatchObject({
+      code: "invoke_failed",
+    });
+  });
+
+  it("rejects an inconsistent National history backend byte ledger", async () => {
+    const observation = {
+      generation: 7,
+      objectKey: "CONUS/MergedBaseReflectivityQC_00.50/20260803/MRMS_MergedBaseReflectivityQC_00.50_20260803-162812.grib2.gz",
+      observationTimeUnixMs: 1_785_775_692_000,
+      contentSha256: "ab".repeat(32),
+      compressedBytes: 1_000,
+      overviewChunkCount: 28,
+      overviewGpuBytes: 3_100_000,
+    };
+    const invoke: InvokeFunction = async <T>(command: string) => {
+      if (command === "open_phase2_transfer_session") return snapshot(0) as T;
+      if (command === "begin_phase2_generation") return snapshot(7) as T;
+      if (command === "commit_national_history_frame") {
+        return {
+          history: {
+            generation: 7,
+            historyLimit: 20,
+            retained: [observation],
+            staged: null,
+            mutationReversible: true,
+            pendingBackfillCount: 19,
+            retainedBackendBytes: 3_000_000,
+            stagedBackendBytes: 0,
+            detailedCacheBytes: 0,
+            reversibleCommitBytes: 0,
+            totalBackendBytes: 4_000_000,
+            backendTargetBytes: 180 * 1024 * 1024,
+          },
+          evicted: null,
+        } as T;
+      }
+      throw new Error(`unexpected command ${command}`);
+    };
+    const client = new PackedSweepTransferClient(invoke);
+    await client.open();
+    await client.begin(7);
+
+    await expect(client.commitNationalHistoryFrame(observation)).rejects.toMatchObject({
+      code: "invoke_failed",
+    });
+  });
+
   it("releases a National credit when strict chunk parsing fails", async () => {
     let releases = 0;
     const corrupt = new Uint8Array(fixtureBuffer(NATIONAL_CHUNK_PATH));
