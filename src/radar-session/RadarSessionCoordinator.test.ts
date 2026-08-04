@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  isPaintedNationalSource,
   RadarSessionCoordinator,
   siteRadarSource,
   type RadarPaintIdentity,
@@ -55,6 +56,22 @@ describe("RadarSessionCoordinator", () => {
       requestedSource: { kind: "national", domain: "conus" },
       painted: { source: { kind: "site", siteIcao: "KTLX" } },
     });
+    expect(isPaintedNationalSource(coordinator.snapshot())).toBe(false);
+  });
+
+  it("gates Site renderer replacement on accepted National paint, not staging intent", () => {
+    const coordinator = new RadarSessionCoordinator();
+    coordinator.establishPaintedSource(sitePaint("KTLX", 1, "painted-ktlx"));
+    const transition = coordinator.beginTransition({ kind: "national", domain: "conus" }, 2);
+
+    expect(isPaintedNationalSource(coordinator.snapshot())).toBe(false);
+
+    coordinator.acceptPaint(transition, {
+      source: { kind: "national", domain: "conus" },
+      generation: 2,
+      observationId: "painted-national",
+    });
+    expect(isPaintedNationalSource(coordinator.snapshot())).toBe(true);
   });
 
   it("supersedes an older transition and rejects its late receipt", () => {

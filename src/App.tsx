@@ -80,6 +80,7 @@ import {
   prependLiveHistory,
 } from "./live/liveHistory";
 import {
+  isPaintedNationalSource,
   RadarSessionCoordinator,
   siteRadarSource,
   type RadarSourceKey,
@@ -1189,7 +1190,10 @@ export function App() {
           (nationalLayer?.getSnapshot().generation ?? transferGeneration) + 1,
         ),
         acquireAndPaint: async (siteIcao, generation) => {
-          const report = nationalLayer
+          // A National layer may exist only as partial staging while Site is
+          // still the authoritative paint. Reuse that painted Site renderer
+          // until a complete National receipt has actually been accepted.
+          const report = isPaintedNationalSource(radarSessionCoordinatorRef.current!.snapshot())
             ? await startSiteFromNational(siteIcao, generation)
             : await startLiveSession(siteIcao, generation);
           if (!report.receipt) {
