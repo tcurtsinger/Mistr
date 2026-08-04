@@ -60,6 +60,7 @@ export class NationalPlaybackController {
   private qualityRequest = 0;
   private preparingQuality = false;
   private refinementAfterQualityPreparation = false;
+  private suppressSettledRefinement = false;
   private readonly dwellMs: number;
   private readonly latestDwellMs: number;
   private readonly refinementSettleMs: number;
@@ -204,8 +205,18 @@ export class NationalPlaybackController {
   async pauseAndWait(scheduleRefinement = true): Promise<boolean> {
     const wasPlaying = this.playing;
     this.pause();
-    if (!scheduleRefinement) this.clearRefinementTimer();
-    if (this.operation) await this.operation;
+    if (!scheduleRefinement) {
+      // Callers settling resident paint for a transition or history mutation
+      // must not have refinement armed behind their back when the pending
+      // selection completes. The settled-selection hook below honors this.
+      this.clearRefinementTimer();
+      this.suppressSettledRefinement = true;
+    }
+    try {
+      if (this.operation) await this.operation;
+    } finally {
+      if (!scheduleRefinement) this.suppressSettledRefinement = false;
+    }
     return wasPlaying;
   }
 
@@ -368,8 +379,14 @@ export class NationalPlaybackController {
       this.operation = null;
       this.emit();
       // A pause that landed while this selection was awaiting its paint could
-      // not schedule refinement; the settled selection schedules it now.
-      if (!this.playing && !this.disposed && this.refinementTimer === null) {
+      // not schedule refinement; the settled selection schedules it now unless
+      // the pausing caller explicitly suppressed refinement for a transition.
+      if (
+        !this.playing
+        && !this.disposed
+        && this.refinementTimer === null
+        && !this.suppressSettledRefinement
+      ) {
         this.scheduleRefinement();
       }
     }

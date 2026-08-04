@@ -280,6 +280,74 @@ describe("NationalPlaybackController", () => {
     expect(refined).toEqual([layer.selected]);
   });
 
+  it("honors suppressed refinement across a selection that settles after the pause", async () => {
+    vi.useFakeTimers();
+    const observations = frames(3);
+    const layer = new FakeNationalLayer(observations);
+    let finishPaint!: (receipt: NationalPaintReceipt) => void;
+    const pendingPaint = new Promise<NationalPaintReceipt>((resolve) => {
+      finishPaint = resolve;
+    });
+    vi.spyOn(layer, "selectResidentAndWait").mockImplementation(async (id, factor) => {
+      layer.selected = id;
+      layer.presentationFactor = factor;
+      layer.selectFactors.push(factor);
+      return pendingPaint;
+    });
+    const refined: string[] = [];
+    const controller = new NationalPlaybackController(layer, observations, {
+      dwellMs: 100,
+      latestDwellMs: 100,
+      refinementSettleMs: 50,
+      onRefinementRequested: (observation) => refined.push(observationId(observation)),
+    });
+    controller.establishInitialPaint(layer.receipt());
+
+    const play = controller.play();
+    await vi.waitFor(() => expect(layer.selectFactors.length).toBeGreaterThan(0));
+    // A transition-style pause suppresses refinement while the paint settles:
+    // the history/source mutation that asked for it owns the working set next.
+    const settled = controller.pauseAndWait(false);
+    finishPaint(layer.receipt());
+    await play.catch(() => {});
+    await settled;
+    await vi.advanceTimersByTimeAsync(500);
+    expect(refined).toEqual([]);
+  });
+
+  it("schedules refinement when a plain pause lands during a pending paint", async () => {
+    vi.useFakeTimers();
+    const observations = frames(3);
+    const layer = new FakeNationalLayer(observations);
+    let finishPaint!: (receipt: NationalPaintReceipt) => void;
+    const pendingPaint = new Promise<NationalPaintReceipt>((resolve) => {
+      finishPaint = resolve;
+    });
+    vi.spyOn(layer, "selectResidentAndWait").mockImplementation(async (id, factor) => {
+      layer.selected = id;
+      layer.presentationFactor = factor;
+      layer.selectFactors.push(factor);
+      return pendingPaint;
+    });
+    const refined: string[] = [];
+    const controller = new NationalPlaybackController(layer, observations, {
+      dwellMs: 100,
+      latestDwellMs: 100,
+      refinementSettleMs: 50,
+      onRefinementRequested: (observation) => refined.push(observationId(observation)),
+    });
+    controller.establishInitialPaint(layer.receipt());
+
+    const play = controller.play();
+    await vi.waitFor(() => expect(layer.selectFactors.length).toBeGreaterThan(0));
+    controller.pause();
+    expect(refined).toEqual([]);
+    finishPaint(layer.receipt());
+    await play.catch(() => {});
+    await vi.advanceTimersByTimeAsync(50);
+    expect(refined).toEqual([observationId(observations.at(-1)!)]);
+  });
+
   it("uses the same timeline model for a non-shipping 30-frame diagnostic", () => {
     const observations = frames(30);
     const layer = new FakeNationalLayer(observations);
