@@ -346,7 +346,10 @@ export class NationalGridLayer implements CustomLayerInterface {
         gl.uniform1i(this.uniforms.smooth, this.displayMode === "smooth" ? 1 : 0);
         gl.activeTexture(gl.TEXTURE1);
         gl.bindTexture(gl.TEXTURE_2D, this.paletteTexture);
-        if (this.fallback && this.active.manifest.presentationFactor === 1) {
+        if (
+          this.fallback
+          && presentationUsesCommonFallback(this.active.manifest.presentationFactor)
+        ) {
           this.drawPresentation(gl, this.fallback, this.active.coverage);
         }
         this.drawPresentation(gl, this.active, null);
@@ -1397,6 +1400,10 @@ export function commonResidencyReadyForSelection(
     && snapshot.paintReceipt !== undefined
     && snapshot.residentObservationIds.length > 0
     && snapshot.commonResidentObservationIds.length === snapshot.residentObservationIds.length;
+}
+
+export function presentationUsesCommonFallback(presentationFactor: number): boolean {
+  return presentationFactor === 1 || presentationFactor === 2;
 }
 
 export function commonResidencyReadyForInteraction(

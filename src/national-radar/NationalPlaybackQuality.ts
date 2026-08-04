@@ -72,15 +72,17 @@ export async function prepareNationalPlaybackQuality(
   if (!selected || timelineIds.length < 1) {
     throw new Error("National playback quality requires the selected retained observation");
   }
-  const candidates = nationalPlaybackDetailCandidates(options.zoom);
-  if (candidates.length < 1) {
-    return { factor: 4, projectedGpuBytes: 0, detailedObservationCount: 0 };
-  }
-
   const resetToCommon = async () => {
     await layer.selectResidentAndWait(selectedObservationId, 4);
     layer.pruneDetailResidency([]);
   };
+  const candidates = nationalPlaybackDetailCandidates(options.zoom);
+  if (candidates.length < 1) {
+    ownershipCheck();
+    await resetToCommon();
+    ownershipCheck();
+    return { factor: 4, projectedGpuBytes: 0, detailedObservationCount: 0 };
+  }
 
   try {
     for (const factor of candidates) {

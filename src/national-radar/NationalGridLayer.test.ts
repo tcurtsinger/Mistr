@@ -4,6 +4,7 @@ import {
   completePlaybackDetailFactor,
   commonResidencyReadyForInteraction,
   commonResidencyReadyForSelection,
+  presentationUsesCommonFallback,
   sameNationalPresentationReceipt,
   type NationalPaintReceipt,
 } from "./NationalGridLayer";
@@ -120,6 +121,12 @@ describe("National WebGL upload error isolation", () => {
       },
     ])).toBeUndefined();
     expect(completePlaybackDetailFactor(["older", "newer"], [details[0]])).toBeUndefined();
+  });
+
+  it("draws the complete overview behind either viewport-detail factor", () => {
+    expect(presentationUsesCommonFallback(1)).toBe(true);
+    expect(presentationUsesCommonFallback(2)).toBe(true);
+    expect(presentationUsesCommonFallback(4)).toBe(false);
   });
 });
 

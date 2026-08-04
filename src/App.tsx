@@ -1396,7 +1396,18 @@ export function App() {
               if (currentCameraKey !== lastNationalCameraKey) {
                 lastNationalCameraKey = currentCameraKey;
                 nationalCoverageVersion += 1;
-                globalThis.queueMicrotask(() => refineNationalForCamera());
+                nationalPlaybackDetailCameraKey = null;
+                nationalPlaybackDetailFactor = null;
+                nationalWorkingSet?.cancel();
+                if (nationalPlaybackController) {
+                  void nationalPlaybackController.notifyCameraChanged(
+                    instance.getZoom() >= NATIONAL_SHARP_PLAYBACK_MIN_ZOOM,
+                  ).catch((error) => {
+                    setPlaybackError(error instanceof Error ? error.message : String(error));
+                  });
+                } else {
+                  globalThis.queueMicrotask(() => refineNationalForCamera());
+                }
               }
             }
           },

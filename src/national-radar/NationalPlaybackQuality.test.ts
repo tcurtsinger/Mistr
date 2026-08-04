@@ -7,7 +7,7 @@ import {
 import { observationId } from "./NationalHistoryWorkingSetController";
 
 describe("National playback quality preparation", () => {
-  it("keeps the complete overview when the camera is already screen-appropriate", async () => {
+  it("returns to the complete overview and releases old regional detail", async () => {
     const fixture = qualityFixture();
     const result = await prepareNationalPlaybackQuality({
       ...fixture.options,
@@ -15,7 +15,7 @@ describe("National playback quality preparation", () => {
     });
 
     expect(result).toEqual({ factor: 4, projectedGpuBytes: 0, detailedObservationCount: 0 });
-    expect(fixture.events).toEqual([]);
+    expect(fixture.events).toEqual(["select:3:4", "prune:"]);
   });
 
   it("prepares exact viewport detail for every retained observation before playback", async () => {
