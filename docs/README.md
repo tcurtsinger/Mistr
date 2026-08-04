@@ -18,7 +18,7 @@ The merged National path is:
 fixed NOAA MRMS host -> strict chronological history -> exact u16/value-aware levels -> PackedGrid v1 -> shared two-credit IPC -> all-frame common GPU residency -> quality-locked playback/scrub -> coverage-aware GPU receipt
 ```
 
-It paints the newest observation first, backfills up to 19 strictly older observations, then polls for strictly newer inventory. Every retained frame keeps a complete factor-4 GPU presentation. Regional playback prepares factor-1 coverage for all frames, or factor 2 when needed to remain under the 200 MiB target, before zero-I/O motion begins; paused high-zoom selection may refine without changing observation truth.
+It paints the newest observation first, backfills up to 19 strictly older observations, then polls for strictly newer inventory. Every retained frame keeps a complete factor-4 GPU presentation, and the selected observation refines to a complete-domain factor-1 presentation that is camera-independent: pan and zoom never restage, refetch, or degrade the paused view at any zoom, and history commits preserve the selected frame's detail. Regional playback prepares factor-1 coverage for all frames, or factor 2 when needed to remain under the 200 MiB target, before zero-I/O motion begins. GPU uploads share a measured 4 ms per-frame budget rather than one fixed row band per vsync.
 
 ## Alpha direction
 
@@ -67,6 +67,7 @@ The numbered documents and phase reports below are historical architecture and a
 | [26_NATIONAL_RADAR_IMPLEMENTATION_PLAN.md](26_NATIONAL_RADAR_IMPLEMENTATION_PLAN.md) | Approved explicit-source CONUS MRMS plan with 20 exact retained observations, a level-of-detail GPU working set designed for later 30-frame extension, phased delivery, and acceptance gates; Phases 1 through 4 are merged |
 | [27_PACKED_GRID_V1.md](27_PACKED_GRID_V1.md) | National Phase 2 big-endian manifest/chunk schema, exact numeric metadata, geometry, integrity, and shared-credit transfer contract |
 | [28_NATIONAL_STATIC_RENDERER_DECISION.md](28_NATIONAL_STATIC_RENDERER_DECISION.md) | National Phase 3 numeric-grid renderer, coverage receipts, exact interrogation, atomic source handoff, and context-recovery contract |
+| [29_NATIONAL_RADAR_PERFORMANCE_FINDINGS.md](29_NATIONAL_RADAR_PERFORMANCE_FINDINGS.md) | Diagnosed National startup, pan/zoom restaging, and pixelation root causes with the ranked whole-domain residency remediation plan |
 | [phase-reports/NATIONAL_PHASE_3_STATIC_RENDERER.md](phase-reports/NATIONAL_PHASE_3_STATIC_RENDERER.md) | Phase 3 packaged Windows/WebView2 static National evidence and measured memory/timing ledger |
 | [phase-reports/NATIONAL_PHASE_4_HISTORY_PLAYBACK.md](phase-reports/NATIONAL_PHASE_4_HISTORY_PLAYBACK.md) | Phase 4 packaged Windows/WebView2 20-frame history, zero-I/O playback, quality lock, memory, recovery, and handoff evidence |
 | [phase-reports/PHASE_2_PACKED_WIRE_AND_IPC.md](phase-reports/PHASE_2_PACKED_WIRE_AND_IPC.md) | Phase 2 cross-language, packaged IPC, timing, and memory evidence |

@@ -111,10 +111,7 @@ import {
   observationId as nationalObservationId,
   type NationalHistoryWorkingSetResult,
 } from "./national-radar/NationalHistoryWorkingSetController";
-import {
-  NATIONAL_SHARP_PLAYBACK_MIN_ZOOM,
-  prepareNationalPlaybackQuality,
-} from "./national-radar/NationalPlaybackQuality";
+import { prepareNationalPlaybackQuality } from "./national-radar/NationalPlaybackQuality";
 import {
   LatestOnlyAsyncQueue,
   type LatestOnlyAsyncQueueSnapshot,
@@ -326,8 +323,7 @@ export function App() {
     let nationalCoverageVersion = 0;
     let nationalPlaybackDetailCameraKey: string | null = null;
     let nationalPlaybackDetailFactor: 1 | 2 | null = null;
-    let lastNationalCameraKey = nationalCameraKey(instance);
-    let pendingNationalCameraKey: string | null = null;
+    let pendingNationalRefinement = false;
     let nationalMoveHandler: (() => void) | null = null;
     let latestNationalPhase3: NationalPhase3Report | null = null;
     let staticNationalDiagnostic = false;
@@ -1390,25 +1386,9 @@ export function App() {
             if (nationalPlaybackController) {
               setNationalPlayback(nationalPlaybackController.snapshot());
             }
-            if (renderer.status === "painted" && pendingNationalCameraKey) {
-              const currentCameraKey = nationalCameraKey(instance);
-              pendingNationalCameraKey = null;
-              if (currentCameraKey !== lastNationalCameraKey) {
-                lastNationalCameraKey = currentCameraKey;
-                nationalCoverageVersion += 1;
-                nationalPlaybackDetailCameraKey = null;
-                nationalPlaybackDetailFactor = null;
-                nationalWorkingSet?.cancel();
-                if (nationalPlaybackController) {
-                  void nationalPlaybackController.notifyCameraChanged(
-                    instance.getZoom() >= NATIONAL_SHARP_PLAYBACK_MIN_ZOOM,
-                  ).catch((error) => {
-                    setPlaybackError(error instanceof Error ? error.message : String(error));
-                  });
-                } else {
-                  globalThis.queueMicrotask(() => refineNationalForCamera());
-                }
-              }
+            if (renderer.status === "painted" && pendingNationalRefinement) {
+              pendingNationalRefinement = false;
+              globalThis.queueMicrotask(() => refineNationalSelected());
             }
           },
         });
@@ -1596,7 +1576,7 @@ export function App() {
         }
       };
 
-      const refineNationalForCamera = (): Promise<NationalHistoryWorkingSetResult | void> | null => {
+      const refineNationalSelected = (): Promise<NationalHistoryWorkingSetResult | void> | null => {
         if (nationalRefinement) return nationalRefinement;
         if (
           !nationalLayer
@@ -1606,7 +1586,7 @@ export function App() {
         ) return null;
         const layerSnapshot = nationalLayer.getSnapshot();
         if (layerSnapshot.status !== "painted") {
-          pendingNationalCameraKey = nationalCameraKey(instance);
+          pendingNationalRefinement = true;
           return null;
         }
         const expectedGeneration = layerSnapshot.generation;
@@ -1615,38 +1595,38 @@ export function App() {
           (observation) => nationalObservationId(observation) === selectedObservationId,
         );
         if (!expectedGeneration || !selectedObservation) return null;
-        if (instance.getZoom() < NATIONAL_SHARP_PLAYBACK_MIN_ZOOM) {
-          nationalPlaybackController?.notifyCameraChanged(false);
-          return null;
-        }
-        const cameraKey = nationalCameraKey(instance);
+        const receipt = layerSnapshot.paintReceipt;
         if (
-          nationalPlaybackDetailCameraKey === cameraKey
-          && nationalPlaybackDetailFactor === 1
-          && nationalLayer.finestCompletePlaybackFactor() === 1
+          receipt
+          && receipt.observationId === selectedObservationId
+          && receipt.presentationFactor === 1
+          && receipt.coverageKind === "complete_domain"
         ) return Promise.resolve();
         nationalCoverageVersion += 1;
-        const cameraVersion = nationalCoverageVersion;
-        const bounds = mapBounds(instance);
+        const refinementVersion = nationalCoverageVersion;
         const timelineIds = nationalObservations.map(nationalObservationId);
         const ownershipCheck = () => {
           const painted = radarSessionCoordinatorRef.current!.snapshot().painted;
           if (
-            cameraVersion !== nationalCoverageVersion
+            refinementVersion !== nationalCoverageVersion
             || nationalResidentOnlyReservations > 0
             || transferGeneration !== expectedGeneration
             || painted?.source.kind !== "national"
             || painted.generation !== expectedGeneration
+            || nationalLayer?.getSnapshot().selectedObservationId !== selectedObservationId
           ) {
-            throw new RadarSourceSupersededError("National camera refinement was superseded");
+            throw new RadarSourceSupersededError("National selected refinement was superseded");
           }
         };
         const operation = (async () => {
           await nationalWorkingSet!.waitForIdle();
           ownershipCheck();
+          // Whole-domain factor-1 detail (~47 MiB) is camera-independent: once
+          // painted, pan and zoom never restage, refetch, or degrade the
+          // paused presentation at any zoom, including the CONUS home view.
           const workingSet = await nationalWorkingSet!.stageSelectedDetail(
             selectedObservation,
-            bounds,
+            null,
             timelineIds,
             ownershipCheck,
             async () => {
@@ -1659,8 +1639,6 @@ export function App() {
             throw new Error("selected National refinement completed without a paint receipt");
           }
           nationalPlaybackController?.acceptRefinement(workingSet.receipt);
-          nationalPlaybackDetailCameraKey = null;
-          nationalPlaybackDetailFactor = null;
           if (latestNationalPhase3) {
             latestNationalPhase3 = {
               ...latestNationalPhase3,
@@ -1669,34 +1647,17 @@ export function App() {
             };
             setNationalPhase3(latestNationalPhase3);
           }
-
-          const selectedIndex = nationalObservations.findIndex(
-            (observation) => nationalObservationId(observation) === selectedObservationId,
-          );
-          const temporalWindow = nationalObservations.filter((_, index) => (
-            Math.abs(index - selectedIndex) <= 1
-          ));
-          for (const observation of temporalWindow) {
-            if (nationalObservationId(observation) === selectedObservationId) continue;
-            ownershipCheck();
-            await nationalWorkingSet!.prefetchDetail(
-              observation,
-              bounds,
-              timelineIds,
-              ownershipCheck,
-            );
-          }
-          nationalLayer?.pruneDetailResidency(temporalWindow.map(nationalObservationId));
+          nationalLayer?.pruneDetailResidency([nationalObservationId(selectedObservation)]);
           return workingSet;
         })();
         nationalRefinement = operation;
         void operation.catch(() => {
           // The prior complete presentation remains authoritative. A later
-          // moveend retries the current camera rather than exposing a partial.
+          // selection change retries refinement rather than exposing a partial.
         }).finally(() => {
           nationalRefinement = null;
-          if (cameraVersion !== nationalCoverageVersion) {
-            globalThis.queueMicrotask(() => refineNationalForCamera());
+          if (refinementVersion !== nationalCoverageVersion) {
+            globalThis.queueMicrotask(() => refineNationalSelected());
           }
         });
         return operation;
@@ -1762,21 +1723,18 @@ export function App() {
       };
       nationalMoveHandler = () => {
         if (radarSessionCoordinatorRef.current!.snapshot().painted?.source.kind !== "national") return;
-        const currentCameraKey = nationalCameraKey(instance);
-        if (currentCameraKey === lastNationalCameraKey) return;
-        if (nationalLayer?.getSnapshot().status !== "painted") {
-          pendingNationalCameraKey = currentCameraKey;
-          return;
-        }
-        lastNationalCameraKey = currentCameraKey;
-        pendingNationalCameraKey = null;
-        nationalCoverageVersion += 1;
+        // The paused presentation is whole-domain and camera-independent:
+        // pan and zoom require no restaging, cancellation, or quality change.
+        // Only an engaged playback session, whose sharp lock is prepared for a
+        // specific viewport, must re-prepare after the camera settles.
+        const playback = nationalPlaybackController?.snapshot();
+        const playbackEngaged = Boolean(
+          playback && (playback.playing || playback.preparingQuality),
+        );
+        if (!playbackEngaged) return;
         nationalPlaybackDetailCameraKey = null;
         nationalPlaybackDetailFactor = null;
-        nationalWorkingSet?.cancel();
-        void nationalPlaybackController?.notifyCameraChanged(
-          instance.getZoom() >= NATIONAL_SHARP_PLAYBACK_MIN_ZOOM,
-        ).catch((error) => {
+        void nationalPlaybackController?.notifyCameraChanged(true).catch((error) => {
           setPlaybackError(error instanceof Error ? error.message : String(error));
         });
       };
@@ -1857,6 +1815,19 @@ export function App() {
         try {
           await activeWorkingSet.waitForIdle();
           nationalHistoryOwnershipCheck(generation, historySession);
+          // Committing an unrelated observation's overview must not degrade
+          // the visible frame: keep the selected observation's complete-domain
+          // detail active so backfill and polling appends cause no visible
+          // quality reset. A changed selection (following newest) starts at
+          // the overview and re-sharpens through the normal refinement path.
+          const rendererBefore = activeLayer.getSnapshot();
+          const activeReceipt = rendererBefore.paintReceipt;
+          const preservedSelectedFactor = rendererBefore.selectedObservationId === selectedObservationId
+            && activeReceipt?.observationId === selectedObservationId
+            && activeReceipt.coverageKind === "complete_domain"
+            && (rendererBefore.presentationFactor === 1 || rendererBefore.presentationFactor === 2)
+            ? rendererBefore.presentationFactor
+            : 4;
           workingSet = await activeWorkingSet.stageHistoryOverview(
             preparation.observation,
             proposed.map(nationalObservationId),
@@ -1869,6 +1840,7 @@ export function App() {
                 : false;
               nationalHistoryOwnershipCheck(generation, historySession);
             },
+            preservedSelectedFactor,
           );
           if (!workingSet.receipt) {
             throw new Error("National history mutation completed without a paint receipt");
@@ -2132,7 +2104,7 @@ export function App() {
                 }
               },
               onRefinementRequested() {
-                void refineNationalForCamera();
+                void refineNationalSelected();
               },
               acquireResidentOnlyActivity: acquireNationalResidentOnlyActivity,
               preparePlaybackQuality: prepareNationalPlaybackForCamera,
@@ -2534,7 +2506,7 @@ export function App() {
         startSite: (site = "KTLX") => siteLevel2Session?.start(normalizeRadarSite(site))
           ?? Promise.reject(new Error("Site session is unavailable")),
         async refineForCamera() {
-          const refinement = refineNationalForCamera();
+          const refinement = refineNationalSelected();
           await refinement;
           if (!latestNationalPhase3) throw new Error("National radar is not painted");
           return latestNationalPhase3;
@@ -2735,7 +2707,7 @@ export function App() {
           }
         },
         async refineForCamera() {
-          const requested = refineNationalForCamera();
+          const requested = refineNationalSelected();
           if (requested) await requested;
           else if (nationalRefinement) await nationalRefinement;
           return this.report();

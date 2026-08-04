@@ -72,12 +72,19 @@ export class NationalHistoryWorkingSetController {
     );
   }
 
+  /**
+   * `selectedPresentationFactor` preserves an already-resident finer selected
+   * presentation across an unrelated observation's overview commit, so
+   * backfill and polling appends never degrade the visible frame to the
+   * coarse overview.
+   */
   stageHistoryOverview(
     observation: NationalHistoryObservation,
     timelineObservationIds: readonly string[],
     selectedObservationId: string,
     ownershipCheck: () => void,
     beforeCommit?: () => void | Promise<void>,
+    selectedPresentationFactor: NationalDetailPresentationFactor | 4 = 4,
   ): Promise<NationalHistoryWorkingSetResult> {
     return this.run(
       observation,
@@ -87,7 +94,7 @@ export class NationalHistoryWorkingSetController {
       async () => this.layer.commitHistoryStaging(
         timelineObservationIds,
         selectedObservationId,
-        4,
+        selectedPresentationFactor,
         true,
       ),
       beforeCommit,
@@ -96,9 +103,15 @@ export class NationalHistoryWorkingSetController {
     );
   }
 
+  /**
+   * Stage detail for the selected observation. `bounds: null` stages the
+   * complete domain, making the resulting presentation camera-independent:
+   * later pan and zoom need no restaging, no readiness inference, and no
+   * quality fallback for the paused view.
+   */
   stageSelectedDetail(
     observation: NationalHistoryObservation,
-    bounds: GeographicBounds,
+    bounds: GeographicBounds | null,
     timelineObservationIds: readonly string[],
     ownershipCheck: () => void,
     beforeCommit?: () => void | Promise<void>,
@@ -107,7 +120,9 @@ export class NationalHistoryWorkingSetController {
     return this.run(
       observation,
       presentationFactor,
-      (manifest, version) => viewportCoverage(manifest, bounds, version),
+      (manifest, version) => (bounds === null
+        ? completeDomainCoverage(manifest, version)
+        : viewportCoverage(manifest, bounds, version)),
       ownershipCheck,
       async () => this.layer.commitHistoryStaging(
         timelineObservationIds,

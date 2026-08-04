@@ -72,6 +72,71 @@ describe("NationalHistoryWorkingSetController", () => {
     expect(events).toContain("upload");
   });
 
+  it("stages camera-independent complete-domain factor-1 detail when bounds are null", async () => {
+    const fixture = historyFixture();
+    const events: string[] = [];
+    const controller = new NationalHistoryWorkingSetController(fixture.client(events), {
+      beginStaging() { events.push("begin"); },
+      async uploadStagedChunk() { events.push("upload"); },
+      async commitInitialHistoryStaging() { throw new Error("not used"); },
+      async commitHistoryStaging(_timeline, _selected, presentationFactor) {
+        expect(presentationFactor).toBe(1);
+        return {
+          ...fixture.receipt,
+          presentationFactor: 1,
+          coverageKind: "complete_domain",
+        };
+      },
+      commitPrefetchedStaging() { throw new Error("not used"); },
+      async rollbackHistoryMutation() { throw new Error("not used"); },
+      rollbackStaging() { events.push("rollback-staging"); },
+    });
+
+    const result = await controller.stageSelectedDetail(
+      fixture.observation,
+      null,
+      [observationId(fixture.observation)],
+      () => {},
+      undefined,
+      1,
+    );
+
+    expect(result.manifest.presentationFactor).toBe(1);
+    expect(result.coverage.kind).toBe("complete_domain");
+    expect(result.coverage.requiredChunkIndices).toEqual([0]);
+    expect(events).toContain("upload");
+  });
+
+  it("preserves the selected finer presentation through an unrelated overview commit", async () => {
+    const fixture = historyFixture();
+    const events: string[] = [];
+    const committedFactors: number[] = [];
+    const controller = new NationalHistoryWorkingSetController(fixture.client(events), {
+      beginStaging() {},
+      async uploadStagedChunk() {},
+      async commitInitialHistoryStaging() { throw new Error("not used"); },
+      async commitHistoryStaging(_timeline, _selected, presentationFactor, deferExternalCommit) {
+        committedFactors.push(presentationFactor ?? 4);
+        expect(deferExternalCommit).toBe(true);
+        return fixture.receipt;
+      },
+      commitPrefetchedStaging() { throw new Error("not used"); },
+      async rollbackHistoryMutation() { throw new Error("not used"); },
+      rollbackStaging() {},
+    });
+
+    await controller.stageHistoryOverview(
+      fixture.observation,
+      [observationId(fixture.observation)],
+      observationId(fixture.observation),
+      () => {},
+      undefined,
+      1,
+    );
+
+    expect(committedFactors).toEqual([1]);
+  });
+
   it("rolls a provisional GPU paint back when ownership is superseded after the fence", async () => {
     const fixture = historyFixture();
     const events: string[] = [];

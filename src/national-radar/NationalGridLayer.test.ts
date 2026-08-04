@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   clearPriorWebGlErrors,
   completePlaybackDetailFactor,
@@ -6,8 +6,91 @@ import {
   commonResidencyReadyForSelection,
   presentationUsesCommonFallback,
   sameNationalPresentationReceipt,
+  UploadFrameBudget,
   type NationalPaintReceipt,
 } from "./NationalGridLayer";
+
+describe("National upload frame budget", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function stubAnimationFrames(): { count: () => number } {
+    let frames = 0;
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames += 1;
+      callback(frames);
+      return frames;
+    });
+    return { count: () => frames };
+  }
+
+  it("yields to an animation frame before the first slice", async () => {
+    const frames = stubAnimationFrames();
+    const budget = new UploadFrameBudget(4);
+
+    await budget.yieldIfSpent();
+
+    expect(frames.count()).toBe(1);
+  });
+
+  it("packs consecutive fast slices into one animation frame", async () => {
+    const frames = stubAnimationFrames();
+    const budget = new UploadFrameBudget(4);
+    await budget.yieldIfSpent();
+
+    budget.recordSlice(32, 0.2);
+    await budget.yieldIfSpent();
+    budget.recordSlice(32, 0.2);
+    await budget.yieldIfSpent();
+
+    expect(frames.count()).toBe(1);
+  });
+
+  it("grows the row band from measured throughput and shrinks it after slow slices", async () => {
+    stubAnimationFrames();
+    const budget = new UploadFrameBudget(4);
+    await budget.yieldIfSpent();
+
+    expect(budget.rowsForSlice(10_000)).toBe(32);
+    budget.recordSlice(32, 0.1);
+    const grown = budget.rowsForSlice(10_000);
+    expect(grown).toBeGreaterThan(32);
+
+    budget.recordSlice(grown, 400);
+    await budget.yieldIfSpent();
+    expect(budget.rowsForSlice(10_000)).toBe(32);
+  });
+
+  it("yields once the measured budget is spent", async () => {
+    const frames = stubAnimationFrames();
+    const budget = new UploadFrameBudget(4);
+    await budget.yieldIfSpent();
+
+    budget.recordSlice(32, 3.9);
+    await budget.yieldIfSpent();
+
+    expect(frames.count()).toBe(2);
+  });
+
+  it("never sizes a slice past the remaining tail rows", async () => {
+    stubAnimationFrames();
+    const budget = new UploadFrameBudget(4);
+    await budget.yieldIfSpent();
+
+    // A 258-row halo chunk ends in a tail band shorter than the minimum.
+    expect(budget.rowsForSlice(2)).toBe(2);
+    expect(budget.rowsForSlice(31)).toBe(31);
+    budget.recordSlice(32, 0.1);
+    expect(budget.rowsForSlice(2)).toBe(2);
+  });
+
+  it("rejects a non-positive budget", () => {
+    expect(() => new UploadFrameBudget(0)).toThrow(
+      "National upload frame budget must be positive",
+    );
+  });
+});
 
 describe("National WebGL upload error isolation", () => {
   it("drains sticky errors left by shared-context rendering before an upload", () => {
