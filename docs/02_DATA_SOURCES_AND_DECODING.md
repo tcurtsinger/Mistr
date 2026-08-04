@@ -95,7 +95,7 @@ type RadarSourceKey =
   | { kind: "national"; domain: "conus" };
 ```
 
-Archive and live Level II observations for one station both satisfy the same top-level Site intent. Their exact provider source remains in observation provenance and paint truth. `PackedGrid v1` retains the MRMS product, domain, provider, object key, content hash, measured time, grid transform, scaling/status metadata, presentation level, and chunk geometry without representing the observation as a polar sweep. Phase 3 repeats that identity in every chunk, complete-coverage GPU receipt, and exact point lookup.
+Archive and live Level II observations for one station both satisfy the same top-level Site intent. Their exact provider source remains in observation provenance and paint truth. `PackedGrid v1` retains the MRMS product, domain, provider, object key, content hash, measured time, grid transform, scaling/status metadata, presentation level, and chunk geometry without representing the observation as a polar sweep. Phase 3 repeats that identity in every chunk, complete-coverage GPU receipt, and exact point lookup. At reduced presentation levels, the first and last grid coordinates are the centers of the complete source-cell footprints represented by those reduced cells; they are not copied unchanged from the factor-1 cell centers.
 
 ## 4. Acquisition modes
 

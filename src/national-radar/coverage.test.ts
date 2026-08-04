@@ -52,10 +52,10 @@ function manifest(): PackedGridManifest {
     contentSha256: "11".repeat(32),
     width,
     height,
-    firstLatitudeDegrees: 54.995,
-    firstLongitudeDegrees: -129.995,
-    lastLatitudeDegrees: 20.035,
-    lastLongitudeDegrees: -60.035,
+    firstLatitudeDegrees: 54.98,
+    firstLongitudeDegrees: -129.98,
+    lastLatitudeDegrees: 20.02,
+    lastLongitudeDegrees: -60.02,
     longitudeStepDegrees: 0.04,
     latitudeStepDegrees: 0.04,
     rowOrientation: "north_to_south",
@@ -76,6 +76,7 @@ describe("National viewport coverage", () => {
     const source = manifest();
     const coverage = completeDomainCoverage(source, 1);
     expect(coverage.kind).toBe("complete_domain");
+    expect(coverage).toMatchObject({ west: -130, south: 20, east: -60, north: 55 });
     expect(coverage.requiredChunkIndices).toHaveLength(28);
     expect(assertCoverageMatchesManifest(source, coverage)).toHaveLength(28);
   });

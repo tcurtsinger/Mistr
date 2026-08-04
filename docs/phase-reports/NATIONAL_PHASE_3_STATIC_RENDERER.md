@@ -65,6 +65,8 @@ The packaged runner also proved:
 - a real context reset rehydrates visible detail first and the complete fallback one chunk per animation frame before issuing a new matching receipt; and
 - returning to Site ends with one settled KTLX source and the Site renderer's own observation truth.
 
+The reviewed PackedGrid correction centers the factor-4 first cell at 54.98 degrees north, 129.98 degrees west and retains exact CONUS footprint bounds of 20 to 55 degrees north and 130 to 60 degrees west. This keeps the overview registered with factor-1 detail instead of copying the factor-1 northwest cell center into every presentation level. The regenerated cross-language manifest vector is pinned by SHA-256 `2758b1c0bd732e3bd98714af3baea6d1aeb1435429377abcc9160fffff8d0bac`.
+
 Generated evidence is under ignored `artifacts/national-phase-3/` and is not committed.
 
 ## Source tests
@@ -81,7 +83,7 @@ The implementation adds tests for:
 
 The age test uses a 30-second-old Site observation followed by a 3-minute-30-second-old newest National observation. National remains green as newest for its active source while exposing the exact larger numeric and accessible age.
 
-The final source suite passes 40 frontend/script test files with 251 tests, the production TypeScript/Vite build, and 115 Rust library tests plus the Rust binary targets. The merged National Phase 2 packaged gate and the existing packaged Phase 4, 5, and 6 gates also pass unchanged. Repository scans and explicit staged-file inspection are rerun immediately before commit.
+The final source suite passes 41 frontend/script test files with 254 tests, the production TypeScript/Vite build, and 115 Rust library tests plus the Rust binary targets. The merged National Phase 2 packaged gate and the existing packaged Phase 4, 5, and 6 gates also pass unchanged. Repository scans and explicit staged-file inspection are rerun immediately before commit.
 
 Final commands completed on the review branch:
 

@@ -137,7 +137,7 @@ These are engineering bounds, not claims that every implementation will naturall
 
 ### National numeric working set
 
-`MrmsNumericPyramid` preserves the exact 7,000 by 3,500 two-byte base grid in Rust and builds power-of-two presentation levels. Each reduction cell selects the strongest valid dBZ raw code; if there is no valid source it selects missing before no coverage. Ordinary image mipmaps and integer-code averaging are prohibited.
+`MrmsNumericPyramid` preserves the exact 7,000 by 3,500 two-byte base grid in Rust and builds power-of-two presentation levels. Each reduction cell selects the strongest valid dBZ raw code; if there is no valid source it selects missing before no coverage. Its geographic center is the center of the source-cell footprint it reduces, so overview and factor-1 detail remain spatially registered during refinement. Ordinary image mipmaps and integer-code averaging are prohibited.
 
 The diagnostic `PackedGrid v1` factor-4 level is 1,750 by 875. It is divided into 256-cell interiors with a one-cell sampling halo, producing 28 independently hashed chunks for the current fixed grid. One manifest and one bounded chunk transfer per global credit; the frontend never owns the full expanded base grid as one buffer.
 
