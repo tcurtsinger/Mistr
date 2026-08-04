@@ -116,6 +116,10 @@ import {
 } from "./national-radar/LatestOnlyAsyncQueue";
 import { runNationalBackfillLoop } from "./national-radar/NationalBackfillLoop";
 import { finalizeNationalHistoryUntilSettled } from "./national-radar/NationalFinalizeLoop";
+import {
+  nationalPollingFallbackDelayMs,
+  runNationalPollingLoop,
+} from "./national-radar/NationalPollingLoop";
 import { colorForReflectivity } from "./radar-renderer/palette";
 import { RadarChrome } from "./ui/RadarChrome";
 import {
@@ -1078,18 +1082,28 @@ export function App() {
       ): Promise<Phase5Report> => {
         if (!client) throw new Error("selected-site transfer client is unavailable");
         const activeClient = client;
+        const assertSiteTransitionStillCurrent = () => {
+          const transition = radarSessionCoordinatorRef.current!.snapshot().transition;
+          if (
+            transition?.generation !== generation
+            || transition.requestedSource.kind !== "site"
+            || transition.requestedSource.siteIcao !== site
+          ) {
+            throw new RadarSourceSupersededError(
+              "Site transition was superseded while National activity settled",
+            );
+          }
+        };
         const nationalOperation = nationalAcquisitionOperation;
         if (nationalOperation) await nationalOperation.catch(() => {});
-        const transition = radarSessionCoordinatorRef.current!.snapshot().transition;
-        if (
-          transition?.generation !== generation
-          || transition.requestedSource.kind !== "site"
-          || transition.requestedSource.siteIcao !== site
-        ) {
-          throw new RadarSourceSupersededError(
-            "Site transition was superseded while National history settled",
-          );
-        }
+        assertSiteTransitionStillCurrent();
+        queuedScrubRef.current = null;
+        const playbackToSettle = nationalPlaybackController;
+        if (playbackToSettle) await playbackToSettle.pauseAndWait(false);
+        const refinementToSettle = nationalRefinement;
+        if (refinementToSettle) await refinementToSettle.catch(() => {});
+        await nationalWorkingSet?.waitForIdle();
+        assertSiteTransitionStillCurrent();
         transferGeneration = generation;
         livePollingSession += 1;
         nationalHistorySession += 1;
@@ -1758,34 +1772,35 @@ export function App() {
       };
 
       const runNationalPolling = async (generation: number, historySession: number) => {
-        let attempt = 0;
-        while (!cancelled && historySession === nationalHistorySession) {
-          try {
-            await runNationalAcquisition(async () => {
-              nationalHistoryOwnershipCheck(generation, historySession);
-              const preparation = await activeClientForNational().prepareNationalHistoryNewer();
-              nationalHistoryOwnershipCheck(generation, historySession);
-              await commitNationalHistoryMutation(preparation, historySession);
-            });
-            attempt = 0;
-          } catch (error) {
-            if (isRadarSourceSuperseded(error)) return;
-            const code = nationalHistoryErrorCode(error);
-            if (code !== "mrms_not_strictly_newer") {
-              setNationalRequestError(error instanceof Error ? error.message : String(error));
-              attempt = Math.min(attempt + 1, 3);
-            }
-          }
-          try {
+        await runNationalPollingLoop({
+          shouldContinue: () => !cancelled && historySession === nationalHistorySession,
+          poll: () => runNationalAcquisition(async () => {
+            nationalHistoryOwnershipCheck(generation, historySession);
+            const preparation = await activeClientForNational().prepareNationalHistoryNewer();
+            nationalHistoryOwnershipCheck(generation, historySession);
+            await commitNationalHistoryMutation(preparation, historySession);
+          }),
+          classifyError(error) {
+            if (isRadarSourceSuperseded(error)) return "superseded";
+            return nationalHistoryErrorCode(error) === "mrms_not_strictly_newer"
+              ? "not_strictly_newer"
+              : "failure";
+          },
+          onHealthyPoll() {
+            setNationalRequestError(null);
+          },
+          onFailure(error) {
+            setNationalRequestError(error instanceof Error ? error.message : String(error));
+          },
+          async requestDelayMs(attempt) {
             const delay = await activeClientForNational().nationalHistoryPollDelay(
               attempt,
               Date.now() % Number.MAX_SAFE_INTEGER,
             );
-            await waitMilliseconds(delay.totalMs);
-          } catch {
-            return;
-          }
-        }
+            return delay.totalMs;
+          },
+          wait: waitMilliseconds,
+        });
       };
 
       const runNationalBackfill = async (generation: number) => {
@@ -1812,11 +1827,17 @@ export function App() {
               setNationalRequestError(error instanceof Error ? error.message : String(error));
             },
             async waitBeforeRetry(attempt) {
-              const delay = await activeClientForNational().nationalHistoryPollDelay(
-                attempt,
-                Date.now() % Number.MAX_SAFE_INTEGER,
-              );
-              await waitMilliseconds(delay.totalMs);
+              try {
+                const delay = await activeClientForNational().nationalHistoryPollDelay(
+                  attempt,
+                  Date.now() % Number.MAX_SAFE_INTEGER,
+                );
+                await waitMilliseconds(delay.totalMs);
+              } catch (error) {
+                nationalHistoryOwnershipCheck(generation, historySession);
+                setNationalRequestError(error instanceof Error ? error.message : String(error));
+                await waitMilliseconds(nationalPollingFallbackDelayMs(attempt));
+              }
               nationalHistoryOwnershipCheck(generation, historySession);
             },
           });
@@ -2962,6 +2983,7 @@ export function App() {
           ? Boolean(nationalPlaybackControllerRef.current)
             && (nationalHistory?.retained.length ?? 0) > 1
             && nationalCommonResidencyReady
+            && !pendingSite
           : Boolean(playbackControllerRef.current) && phase4.kind === "complete")
           && !rendererError
           && !playback?.residentReplacementPending}

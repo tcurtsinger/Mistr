@@ -141,6 +141,38 @@ describe("NationalPlaybackController", () => {
     controller.dispose();
   });
 
+  it("waits for an in-flight selection before a source transition can remove the layer", async () => {
+    const observations = frames(3);
+    const layer = new FakeNationalLayer(observations);
+    let finishPaint!: (receipt: NationalPaintReceipt) => void;
+    const pendingPaint = new Promise<NationalPaintReceipt>((resolve) => {
+      finishPaint = resolve;
+    });
+    vi.spyOn(layer, "selectResidentAndWait").mockImplementation(async (id, factor) => {
+      layer.selected = id;
+      layer.presentationFactor = factor;
+      layer.selectFactors.push(factor);
+      return pendingPaint;
+    });
+    const controller = new NationalPlaybackController(layer, observations);
+    controller.establishInitialPaint(layer.receipt());
+
+    const scrub = controller.scrub(0);
+    await vi.waitFor(() => expect(layer.selectFactors).toEqual([4]));
+    let settled = false;
+    const transitionBarrier = controller.pauseAndWait(false).then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    finishPaint(layer.receipt());
+    await scrub;
+    await transitionBarrier;
+    expect(settled).toBe(true);
+    controller.dispose();
+  });
+
   it("requests fine detail only after playback is paused and selection settles", async () => {
     vi.useFakeTimers();
     const observations = frames(2);

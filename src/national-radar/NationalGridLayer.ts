@@ -388,6 +388,13 @@ export class NationalGridLayer implements CustomLayerInterface {
     }
     this.rehydrationToken += 1;
     this.rollbackStaging();
+    const waiter = this.paintWaiter;
+    this.paintWaiter = null;
+    if (waiter) {
+      globalThis.clearTimeout(waiter.timeout);
+      waiter.reject(new Error("National renderer was removed before paint completed"));
+    }
+    this.pendingResidencyMutation = null;
     const uncommitted = this.awaitingExternalCommit?.mutation;
     if (uncommitted) {
       this.restoreResidencyState(uncommitted.previous);

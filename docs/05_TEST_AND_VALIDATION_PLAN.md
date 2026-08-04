@@ -303,6 +303,8 @@ Phase 4 adds bounded-history, transaction, residency, and playback tests without
 15. National playback controls remain disabled until renderer status is painted and every retained observation has complete common residency after recovery.
 16. The packaged Phase 3 regression must await an already-active camera refinement rather than returning a stale overview report while exact chunks are staging.
 17. Finalizing a strictly newer observation must release the prior current frame's optional exact-pyramid cache so later factor-1 preparation remains within the backend target even if polling wins the cadence race before refinement.
+18. A successful National-to-Site transition must disable new National playback input, pause and await an in-flight frame fence, settle refinement/working-set activity, and reject any defensive removal waiter before destroying the National layer.
+19. A healthy `mrms_not_strictly_newer` result after a transient poll failure must clear the stale request error and reset base cadence. A transient delay-command failure must use bounded local backoff and continue the same polling loop; it cannot require a source restart.
 18. Retrying predecessor or newer preparation after its response is lost must return the exact matching Rust stage with `reused: true` and zero repeated acquisition; frontend validation accepts that all-zero metric shape, rejects unmarked zeros, and a different staged mutation kind remains a hard error.
 19. The final broker has two credits and zero held/in-flight ownership, and a National-to-KTLX transition ends with one settled Site timeline.
 

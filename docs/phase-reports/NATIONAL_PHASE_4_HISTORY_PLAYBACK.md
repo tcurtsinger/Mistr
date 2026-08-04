@@ -28,7 +28,7 @@ Phase 5 long-session, UTC rollover, lower-GPU/device-floor, installer, sleep/wak
 
 `NationalPlaybackController` selects only complete factor-4 resources during play and active scrub. A resident-only reservation waits for in-flight acquisition/refinement and prevents new predecessor/poll work until interaction ends. After context loss, direct scrub awaits the same all-frame common-residency barrier as play; complete texture counts are insufficient until the renderer is painted, has an authoritative recovered receipt, and has no provisional mutation. The product disables playback controls and reports recovery until that repaint/fence completes. Paused high-zoom selection may refine, but refinement cannot change timeline time, numeric age, source, or exact interrogation identity.
 
-National-to-Site acquisition waits for the currently observed National acquisition/history transaction before it advances the global transfer generation, then verifies the same Site transition still owns intent. Paused camera moves reuse a matching prepared Rust detail frame by exact generation/time/hash/factor identity rather than repeating full-grid decode and encoding. Overlapping camera and diagnostic requests join the active refinement promise instead of returning the prior overview report while exact chunks are staging. Predecessor backfill keeps a failed Rust candidate unconsumed, reports the failure, and retries it with the same capped jitter/backoff policy; a successful commit resets the backoff before the loop can move to the next predecessor or newer-only polling.
+National-to-Site acquisition closes new National playback input and waits for the currently observed National acquisition/history transaction, playback selection, camera refinement, and working-set mutation before it advances the global transfer generation or removes the layer, then verifies the same Site transition still owns intent. A defensive removal path rejects rather than strands any unexpected paint waiter. Paused camera moves reuse a matching prepared Rust detail frame by exact generation/time/hash/factor identity rather than repeating full-grid decode and encoding. Overlapping camera and diagnostic requests join the active refinement promise instead of returning the prior overview report while exact chunks are staging. Predecessor backfill keeps a failed Rust candidate unconsumed, reports the failure, and retries it with the same capped jitter/backoff policy; a successful commit resets the backoff before the loop can move to the next predecessor or newer-only polling. A healthy no-newer inventory clears any prior transient request error and resets cadence. If the Rust delay command fails locally, bounded frontend backoff keeps predecessor/newer discovery alive.
 
 ## Packaged Windows/WebView2 evidence
 
@@ -38,7 +38,7 @@ Command:
 npm run test:national:phase4:packaged
 ```
 
-Five passing 3840 by 2160 results across review hardening, including the latest run after the paint-ready recovery barrier and transaction-bound seal retry:
+Six passing 3840 by 2160 results across review hardening, including the latest run after settled National playback before Site removal and resilient newer-observation polling:
 
 | Measurement | Result |
 |---|---:|
@@ -54,7 +54,7 @@ Five passing 3840 by 2160 results across review hardening, including the latest 
 | Hot-path texture uploads | 0 |
 | Detailed factor-1 residents after settle | 2 |
 | Highest National GPU allocation | 65,201,668 bytes |
-| Highest upload slice | 1.90 ms across initial staging, detail, and both recovery passes |
+| Highest upload slice | 2.00 ms across initial staging, detail, and both recovery passes |
 | Context epoch after real reset | 2 |
 | Shared transfer credits after evidence | 2 available, 0 held, 0 in flight |
 | Restored source | KTLX Site |
@@ -71,7 +71,8 @@ Generated JSON and screenshots remain under ignored `artifacts/national-phase-4/
 - Rust detail-cache tests: same-identity/factor preparation returns the identical packed frame, while a different factor misses and requires a rebuild.
 - TypeScript transfer/renderer/working-set tests: strict acceptance of explicitly reused zero-cost preparation with rejection of unmarked zeros, complete lease release, provisional paint, post-fence supersession rollback, recovery receipt matching that ignores only context/draw freshness while preserving the full presentation identity, a common-residency barrier that rejects complete texture counts until recovery paint/fence truth exists, transaction-bound sealing beyond three failures with matching-snapshot recovery, and a deterministic latest-only async queue proving one active lookup plus newest-pending replacement.
 - Backfill-loop tests: transient prepare/commit failures retry the preserved candidate, successful work resets capped backoff, and supersession stops without another delay.
-- Playback tests: common factor-4 play/scrub, recovery-time scrub waiting, pause-only refinement, overview-camera no-refinement behavior, and diagnostic 30-frame controller compatibility.
+- Polling-loop tests: a recovered no-newer inventory clears a prior failure and resets cadence, while delay-command failure uses bounded local backoff and continues polling.
+- Playback tests: common factor-4 play/scrub, recovery-time scrub waiting, source transition waiting for an in-flight selection fence, pause-only refinement, overview-camera no-refinement behavior, and diagnostic 30-frame controller compatibility.
 - Session tests: current Site failures report only after coordinator rollback, while superseded Site failures cannot trigger fallback restoration.
 - Packaged validator tests: rejection of hot-path activity, mixed high-zoom presentation quality, or missing/stale failed-Site restoration evidence.
 - The merged National Phase 3 packaged regression: an automatic camera refinement and explicit diagnostic caller converge on the same eight-chunk exact viewport, then retain overview fallback and recover the matching presentation.
@@ -79,6 +80,6 @@ Generated JSON and screenshots remain under ignored `artifacts/national-phase-4/
 
 ## Acceptance disposition
 
-The dedicated National Phase 4 packaged gate passes five times across review hardening, including the latest exact code after the paint-ready recovery barrier and transaction-bound seal retry, across the primary release-runtime history, residency, zero-I/O playback, quality-lock, memory, context-recovery, credit-release, exact-lookup, inspection-refresh/coalescing, post-finalization recovery receipt, active-playback failed-Site restoration, and successful Site-return criteria. `npm run verify` passes 277 frontend/script tests and 133 Rust tests across the library and binaries, together with the production build, formatting, warnings-denied clippy, Rust check, documentation links, and public-repository scan. The merged National Phase 2/3 packaged gates and unchanged selected-site Phase 4/5/6 packaged regressions also pass.
+The dedicated National Phase 4 packaged gate passes six times across review hardening, including the latest exact code after settled National playback before Site removal and resilient newer-observation polling, across the primary release-runtime history, residency, zero-I/O playback, quality-lock, memory, context-recovery, credit-release, exact-lookup, inspection-refresh/coalescing, post-finalization recovery receipt, active-playback failed-Site restoration, and successful Site-return criteria. `npm run verify` passes 280 frontend/script tests and 133 Rust tests across the library and binaries, together with the production build, formatting, warnings-denied clippy, Rust check, documentation links, and public-repository scan. The merged National Phase 2/3 packaged gates and unchanged selected-site Phase 4/5/6 packaged regressions also pass.
 
 Whitespace validation and staged-file inspection remain pre-commit controls. Pull-request review and CI remain required before the owner may merge.
