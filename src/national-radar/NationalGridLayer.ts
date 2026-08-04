@@ -955,6 +955,7 @@ function residentGpuBytes(presentation: PresentationResources): number {
 }
 
 function uploadRawTexture(gl: WebGL2RenderingContext, chunk: PackedGridChunk): WebGLTexture {
+  clearPriorWebGlErrors(gl);
   const texture = gl.createTexture();
   if (!texture) throw new Error("National renderer could not allocate a chunk texture");
   const previousActive = gl.getParameter(gl.ACTIVE_TEXTURE) as number;
@@ -991,6 +992,15 @@ function uploadRawTexture(gl: WebGL2RenderingContext, chunk: PackedGridChunk): W
     gl.bindTexture(gl.TEXTURE_2D, previousTexture0);
     gl.activeTexture(previousActive);
   }
+}
+
+export function clearPriorWebGlErrors(
+  gl: Pick<WebGL2RenderingContext, "getError" | "NO_ERROR">,
+): void {
+  for (let attempt = 0; attempt < 32; attempt += 1) {
+    if (gl.getError() === gl.NO_ERROR) return;
+  }
+  throw new Error("National renderer could not clear the prior WebGL error state");
 }
 
 function uploadPalette(gl: WebGL2RenderingContext): WebGLTexture {
