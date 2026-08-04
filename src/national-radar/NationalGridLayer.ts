@@ -281,6 +281,7 @@ export class NationalGridLayer implements CustomLayerInterface {
   private recovering = false;
   private rehydrationToken = 0;
   private readonly uploadBudgetMs: number;
+  private readonly uploadFrameBudget: UploadFrameBudget;
 
   constructor(private readonly options: NationalGridLayerOptions = {}) {
     this.displayMode = options.displayMode ?? "smooth";
@@ -291,6 +292,7 @@ export class NationalGridLayer implements CustomLayerInterface {
     if (!Number.isFinite(this.uploadBudgetMs) || this.uploadBudgetMs <= 0 || this.uploadBudgetMs > 4) {
       throw new Error("National upload budget must be greater than zero and no more than 4 ms");
     }
+    this.uploadFrameBudget = new UploadFrameBudget(this.uploadBudgetMs);
   }
 
   onAdd(map: MapLibreMap, gl: WebGL2RenderingContext): void {
@@ -459,17 +461,19 @@ export class NationalGridLayer implements CustomLayerInterface {
     if (staging.chunks.has(chunk.descriptor.index)) {
       throw new Error(`National chunk ${chunk.descriptor.index} was staged twice`);
     }
-    await nextAnimationFrame();
-    if (this.staging !== staging) throw new Error("National staging was cancelled before upload");
     const gl = this.gl;
     if (!gl || gl.isContextLost()) throw new Error("National renderer lost its WebGL context during upload");
     const { texture, maximumSliceMs } = await uploadRawTextureTimeSliced(
       gl,
       chunk,
-      this.uploadBudgetMs,
+      this.uploadFrameBudget,
       () => this.staging === staging && this.gl === gl && !gl.isContextLost(),
       "National chunk upload",
     );
+    if (this.staging !== staging) {
+      gl.deleteTexture(texture);
+      throw new Error("National staging was cancelled before upload");
+    }
     const resource: GpuChunk = {
       packed: chunk,
       texture,
@@ -1178,7 +1182,6 @@ export class NationalGridLayer implements CustomLayerInterface {
       for (const presentation of presentations) {
         for (const resource of presentation.chunks.values()) {
           if (resource.texture) continue;
-          await nextAnimationFrame();
           if (
             token !== this.rehydrationToken
             || this.gl !== gl
@@ -1187,7 +1190,7 @@ export class NationalGridLayer implements CustomLayerInterface {
           const { texture, maximumSliceMs } = await uploadRawTextureTimeSliced(
             gl,
             resource.packed,
-            this.uploadBudgetMs,
+            this.uploadFrameBudget,
             () => token === this.rehydrationToken && this.gl === gl && !gl.isContextLost(),
             "National recovery chunk upload",
           );
@@ -1567,25 +1570,74 @@ function residentGpuBytes(presentation: PresentationResources): number {
   return bytes;
 }
 
-// A 256-cell chunk plus halos is allocated separately, then filled across
-// nine animation frames. The smaller row band preserves headroom for texture
-// state restoration and WebView2 scheduling variance inside the 4 ms budget.
-const TEXTURE_UPLOAD_ROWS_PER_SLICE = 32;
+// Chunk textures are filled in row bands sized from measured upload
+// throughput. Bands and whole chunks share one animation frame until the
+// measured budget is spent, then the budget yields; the fixed 32-row band and
+// its one-band-per-frame yield made a 392-chunk whole-domain presentation cost
+// thousands of vsync waits on real 60 Hz displays.
+const MINIMUM_UPLOAD_ROWS_PER_SLICE = 32;
+// A single non-preemptible upload call must never become a long task even if
+// the throughput estimate is badly wrong.
+const UPLOAD_SLICE_LONG_TASK_CEILING_MS = 50;
+
+export class UploadFrameBudget {
+  private spentMs: number;
+  private estimatedMsPerRow: number;
+
+  constructor(private readonly budgetMs: number) {
+    if (!Number.isFinite(budgetMs) || budgetMs <= 0) {
+      throw new Error("National upload frame budget must be positive");
+    }
+    // Force a yield before the first slice and start from the conservative
+    // legacy assumption of one 32-row band per whole budget.
+    this.spentMs = Number.POSITIVE_INFINITY;
+    this.estimatedMsPerRow = budgetMs / MINIMUM_UPLOAD_ROWS_PER_SLICE;
+  }
+
+  /** Yield to the next animation frame when the current one cannot fit a minimum slice. */
+  async yieldIfSpent(): Promise<void> {
+    const minimumSliceMs = this.estimatedMsPerRow * MINIMUM_UPLOAD_ROWS_PER_SLICE;
+    if (this.spentMs + minimumSliceMs <= this.budgetMs) return;
+    await nextAnimationFrame();
+    this.spentMs = 0;
+  }
+
+  rowsForSlice(remainingRows: number): number {
+    const affordable = Math.floor((this.budgetMs - this.spentMs) / this.estimatedMsPerRow);
+    return Math.max(MINIMUM_UPLOAD_ROWS_PER_SLICE, Math.min(affordable, remainingRows));
+  }
+
+  recordSlice(rowCount: number, elapsedMs: number): void {
+    this.spentMs += elapsedMs;
+    const measured = elapsedMs / Math.max(1, rowCount);
+    // Blend toward the measurement so one scheduler hiccup cannot permanently
+    // collapse the band size, while sustained slowness still shrinks it.
+    this.estimatedMsPerRow = Math.max(
+      0.000_5,
+      this.estimatedMsPerRow * 0.5 + measured * 0.5,
+    );
+  }
+
+  recordFixedCost(elapsedMs: number): void {
+    this.spentMs += elapsedMs;
+  }
+}
 
 async function uploadRawTextureTimeSliced(
   gl: WebGL2RenderingContext,
   chunk: PackedGridChunk,
-  uploadBudgetMs: number,
+  budget: UploadFrameBudget,
   shouldContinue: () => boolean,
   diagnosticLabel: string,
 ): Promise<{ texture: WebGLTexture; maximumSliceMs: number }> {
+  await budget.yieldIfSpent();
+  if (!shouldContinue()) throw new Error(`${diagnosticLabel} was cancelled`);
   const allocationStarted = performance.now();
   const texture = gl.createTexture();
   if (!texture) throw new Error("National renderer could not allocate a chunk texture");
   let maximumSliceMs = 0;
   let nextRow = 0;
   try {
-    if (!shouldContinue()) throw new Error(`${diagnosticLabel} was cancelled`);
     withBoundRawTexture(gl, texture, () => {
       clearPriorWebGlErrors(gl);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
@@ -1607,23 +1659,18 @@ async function uploadRawTextureTimeSliced(
       if (error !== gl.NO_ERROR) throw new Error(`National chunk texture allocation failed (GL ${error})`);
     });
     const allocationElapsed = performance.now() - allocationStarted;
-    if (allocationElapsed > uploadBudgetMs) {
-      throw new Error(
-        `${diagnosticLabel} allocation used ${allocationElapsed.toFixed(3)} ms, exceeding the ${uploadBudgetMs} ms frame budget`,
-      );
-    }
+    assertSliceUnderLongTaskCeiling(allocationElapsed, `${diagnosticLabel} allocation`);
+    budget.recordFixedCost(allocationElapsed);
     maximumSliceMs = allocationElapsed;
-    await nextAnimationFrame();
     while (nextRow < chunk.descriptor.haloHeight) {
+      await budget.yieldIfSpent();
       if (!shouldContinue()) throw new Error(`${diagnosticLabel} was cancelled`);
-      const rowCount = Math.min(
-        TEXTURE_UPLOAD_ROWS_PER_SLICE,
-        chunk.descriptor.haloHeight - nextRow,
-      );
+      const rowCount = budget.rowsForSlice(chunk.descriptor.haloHeight - nextRow);
       const started = performance.now();
+      const sliceFirstRow = nextRow;
       withBoundRawTexture(gl, texture, () => {
         clearPriorWebGlErrors(gl);
-        const firstValue = nextRow * chunk.descriptor.haloWidth;
+        const firstValue = sliceFirstRow * chunk.descriptor.haloWidth;
         const values = chunk.rawCodes.subarray(
           firstValue,
           firstValue + rowCount * chunk.descriptor.haloWidth,
@@ -1632,7 +1679,7 @@ async function uploadRawTextureTimeSliced(
           gl.TEXTURE_2D,
           0,
           0,
-          nextRow,
+          sliceFirstRow,
           chunk.descriptor.haloWidth,
           rowCount,
           gl.RED_INTEGER,
@@ -1643,20 +1690,23 @@ async function uploadRawTextureTimeSliced(
         if (error !== gl.NO_ERROR) throw new Error(`National chunk texture upload failed (GL ${error})`);
       });
       const elapsed = performance.now() - started;
-      if (elapsed > uploadBudgetMs) {
-        throw new Error(
-          `${diagnosticLabel} used ${elapsed.toFixed(3)} ms, exceeding the ${uploadBudgetMs} ms frame budget`,
-        );
-      }
+      assertSliceUnderLongTaskCeiling(elapsed, diagnosticLabel);
+      budget.recordSlice(rowCount, elapsed);
       maximumSliceMs = Math.max(maximumSliceMs, elapsed);
       nextRow += rowCount;
-      if (nextRow < chunk.descriptor.haloHeight) await nextAnimationFrame();
     }
     return { texture, maximumSliceMs };
   } catch (error) {
     gl.deleteTexture(texture);
     throw error;
   }
+}
+
+function assertSliceUnderLongTaskCeiling(elapsedMs: number, diagnosticLabel: string): void {
+  if (elapsedMs <= UPLOAD_SLICE_LONG_TASK_CEILING_MS) return;
+  throw new Error(
+    `${diagnosticLabel} used ${elapsedMs.toFixed(3)} ms in one non-preemptible slice, exceeding the ${UPLOAD_SLICE_LONG_TASK_CEILING_MS} ms long-task ceiling`,
+  );
 }
 
 function withBoundRawTexture(
