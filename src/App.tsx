@@ -1364,6 +1364,7 @@ export function App() {
           displayMode: displayModeRef.current,
           recoveryBeforeLayerId: radarContextAnchorLayerId(instance.getStyle().layers ?? []),
           onSnapshot(renderer) {
+            setPlaybackError((current) => playbackErrorAfterRendererStatus(current, renderer.status));
             if (renderer.displayMode !== displayModeRef.current) {
               displayModeRef.current = renderer.displayMode;
               setDisplayMode(renderer.displayMode);

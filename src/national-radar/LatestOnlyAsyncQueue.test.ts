@@ -25,6 +25,7 @@ describe("LatestOnlyAsyncQueue", () => {
 
     expect(calls).toEqual(["first"]);
     expect(queue.snapshot()).toMatchObject({ running: true, pending: true });
+    await expect(second).resolves.toBeNull();
     resolvers[0]("first-result");
     await Promise.resolve();
     await Promise.resolve();
@@ -32,8 +33,7 @@ describe("LatestOnlyAsyncQueue", () => {
     expect(maxActive).toBe(1);
 
     resolvers[1]("newest-result");
-    await expect(first).resolves.toBe("newest-result");
-    await expect(second).resolves.toBe("newest-result");
+    await expect(first).resolves.toBe("first-result");
     await expect(newest).resolves.toBe("newest-result");
     await queue.waitForIdle();
     expect(queue.snapshot()).toEqual({
@@ -56,13 +56,52 @@ describe("LatestOnlyAsyncQueue", () => {
     });
 
     const running = queue.enqueue("active");
-    queue.enqueue("stale-pending");
+    const stalePending = queue.enqueue("stale-pending");
     queue.cancelPending();
+    await expect(stalePending).resolves.toBeNull();
     finish("done");
 
     await expect(running).resolves.toBe("done");
     await queue.waitForIdle();
     expect(calls).toEqual(["active"]);
     expect(queue.snapshot()).toMatchObject({ running: false, pending: false });
+  });
+
+  it("settles every superseded caller without waiting for the active drain", async () => {
+    let finishActive!: (value: string) => void;
+    const queue = new LatestOnlyAsyncQueue<string, string>(() => (
+      new Promise((resolve) => { finishActive = resolve; })
+    ));
+
+    const active = queue.enqueue("active");
+    const superseded = queue.enqueue("superseded");
+    const newest = queue.enqueue("newest");
+
+    await expect(superseded).resolves.toBeNull();
+    expect(queue.snapshot()).toMatchObject({ running: true, pending: true });
+    queue.cancelPending();
+    await expect(newest).resolves.toBeNull();
+    finishActive("active-result");
+    await expect(active).resolves.toBe("active-result");
+    await queue.waitForIdle();
+  });
+
+  it("starts a new drain when a request arrives as the prior drain settles", async () => {
+    let finishActive!: (value: string) => void;
+    const activeResult = new Promise<string>((resolve) => { finishActive = resolve; });
+    const calls: string[] = [];
+    const queue = new LatestOnlyAsyncQueue<string, string>((request) => {
+      calls.push(request);
+      return request === "active" ? activeResult : Promise.resolve("late-result");
+    });
+
+    const active = queue.enqueue("active");
+    const late = activeResult.then(() => queue.enqueue("late")).then((result) => result);
+    finishActive("active-result");
+
+    await expect(active).resolves.toBe("active-result");
+    await expect(late).resolves.toBe("late-result");
+    await queue.waitForIdle();
+    expect(calls).toEqual(["active", "late"]);
   });
 });

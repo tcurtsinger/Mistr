@@ -14,9 +14,8 @@ export interface LatestOnlyAsyncQueueSnapshot {
  * already-running native operation can be cancelled.
  */
 export class LatestOnlyAsyncQueue<TRequest, TResult> {
-  private pendingRequest: TRequest | undefined;
-  private hasPendingRequest = false;
-  private runningPromise: Promise<TResult | null> | null = null;
+  private pending: PendingRequest<TRequest, TResult> | null = null;
+  private runningPromise: Promise<void> | null = null;
   private startedCount = 0;
   private completedCount = 0;
   private failedCount = 0;
@@ -29,22 +28,20 @@ export class LatestOnlyAsyncQueue<TRequest, TResult> {
   ) {}
 
   enqueue(request: TRequest): Promise<TResult | null> {
-    if (this.hasPendingRequest) this.replacedPendingCount += 1;
-    this.pendingRequest = request;
-    this.hasPendingRequest = true;
-    if (!this.runningPromise) {
-      const running = this.drain();
-      this.runningPromise = running;
-      void running.finally(() => {
-        if (this.runningPromise === running) this.runningPromise = null;
-      });
-    }
-    return this.runningPromise;
+    const result = new Promise<TResult | null>((resolve) => {
+      if (this.pending) {
+        this.replacedPendingCount += 1;
+        this.pending.resolve(null);
+      }
+      this.pending = { request, resolve };
+    });
+    this.startDrain();
+    return result;
   }
 
   cancelPending(): void {
-    this.pendingRequest = undefined;
-    this.hasPendingRequest = false;
+    this.pending?.resolve(null);
+    this.pending = null;
   }
 
   async waitForIdle(): Promise<void> {
@@ -54,7 +51,7 @@ export class LatestOnlyAsyncQueue<TRequest, TResult> {
   snapshot(): LatestOnlyAsyncQueueSnapshot {
     return {
       running: this.runningPromise !== null,
-      pending: this.hasPendingRequest,
+      pending: this.pending !== null,
       startedCount: this.startedCount,
       completedCount: this.completedCount,
       failedCount: this.failedCount,
@@ -63,25 +60,38 @@ export class LatestOnlyAsyncQueue<TRequest, TResult> {
     };
   }
 
-  private async drain(): Promise<TResult | null> {
-    let latestResult: TResult | null = null;
-    while (this.hasPendingRequest) {
-      const request = this.pendingRequest as TRequest;
-      this.pendingRequest = undefined;
-      this.hasPendingRequest = false;
+  private startDrain() {
+    if (this.runningPromise || !this.pending) return;
+    const running = this.drain();
+    this.runningPromise = running;
+    void running.finally(() => {
+      if (this.runningPromise !== running) return;
+      this.runningPromise = null;
+      this.startDrain();
+    });
+  }
+
+  private async drain(): Promise<void> {
+    while (this.pending) {
+      const pending = this.pending;
+      this.pending = null;
       this.startedCount += 1;
       this.concurrentCount += 1;
       this.maxConcurrentCount = Math.max(this.maxConcurrentCount, this.concurrentCount);
       try {
-        latestResult = await this.execute(request);
+        pending.resolve(await this.execute(pending.request));
       } catch {
-        latestResult = null;
+        pending.resolve(null);
         this.failedCount += 1;
       } finally {
         this.concurrentCount -= 1;
         this.completedCount += 1;
       }
     }
-    return latestResult;
   }
+}
+
+interface PendingRequest<TRequest, TResult> {
+  request: TRequest;
+  resolve(result: TResult | null): void;
 }
