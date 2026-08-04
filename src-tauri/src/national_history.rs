@@ -220,6 +220,28 @@ impl NationalHistoryStore {
         Ok(())
     }
 
+    fn retryable_staged_preparation(
+        &self,
+        generation: u64,
+        kind: NationalHistoryMutationKind,
+    ) -> Result<Option<Arc<RetainedNationalFrame>>, TransferError> {
+        self.ensure_generation(generation)?;
+        if self.reversible_commit.is_some() {
+            return Err(TransferError::new(
+                "national_history_commit_unfinalized",
+                "the prior National history commit is still reversible",
+            ));
+        }
+        match &self.staged {
+            None => Ok(None),
+            Some(staged) if staged.kind == kind => Ok(Some(staged.frame.clone())),
+            Some(_) => Err(TransferError::new(
+                "national_history_stage_busy",
+                "a different National history mutation is already staged",
+            )),
+        }
+    }
+
     fn find(
         &self,
         generation: u64,
@@ -689,8 +711,23 @@ pub async fn prepare_national_history_predecessor(
     let token = broker.live_generation_token(session, generation)?;
     let candidate = {
         let store = lock_store(&state)?;
-        store.ensure_generation(generation)?;
-        store.ensure_no_stage()?;
+        if let Some(frame) = store
+            .retryable_staged_preparation(generation, NationalHistoryMutationKind::Predecessor)?
+        {
+            let matches_pending_candidate = store
+                .backfill_candidates
+                .front()
+                .is_some_and(|candidate| candidate.key == frame.evidence.object_key);
+            if !matches_pending_candidate {
+                return Err(TransferError::new(
+                    "national_history_stage_stale",
+                    "staged predecessor no longer matches the pending backfill candidate",
+                ));
+            }
+            drop(store);
+            return retry_prepare_report(&state, NationalHistoryMutationKind::Predecessor, frame)
+                .map(Some);
+        }
         let oldest = store.retained.front().ok_or_else(|| {
             TransferError::new(
                 "national_history_empty",
@@ -740,8 +777,12 @@ pub async fn prepare_national_history_newer(
     let token = broker.live_generation_token(session, generation)?;
     let newest_time = {
         let store = lock_store(&state)?;
-        store.ensure_generation(generation)?;
-        store.ensure_no_stage()?;
+        if let Some(frame) =
+            store.retryable_staged_preparation(generation, NationalHistoryMutationKind::Newer)?
+        {
+            drop(store);
+            return retry_prepare_report(&state, NationalHistoryMutationKind::Newer, frame);
+        }
         store
             .retained
             .back()
@@ -1228,6 +1269,23 @@ fn prepare_report(
     })
 }
 
+fn retry_prepare_report(
+    state: &NationalHistoryState,
+    kind: NationalHistoryMutationKind,
+    frame: Arc<RetainedNationalFrame>,
+) -> Result<NationalHistoryPrepareReport, TransferError> {
+    Ok(NationalHistoryPrepareReport {
+        kind,
+        observation: frame.identity(),
+        discovery_ms: 0.0,
+        download_ms: 0.0,
+        decode_and_level_ms: 0.0,
+        acquisition_network_requests: 0,
+        acquisition_response_bytes: 0,
+        history: lock_store(state)?.snapshot(),
+    })
+}
+
 fn history_frame_bytes<T>(
     state: &NationalHistoryState,
     generation: u64,
@@ -1448,6 +1506,67 @@ mod tests {
             )
             .unwrap();
         assert!(store.staged.is_none());
+    }
+
+    #[test]
+    fn predecessor_and_newer_preparation_retries_reuse_the_exact_staged_frame() {
+        for kind in [
+            NationalHistoryMutationKind::Predecessor,
+            NationalHistoryMutationKind::Newer,
+        ] {
+            let mut store = test_store(20);
+            store.reset(7, VecDeque::new());
+            commit(&mut store, NationalHistoryMutationKind::Current, 2_000).unwrap();
+            let frame = retained_frame(
+                7,
+                if kind == NationalHistoryMutationKind::Predecessor {
+                    1_000
+                } else {
+                    3_000
+                },
+            );
+            store.stage(kind, frame.clone()).unwrap();
+
+            let retried = store
+                .retryable_staged_preparation(7, kind)
+                .unwrap()
+                .unwrap();
+
+            assert!(Arc::ptr_eq(&retried, &frame));
+            assert_eq!(store.activity.network_requests, 0);
+            assert_eq!(store.activity.decoder_runs, 0);
+            let state = NationalHistoryState {
+                inner: Arc::new(Mutex::new(store)),
+                point_lookup_gate: Arc::new(Semaphore::new(1)),
+            };
+            let report = retry_prepare_report(&state, kind, retried).unwrap();
+            assert_eq!(report.kind, kind);
+            assert_eq!(report.observation.object_key, frame.evidence.object_key);
+            assert_eq!(report.discovery_ms, 0.0);
+            assert_eq!(report.download_ms, 0.0);
+            assert_eq!(report.decode_and_level_ms, 0.0);
+            assert_eq!(report.acquisition_network_requests, 0);
+            assert_eq!(report.acquisition_response_bytes, 0);
+        }
+    }
+
+    #[test]
+    fn preparation_retry_rejects_a_different_staged_mutation_kind() {
+        let mut store = test_store(20);
+        store.reset(7, VecDeque::new());
+        commit(&mut store, NationalHistoryMutationKind::Current, 2_000).unwrap();
+        store
+            .stage(
+                NationalHistoryMutationKind::Predecessor,
+                retained_frame(7, 1_000),
+            )
+            .unwrap();
+
+        let error = store
+            .retryable_staged_preparation(7, NationalHistoryMutationKind::Newer)
+            .unwrap_err();
+
+        assert_eq!(error.code, "national_history_stage_busy");
     }
 
     #[test]
