@@ -41,6 +41,15 @@ describe("National Phase 4 packaged acceptance", () => {
     report.activePlayback.activityAfter.pointLookupDecodes = 8;
     expect(validateNationalPhase4Acceptance(report)).toEqual([]);
   });
+
+  it("requires usable playback controls while another National frame stages", () => {
+    const report = validReport();
+    report.partialHistoryControls.enabledStableStagingSampleCount = 0;
+    report.partialHistoryControls.enabledStableStagingRetainedCounts = [];
+    expect(validateNationalPhase4Acceptance(report)).toContain(
+      "partial-history playback control availability",
+    );
+  });
 });
 
 function validReport() {
@@ -89,6 +98,16 @@ function validReport() {
     };
   };
   return {
+    partialHistoryControls: {
+      partialSampleCount: 240,
+      buttonFoundSampleCount: 240,
+      stableStagingSampleCount: 180,
+      enabledStableStagingSampleCount: 180,
+      partialRetainedCounts: Array.from({ length: 18 }, (_, index) => index + 2),
+      stableStagingRetainedCounts: Array.from({ length: 18 }, (_, index) => index + 2),
+      enabledStableStagingRetainedCounts: Array.from({ length: 18 }, (_, index) => index + 2),
+      firstDisabledStableStaging: null,
+    },
     history: {
       history: {
         historyLimit: 20,

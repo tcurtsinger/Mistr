@@ -3,6 +3,17 @@ const HARD_CEILING_BYTES = 256 * 1024 * 1024;
 
 export function validateNationalPhase4Acceptance(report) {
   const failures = [];
+  const partialControls = report.partialHistoryControls;
+  if (
+    !(partialControls?.partialSampleCount > 0)
+    || partialControls?.buttonFoundSampleCount !== partialControls?.partialSampleCount
+    || !(partialControls?.stableStagingSampleCount > 0)
+    || partialControls?.enabledStableStagingSampleCount !== partialControls?.stableStagingSampleCount
+    || !sameMembers(
+      partialControls?.enabledStableStagingRetainedCounts ?? [],
+      partialControls?.stableStagingRetainedCounts ?? [],
+    )
+  ) failures.push("partial-history playback control availability");
   const history = report.history?.history;
   const renderer = report.history?.renderer;
   const playback = report.history?.playback;

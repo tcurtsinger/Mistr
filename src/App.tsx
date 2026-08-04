@@ -101,6 +101,7 @@ import {
 } from "./radar-session/SiteLevel2Session";
 import { NationalMrmsSession } from "./radar-session/NationalMrmsSession";
 import {
+  commonResidencyReadyForInteraction,
   NationalGridLayer,
   type NationalGridRendererSnapshot,
   type NationalPaintReceipt,
@@ -1829,7 +1830,6 @@ export function App() {
         let workingSet: NationalHistoryWorkingSetResult | undefined;
         let backendFinalized = false;
         let rendererFinalized = false;
-        activePlayback.markReplacementPending(true);
         try {
           await activeWorkingSet.waitForIdle();
           nationalHistoryOwnershipCheck(generation, historySession);
@@ -1839,6 +1839,7 @@ export function App() {
             selectedObservationId,
             () => nationalHistoryOwnershipCheck(generation, historySession),
             async () => {
+              activePlayback.markReplacementPending(true);
               resumePlayback = activePlayback.snapshot().playing
                 ? await activePlayback.pauseAndWait(false)
                 : false;
@@ -2850,10 +2851,11 @@ export function App() {
 
   const nationalActive = paintedRadarSource.kind === "national";
   const nationalCommonResidencyReady = nationalActive
-    && nationalPhase3?.renderer.status === "painted"
-    && nationalPhase3.renderer.commonResidentObservationIds.length
-      === (nationalHistory?.retained.length ?? 0)
-    && (nationalHistory?.retained.length ?? 0) > 0;
+    && nationalPhase3 !== null
+    && commonResidencyReadyForInteraction(
+      nationalPhase3.renderer,
+      nationalHistory?.retained.length ?? 0,
+    );
   const sitePlayback = phase4.kind === "complete" ? phase4.report.playback : undefined;
   const playback = nationalActive ? nationalPlayback ?? undefined : sitePlayback;
   const frameIndex = paintedFrameIndex(timelineFrames, playback);

@@ -4,7 +4,7 @@
 |---|---|
 | Decision date | 2026-08-03 |
 | Last plan amendment | 2026-08-03 — 20-observation retained history, level-of-detail GPU working set, theoretical-domain encoding, time-sliced uploads, and cross-source freshness evidence |
-| Status | Approved plan; Phases 1 through 3 merged in PRs #15/#16/#17; Phase 4 bounded National history active on `codex/mistr-national-history` for review |
+| Status | Approved plan; Phases 1 through 4 merged in PRs #15/#16/#17/#18; focused post-merge playback correction active on `codex/mistr-national-visual-fidelity` |
 | Planned source | NOAA Multi-Radar/Multi-Sensor System (MRMS) `MergedBaseReflectivityQC` |
 | Initial geographic scope | Contiguous United States (CONUS) |
 | Initial retained history | 20 exact observations, approximately 38 minutes at the normal two-minute publication cadence |
@@ -16,7 +16,7 @@ This document defines the next Mistr radar milestone: a truthful, bounded Nation
 
 The plan deliberately avoids the failure modes demonstrated by GustAVO's national/site radar path. National radar will not be assembled from individual Level II sites inside Mistr, represented as a large set of animated MapLibre tile sources, or automatically substituted for site radar at a zoom threshold. It will be a separate NOAA-produced gridded observation type with the same generation, ownership, paint-receipt, playback, recovery, and UI-truth standards already required by Mistr.
 
-This remains the governing phased contract. The owner authorized and merged Phase 1 through PR #15, Phase 2 through PR #16, and Phase 3 through PR #17 at `be4b05b`. The owner separately authorized Phase 4 on 2026-08-03. Phase 4 authorization extends only to bounded rolling National history, polling, all-frame residency, playback/scrubbing quality locking, paused detail refinement, exact retained-frame interrogation, and recovery; it does not authorize the Phase 5 long-session/platform hardening matrix.
+This remains the governing phased contract. The owner authorized and merged Phase 1 through PR #15, Phase 2 through PR #16, Phase 3 through PR #17, and Phase 4 through PR #18 at `4a4da19`. The active post-merge correction is limited to demonstrated playback visual fidelity and already-usable control availability during background backfill; it does not authorize the Phase 5 long-session/platform hardening matrix.
 
 ## 2. Accepted product decisions
 
@@ -88,7 +88,7 @@ National and Site never share a timeline. The currently painted source alone own
 - inspected dBZ and no-data status;
 - partial-history or acquisition notices.
 
-National retains 20 exact chronological observations. The newest safe observation paints first, and up to 19 predecessors backfill afterward without changing the visible newest observation. The timeline exposes every retained observation, but the renderer uploads only the level-of-detail chunks required for the current camera and playback working set.
+National retains 20 exact chronological observations. The newest safe observation paints first, and up to 19 predecessors backfill afterward without changing the visible newest observation. Once two complete observations are resident, Play and direct scrubbing remain available while another predecessor stages; only the bounded atomic residency change or recovery may hold transport briefly. The timeline exposes every retained observation, but the renderer uploads only the level-of-detail chunks required for the current camera and playback working set.
 
 The plan uses three terms deliberately:
 

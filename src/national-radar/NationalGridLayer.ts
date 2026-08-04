@@ -1399,6 +1399,23 @@ export function commonResidencyReadyForSelection(
     && snapshot.commonResidentObservationIds.length === snapshot.residentObservationIds.length;
 }
 
+export function commonResidencyReadyForInteraction(
+  snapshot: Pick<
+    NationalGridRendererSnapshot,
+    | "status"
+    | "mutationAwaitingCommit"
+    | "paintReceipt"
+    | "commonResidentObservationIds"
+  >,
+  retainedObservationCount: number,
+): boolean {
+  return retainedObservationCount > 0
+    && (snapshot.status === "painted" || snapshot.status === "staging")
+    && !snapshot.mutationAwaitingCommit
+    && snapshot.paintReceipt !== undefined
+    && snapshot.commonResidentObservationIds.length === retainedObservationCount;
+}
+
 export interface NationalPlaybackDetailResidency {
   observationId: string;
   presentationFactor: number;

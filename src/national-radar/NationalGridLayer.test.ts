@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   clearPriorWebGlErrors,
   completePlaybackDetailFactor,
+  commonResidencyReadyForInteraction,
   commonResidencyReadyForSelection,
   sameNationalPresentationReceipt,
   type NationalPaintReceipt,
@@ -61,6 +62,36 @@ describe("National WebGL upload error isolation", () => {
       status: "painted",
       paintReceipt: undefined,
     })).toBe(false);
+  });
+
+  it("keeps completed playback residents interactive while another frame stages", () => {
+    const completedTimeline = {
+      mutationAwaitingCommit: false,
+      paintReceipt: receipt({ contextEpoch: 2 }),
+      commonResidentObservationIds: ["older", "newer"],
+    } as const;
+
+    expect(commonResidencyReadyForInteraction({
+      ...completedTimeline,
+      status: "staging",
+    }, 2)).toBe(true);
+    expect(commonResidencyReadyForInteraction({
+      ...completedTimeline,
+      status: "painted",
+    }, 2)).toBe(true);
+    expect(commonResidencyReadyForInteraction({
+      ...completedTimeline,
+      status: "recovering",
+    }, 2)).toBe(false);
+    expect(commonResidencyReadyForInteraction({
+      ...completedTimeline,
+      status: "staging",
+      mutationAwaitingCommit: true,
+    }, 2)).toBe(false);
+    expect(commonResidencyReadyForInteraction({
+      ...completedTimeline,
+      status: "staging",
+    }, 3)).toBe(false);
   });
 
   it("accepts fine playback only when every observation owns the same viewport chunks", () => {

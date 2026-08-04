@@ -28,11 +28,7 @@ try {
 
   const startedAt = new Date().toISOString();
   await evaluate(serialized("window.__MISTR_NATIONAL_PHASE4__.startNational()"), true, 300_000);
-  await evaluate(
-    serialized("window.__MISTR_NATIONAL_PHASE4__.waitForHistory(20, 600000)"),
-    true,
-    660_000,
-  );
+  const partialHistoryControls = await observePartialHistoryControls();
   await evaluate(
     "window.__MISTR_NATIONAL_PHASE4__.beginResidentEvidence()",
     true,
@@ -168,6 +164,7 @@ try {
     startedAt,
     completedAt: new Date().toISOString(),
     userAgent: await evaluate("navigator.userAgent"),
+    partialHistoryControls,
     history,
     transitions,
     scrub: { oldest, newest },
@@ -189,6 +186,7 @@ try {
   console.log(JSON.stringify({
     status: report.status,
     retainedCount: history?.history?.retained?.length,
+    partialHistoryEnabledStagingSamples: partialHistoryControls?.enabledStableStagingSampleCount,
     historyMinutes: ((history?.history?.retained?.at(-1)?.observationTimeUnixMs ?? 0)
       - (history?.history?.retained?.[0]?.observationTimeUnixMs ?? 0)) / 60_000,
     commonResidentCount: history?.renderer?.commonResidentObservationIds?.length,
@@ -231,6 +229,63 @@ async function waitForReport(condition, timeoutMs) {
     await delay(100);
   }
   throw new Error(`National report did not satisfy ${condition}: ${JSON.stringify(report)}`);
+}
+
+async function observePartialHistoryControls() {
+  return evaluate(serialized(`(async()=>{
+    const deadline=performance.now()+600000;
+    let partialSampleCount=0;
+    let buttonFoundSampleCount=0;
+    let stableStagingSampleCount=0;
+    let enabledStableStagingSampleCount=0;
+    const partialRetainedCounts=new Set();
+    const stableStagingRetainedCounts=new Set();
+    const enabledStableStagingRetainedCounts=new Set();
+    let firstDisabledStableStaging=null;
+    while(performance.now()<deadline){
+      const report=window.__MISTR_NATIONAL_PHASE4__.report();
+      const retainedCount=report?.history?.retained?.length??0;
+      if(retainedCount>=20){
+        return {
+          partialSampleCount,
+          buttonFoundSampleCount,
+          stableStagingSampleCount,
+          enabledStableStagingSampleCount,
+          partialRetainedCounts:[...partialRetainedCounts].sort((a,b)=>a-b),
+          stableStagingRetainedCounts:[...stableStagingRetainedCounts].sort((a,b)=>a-b),
+          enabledStableStagingRetainedCounts:[...enabledStableStagingRetainedCounts].sort((a,b)=>a-b),
+          firstDisabledStableStaging,
+        };
+      }
+      if(retainedCount>=2){
+        partialSampleCount+=1;
+        partialRetainedCounts.add(retainedCount);
+        const button=document.querySelector('.playback-toggle');
+        if(button instanceof HTMLButtonElement) buttonFoundSampleCount+=1;
+        const renderer=report?.renderer;
+        const stableStaging=renderer?.status==='staging'
+          && renderer?.mutationAwaitingCommit===false
+          && renderer?.paintReceipt
+          && renderer?.commonResidentObservationIds?.length===retainedCount;
+        if(stableStaging){
+          stableStagingSampleCount+=1;
+          stableStagingRetainedCounts.add(retainedCount);
+          if(button instanceof HTMLButtonElement && !button.disabled){
+            enabledStableStagingSampleCount+=1;
+            enabledStableStagingRetainedCounts.add(retainedCount);
+          }else if(firstDisabledStableStaging===null){
+            firstDisabledStableStaging={
+              retainedCount,
+              buttonFound:button instanceof HTMLButtonElement,
+              replacementPending:report?.playback?.residentReplacementPending??null,
+            };
+          }
+        }
+      }
+      await new Promise(resolve=>setTimeout(resolve,20));
+    }
+    throw new Error('National history did not reach 20 observations while controls were observed');
+  })()`), true, 660_000);
 }
 
 async function captureScreenshot() {
