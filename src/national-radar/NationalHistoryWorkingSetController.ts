@@ -44,6 +44,7 @@ type HistoryGridLayer = Pick<
   | "rollbackHistoryMutation"
   | "rollbackStaging"
   | "uploadStagedChunk"
+  | "waitForPaintQuiescence"
 >;
 
 export class NationalHistoryWorkingSetController {
@@ -148,6 +149,7 @@ export class NationalHistoryWorkingSetController {
       (manifest, version) => viewportCoverage(manifest, bounds, version),
       ownershipCheck,
       async () => {
+        await this.layer.waitForPaintQuiescence();
         this.layer.commitPrefetchedStaging(timelineObservationIds);
         return undefined;
       },
@@ -180,7 +182,7 @@ export class NationalHistoryWorkingSetController {
     deferExternalCommit = false,
   ): Promise<NationalHistoryWorkingSetResult> {
     if (this.operation) {
-      return Promise.reject(new Error("a National history working-set mutation is already active"));
+      return Promise.reject(new Error(WORKING_SET_BUSY_MESSAGE));
     }
     const operation = this.stage(
       observation,
@@ -297,6 +299,13 @@ export class NationalHistoryWorkingSetController {
 
 export function observationId(observation: NationalHistoryObservation): string {
   return `${observation.observationTimeUnixMs}:${observation.contentSha256}`;
+}
+
+const WORKING_SET_BUSY_MESSAGE = "a National history working-set mutation is already active";
+
+/** True when a mutation was rejected only because another one was in flight. */
+export function isNationalWorkingSetBusy(error: unknown): boolean {
+  return error instanceof Error && error.message === WORKING_SET_BUSY_MESSAGE;
 }
 
 function assertManifestIdentity(

@@ -12,6 +12,7 @@ describe("NationalHistoryWorkingSetController", () => {
     const fixture = historyFixture();
     const events: string[] = [];
     const controller = new NationalHistoryWorkingSetController(fixture.client(events), {
+      async waitForPaintQuiescence() {},
       beginStaging() { events.push("begin"); },
       async uploadStagedChunk() { events.push("upload"); },
       async commitInitialHistoryStaging() {
@@ -41,6 +42,7 @@ describe("NationalHistoryWorkingSetController", () => {
     const fixture = historyFixture();
     const events: string[] = [];
     const controller = new NationalHistoryWorkingSetController(fixture.client(events), {
+      async waitForPaintQuiescence() {},
       beginStaging() { events.push("begin"); },
       async uploadStagedChunk() { events.push("upload"); },
       async commitInitialHistoryStaging() { throw new Error("not used"); },
@@ -76,6 +78,7 @@ describe("NationalHistoryWorkingSetController", () => {
     const fixture = historyFixture();
     const events: string[] = [];
     const controller = new NationalHistoryWorkingSetController(fixture.client(events), {
+      async waitForPaintQuiescence() {},
       beginStaging() { events.push("begin"); },
       async uploadStagedChunk() { events.push("upload"); },
       async commitInitialHistoryStaging() { throw new Error("not used"); },
@@ -112,6 +115,7 @@ describe("NationalHistoryWorkingSetController", () => {
     const events: string[] = [];
     const committedFactors: number[] = [];
     const controller = new NationalHistoryWorkingSetController(fixture.client(events), {
+      async waitForPaintQuiescence() {},
       beginStaging() {},
       async uploadStagedChunk() {},
       async commitInitialHistoryStaging() { throw new Error("not used"); },
@@ -142,6 +146,7 @@ describe("NationalHistoryWorkingSetController", () => {
     const events: string[] = [];
     let checks = 0;
     const controller = new NationalHistoryWorkingSetController(fixture.client(events), {
+      async waitForPaintQuiescence() {},
       beginStaging() {},
       async uploadStagedChunk() {},
       async commitInitialHistoryStaging() { return fixture.receipt; },

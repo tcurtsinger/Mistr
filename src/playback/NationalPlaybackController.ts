@@ -57,12 +57,9 @@ export class NationalPlaybackController {
   private transitionCount = 0;
   private completedCycles = 0;
   private playRequest = 0;
-  private cameraChangeRequest = 0;
-  private cameraPlaybackRestartPending = false;
+  private qualityRequest = 0;
   private preparingQuality = false;
   private refinementAfterQualityPreparation = false;
-  private playbackStartOperation: Promise<void> | null = null;
-  private playbackActivityRelease: (() => void) | null = null;
   private readonly dwellMs: number;
   private readonly latestDwellMs: number;
   private readonly refinementSettleMs: number;
@@ -125,84 +122,81 @@ export class NationalPlaybackController {
     this.emit();
   }
 
+  /**
+   * Motion-first playback: motion begins immediately at the always-resident
+   * complete common level, and sharp quality upgrades in the background. The
+   * loop is never held for preparation, and a camera change never stops it.
+   */
   play(): Promise<void> {
     this.assertActive();
-    if (this.playing || this.preparingQuality || this.observations.length < 2) {
+    if (this.playing || this.observations.length < 2) {
       return Promise.resolve();
     }
-    const operation = this.startPlayback();
-    this.playbackStartOperation = operation;
-    void operation.then(
-      () => {
-        if (this.playbackStartOperation === operation) this.playbackStartOperation = null;
-      },
-      () => {
-        if (this.playbackStartOperation === operation) this.playbackStartOperation = null;
-      },
-    );
-    return operation;
-  }
-
-  private async startPlayback(): Promise<void> {
     const request = this.playRequest + 1;
     this.playRequest = request;
     this.clearRefinementTimer();
+    this.playing = true;
+    this.layer.setPlaybackQualityLock(4);
+    this.emit();
+    this.beginQualityUpgrade();
+    return this.ensureCommonSelection(4).then(
+      () => {
+        if (this.playing && this.playRequest === request && !this.operation) {
+          this.scheduleNext(this.dwellForCurrent());
+        }
+      },
+      (error) => {
+        if (this.playRequest === request) this.stopPlayback();
+        throw error;
+      },
+    );
+  }
+
+  /**
+   * Prepare sharp playback beside the running loop. The prepared factor is
+   * applied through the quality lock and takes effect on the next frame
+   * selection; failure or supersession leaves motion at the common level.
+   */
+  private beginQualityUpgrade(): void {
+    const prepare = this.options.preparePlaybackQuality;
+    if (!prepare) return;
+    const request = this.qualityRequest + 1;
+    this.qualityRequest = request;
+    const isCurrent = () => !this.disposed
+      && this.playing
+      && this.qualityRequest === request;
     this.preparingQuality = true;
     this.emit();
-    let release: (() => void) | null = null;
-    try {
-      release = await this.acquireResidentOnlyActivity();
-      const isCurrent = () => !this.disposed && this.playRequest === request;
-      if (!isCurrent()) {
-        release();
-        return;
-      }
-      let qualityFactor: NationalPlaybackQualityFactor;
+    void (async () => {
       try {
-        qualityFactor = await this.options.preparePlaybackQuality?.(isCurrent)
-          ?? this.layer.finestCompletePlaybackFactor();
-      } catch (error) {
-        if (!isCurrent()) return;
-        throw error;
+        const factor = await prepare(isCurrent);
+        if (isCurrent() && (factor === 1 || factor === 2)) {
+          this.layer.setPlaybackQualityLock(factor);
+        }
+      } catch {
+        // Superseded, busy, or unavailable sharp detail: motion continues at
+        // the complete common level rather than pausing or surfacing an error.
+      } finally {
+        if (this.qualityRequest === request) {
+          this.preparingQuality = false;
+          this.emit();
+          const deferred = this.refinementAfterQualityPreparation;
+          this.refinementAfterQualityPreparation = false;
+          if (deferred && !this.playing) this.scheduleRefinement();
+        }
       }
-      if (!isCurrent()) {
-        release();
-        return;
-      }
-      this.layer.setPlaybackQualityLock(qualityFactor);
-      this.playbackActivityRelease = release;
-      release = null;
-      this.playing = true;
-      this.emit();
-      void this.ensureCommonSelection().then(
-        () => {
-          if (this.playing && !this.operation) this.scheduleNext(this.dwellForCurrent());
-        },
-        () => {
-          this.stopPlayback();
-        },
-      );
-    } finally {
-      release?.();
-      const scheduleDeferredRefinement = this.refinementAfterQualityPreparation;
-      this.refinementAfterQualityPreparation = false;
-      this.preparingQuality = false;
-      this.emit();
-      if (scheduleDeferredRefinement) this.scheduleRefinement();
-    }
+    })();
   }
 
   pause(): void {
     if (this.disposed) return;
-    this.cameraChangeRequest += 1;
-    this.cameraPlaybackRestartPending = false;
     this.playRequest += 1;
+    this.qualityRequest += 1;
+    this.preparingQuality = false;
     this.playing = false;
     if (this.timer !== null) globalThis.clearTimeout(this.timer);
     this.timer = null;
     this.layer.setPlaybackQualityLock(undefined);
-    this.playbackActivityRelease?.();
-    this.playbackActivityRelease = null;
     this.emit();
     if (!this.operation) this.scheduleRefinement();
   }
@@ -258,46 +252,27 @@ export class NationalPlaybackController {
     }
   }
 
-  async notifyCameraChanged(requestRefinementAfterSettle = true): Promise<void> {
-    const shouldResumePlayback = this.playing
-      || this.preparingQuality
-      || this.cameraPlaybackRestartPending;
-    const pendingStart = this.playbackStartOperation;
-    const pendingPaint = this.operation;
-    if (shouldResumePlayback) {
-      this.pause();
-      this.clearRefinementTimer();
-      this.cameraPlaybackRestartPending = true;
-      const request = this.cameraChangeRequest + 1;
-      this.cameraChangeRequest = request;
-      try {
-        await pendingStart;
-        await pendingPaint;
-      } catch {
-        // A superseded preparation or paint cannot change the new camera request.
+  /**
+   * A settled camera never stops motion. The paused presentation is
+   * complete-domain and camera-independent, so a paused camera change is a
+   * no-op. While playing, the sharp lock was prepared for the previous
+   * viewport: motion drops to the always-complete common level between
+   * frames and a fresh background preparation upgrades it again.
+   */
+  notifyCameraChanged(): void {
+    if (this.disposed) return;
+    if (!this.playing) {
+      if (this.preparingQuality) {
+        this.qualityRequest += 1;
+        this.preparingQuality = false;
+        this.emit();
       }
-      if (
-        this.disposed
-        || this.cameraChangeRequest !== request
-        || !this.cameraPlaybackRestartPending
-      ) return;
-      this.cameraPlaybackRestartPending = false;
-      await this.play();
       return;
     }
-    const request = this.cameraChangeRequest + 1;
-    this.cameraChangeRequest = request;
-    this.clearRefinementTimer();
-    try {
-      await this.ensureCommonSelection(requestRefinementAfterSettle ? undefined : 4);
-      if (
-        requestRefinementAfterSettle
-        && !this.disposed
-        && this.cameraChangeRequest === request
-      ) this.scheduleRefinement();
-    } catch {
-      // A newer camera, source, or renderer request owns presentation truth.
-    }
+    this.qualityRequest += 1;
+    this.layer.setPlaybackQualityLock(4);
+    this.emit();
+    this.beginQualityUpgrade();
   }
 
   snapshot(): NationalPlaybackSnapshot {
@@ -319,7 +294,6 @@ export class NationalPlaybackController {
       qualityLockFactor: renderer.playbackQualityFactor,
       refining: this.refinementTimer !== null,
       preparingQuality: this.preparingQuality,
-      ...(this.preparingQuality ? { holdReason: "PREPARING_PLAYBACK_QUALITY" } : {}),
       ...(this.operation ? { holdReason: "AWAITING_GPU_PAINT" } : {}),
       ...(renderer.status === "recovering" || !commonResidencyComplete
         ? { holdReason: "GPU_RECOVERY_REHYDRATING" }
@@ -393,6 +367,11 @@ export class NationalPlaybackController {
     } finally {
       this.operation = null;
       this.emit();
+      // A pause that landed while this selection was awaiting its paint could
+      // not schedule refinement; the settled selection schedules it now.
+      if (!this.playing && !this.disposed && this.refinementTimer === null) {
+        this.scheduleRefinement();
+      }
     }
   }
 
@@ -430,12 +409,12 @@ export class NationalPlaybackController {
 
   private stopPlayback() {
     this.playRequest += 1;
+    this.qualityRequest += 1;
+    this.preparingQuality = false;
     this.playing = false;
     if (this.timer !== null) globalThis.clearTimeout(this.timer);
     this.timer = null;
     this.layer.setPlaybackQualityLock(undefined);
-    this.playbackActivityRelease?.();
-    this.playbackActivityRelease = null;
     this.emit();
   }
 

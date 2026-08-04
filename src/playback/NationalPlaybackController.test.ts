@@ -118,7 +118,7 @@ describe("NationalPlaybackController", () => {
     expect(controller.snapshot().selectedObservationId).toBe(observationId(observations[0]));
   });
 
-  it("prepares and locks playback to complete exact viewport detail", async () => {
+  it("starts motion immediately and upgrades quality in the background", async () => {
     vi.useFakeTimers();
     const observations = frames(3);
     const layer = new FakeNationalLayer(observations);
@@ -136,28 +136,28 @@ describe("NationalPlaybackController", () => {
     });
     controller.establishInitialPaint(layer.receipt());
 
-    const play = controller.play();
-    await vi.waitFor(() => {
-      expect(controller.snapshot()).toMatchObject({
-        playing: false,
-        preparingQuality: true,
-        holdReason: "PREPARING_PLAYBACK_QUALITY",
-      });
+    await controller.play();
+    // Motion is running at the complete common level while sharp detail
+    // prepares; the loop is never held.
+    expect(controller.snapshot()).toMatchObject({
+      playing: true,
+      preparingQuality: true,
     });
-    finishPreparation();
-    await play;
-
-    expect(layer.qualityLock).toBe(1);
-    expect(layer.getSnapshot().presentationFactor).toBe(1);
+    expect(controller.snapshot().holdReason).toBeUndefined();
+    expect(layer.qualityLock).toBe(4);
     await vi.advanceTimersByTimeAsync(100);
-    expect(layer.selectFactors.every((factor) => factor === 1)).toBe(true);
-    controller.pause();
+    expect(layer.selectFactors.every((factor) => factor === 4)).toBe(true);
 
-    await controller.scrub(0);
+    finishPreparation();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(layer.qualityLock).toBe(1);
+    expect(controller.snapshot()).toMatchObject({ playing: true, preparingQuality: false });
+    await vi.advanceTimersByTimeAsync(100);
     expect(layer.selectFactors.at(-1)).toBe(1);
+    controller.pause();
   });
 
-  it("treats user cancellation during quality preparation as a clean pause", async () => {
+  it("treats a pause during quality preparation as a clean stop at the common level", async () => {
     vi.useFakeTimers();
     const observations = frames(3);
     const layer = new FakeNationalLayer(observations);
@@ -165,13 +165,9 @@ describe("NationalPlaybackController", () => {
     const preparation = new Promise<void>((resolve) => {
       finishPreparation = resolve;
     });
-    let releases = 0;
     const refined: string[] = [];
     const controller = new NationalPlaybackController(layer, observations, {
       refinementSettleMs: 50,
-      async acquireResidentOnlyActivity() {
-        return () => { releases += 1; };
-      },
       async preparePlaybackQuality(isCurrent) {
         await preparation;
         if (!isCurrent()) throw new Error("superseded preparation");
@@ -184,19 +180,17 @@ describe("NationalPlaybackController", () => {
     controller.establishInitialPaint(layer.receipt());
 
     const play = controller.play();
-    await vi.waitFor(() => expect(controller.snapshot().preparingQuality).toBe(true));
+    expect(controller.snapshot().preparingQuality).toBe(true);
+    await play;
     controller.pause();
-    await vi.advanceTimersByTimeAsync(100);
-    expect(refined).toEqual([]);
     finishPreparation();
+    await vi.advanceTimersByTimeAsync(0);
 
-    await expect(play).resolves.toBeUndefined();
     expect(controller.snapshot()).toMatchObject({
       playing: false,
       preparingQuality: false,
     });
     expect(layer.qualityLock).toBeUndefined();
-    expect(releases).toBe(1);
     await vi.advanceTimersByTimeAsync(49);
     expect(refined).toEqual([]);
     await vi.advanceTimersByTimeAsync(1);
@@ -297,7 +291,7 @@ describe("NationalPlaybackController", () => {
     });
   });
 
-  it("returns an overview camera to common residency without scheduling fine detail", async () => {
+  it("treats a paused camera change as a no-op for the camera-independent presentation", async () => {
     vi.useFakeTimers();
     const observations = frames(2);
     const layer = new FakeNationalLayer(observations);
@@ -307,21 +301,25 @@ describe("NationalPlaybackController", () => {
       onRefinementRequested: (observation) => refined.push(observationId(observation)),
     });
 
-    await controller.notifyCameraChanged(false);
+    controller.notifyCameraChanged();
     await vi.advanceTimersByTimeAsync(500);
 
-    expect(layer.selectFactors).toEqual([4]);
+    // No forced common selection, no refinement scheduling: the paused
+    // presentation needs nothing from the camera.
+    expect(layer.selectFactors).toEqual([]);
     expect(refined).toEqual([]);
   });
 
-  it("re-prepares the moved viewport before resuming active playback", async () => {
+  it("keeps motion running through a camera change and re-prepares in the background", async () => {
     vi.useFakeTimers();
     const observations = frames(3);
     const layer = new FakeNationalLayer(observations);
     let preparations = 0;
+    const playingSeen: boolean[] = [];
     const controller = new NationalPlaybackController(layer, observations, {
       dwellMs: 100,
       latestDwellMs: 100,
+      onState: (snapshot) => playingSeen.push(snapshot.playing),
       async preparePlaybackQuality(isCurrent) {
         expect(isCurrent()).toBe(true);
         preparations += 1;
@@ -332,17 +330,23 @@ describe("NationalPlaybackController", () => {
     controller.establishInitialPaint(layer.receipt());
 
     await controller.play();
+    await vi.advanceTimersByTimeAsync(0);
     expect(controller.snapshot()).toMatchObject({ playing: true, qualityLockFactor: 1 });
+    const statesBeforeCamera = playingSeen.length;
 
-    await controller.notifyCameraChanged(true);
-
+    controller.notifyCameraChanged();
+    // The sharp lock drops to the complete common level without stopping motion.
+    expect(controller.snapshot().playing).toBe(true);
+    await vi.advanceTimersByTimeAsync(0);
     expect(preparations).toBe(2);
     expect(controller.snapshot()).toMatchObject({ playing: true, qualityLockFactor: 2 });
+    expect(playingSeen.slice(statesBeforeCamera).every((playing) => playing)).toBe(true);
+    await vi.advanceTimersByTimeAsync(100);
     expect(layer.selectFactors.at(-1)).toBe(2);
     controller.pause();
   });
 
-  it("cancels superseded quality preparation and restarts only for the newest camera", async () => {
+  it("supersedes stale quality preparation so only the newest camera locks", async () => {
     const observations = frames(3);
     const layer = new FakeNationalLayer(observations);
     let finishFirstPreparation!: () => void;
@@ -353,24 +357,26 @@ describe("NationalPlaybackController", () => {
     const controller = new NationalPlaybackController(layer, observations, {
       async preparePlaybackQuality(isCurrent) {
         preparations += 1;
-        if (preparations === 1) await firstPreparation;
-        if (!isCurrent()) return 4;
+        if (preparations === 1) {
+          await firstPreparation;
+          expect(isCurrent()).toBe(false);
+          throw new Error("superseded preparation");
+        }
         layer.completeFactor = 1;
         return 1;
       },
     });
     controller.establishInitialPaint(layer.receipt());
 
-    const initialPlay = controller.play();
-    await vi.waitFor(() => expect(controller.snapshot().preparingQuality).toBe(true));
-    const firstCamera = controller.notifyCameraChanged(true);
-    const newestCamera = controller.notifyCameraChanged(true);
+    await controller.play();
+    expect(controller.snapshot().preparingQuality).toBe(true);
+    controller.notifyCameraChanged();
     finishFirstPreparation();
-    await initialPlay;
-    await Promise.all([firstCamera, newestCamera]);
+    await vi.waitFor(() => {
+      expect(controller.snapshot()).toMatchObject({ playing: true, qualityLockFactor: 1 });
+    });
 
     expect(preparations).toBe(2);
-    expect(controller.snapshot()).toMatchObject({ playing: true, qualityLockFactor: 1 });
     controller.pause();
   });
 });

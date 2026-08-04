@@ -108,6 +108,7 @@ import {
 } from "./national-radar/NationalGridLayer";
 import {
   NationalHistoryWorkingSetController,
+  isNationalWorkingSetBusy,
   observationId as nationalObservationId,
   type NationalHistoryWorkingSetResult,
 } from "./national-radar/NationalHistoryWorkingSetController";
@@ -1679,6 +1680,10 @@ export function App() {
         ) {
           throw new Error("National playback detail cannot prepare before paint is complete");
         }
+        // Sharp preparation waits for the retained history to settle; motion
+        // runs at the complete common level while backfill continues, and the
+        // resume after the final backfill commit re-runs this preparation.
+        if ((latestNationalHistory?.pendingBackfillCount ?? 0) > 0) return 4;
         const cameraKey = nationalCameraKey(instance);
         const alreadyComplete = activeLayer.finestCompletePlaybackFactor();
         if (
@@ -1692,7 +1697,6 @@ export function App() {
           if (
             !isCurrent()
             || cancelled
-            || nationalResidentOnlyReservations < 1
             || transferGeneration !== expectedGeneration
             || nationalCameraKey(instance) !== cameraKey
             || painted?.source.kind !== "national"
@@ -1703,23 +1707,44 @@ export function App() {
             );
           }
         };
-        const result = await prepareNationalPlaybackQuality({
-          zoom: instance.getZoom(),
-          observations,
-          selectedObservationId,
-          bounds,
-          workingSet: activeWorkingSet,
-          layer: activeLayer,
-          ownershipCheck,
-        });
-        if (result.factor === 1 || result.factor === 2) {
-          nationalPlaybackDetailCameraKey = cameraKey;
-          nationalPlaybackDetailFactor = result.factor;
-        } else {
-          nationalPlaybackDetailCameraKey = null;
-          nationalPlaybackDetailFactor = null;
+        // Motion may still be painting the selected observation's previous
+        // detail right after a camera change; prefetching that observation is
+        // only additive once the common level is the active presentation.
+        const commonActiveDeadline = Date.now() + 5_000;
+        while (activeLayer.getSnapshot().presentationFactor !== 4) {
+          ownershipCheck();
+          if (Date.now() > commonActiveDeadline) return 4;
+          await waitMilliseconds(50);
         }
-        return result.factor;
+        const maximumBusyAttempts = 3;
+        for (let attempt = 1; ; attempt += 1) {
+          ownershipCheck();
+          await activeWorkingSet.waitForIdle();
+          ownershipCheck();
+          try {
+            const result = await prepareNationalPlaybackQuality({
+              zoom: instance.getZoom(),
+              observations,
+              selectedObservationId,
+              bounds,
+              workingSet: activeWorkingSet,
+              layer: activeLayer,
+              ownershipCheck,
+            });
+            if (result.factor === 1 || result.factor === 2) {
+              nationalPlaybackDetailCameraKey = cameraKey;
+              nationalPlaybackDetailFactor = result.factor;
+            } else {
+              nationalPlaybackDetailCameraKey = null;
+              nationalPlaybackDetailFactor = null;
+            }
+            return result.factor;
+          } catch (error) {
+            if (attempt >= maximumBusyAttempts || !isNationalWorkingSetBusy(error)) {
+              throw error;
+            }
+          }
+        }
       };
       nationalMoveHandler = () => {
         if (radarSessionCoordinatorRef.current!.snapshot().painted?.source.kind !== "national") return;
@@ -1734,9 +1759,7 @@ export function App() {
         if (!playbackEngaged) return;
         nationalPlaybackDetailCameraKey = null;
         nationalPlaybackDetailFactor = null;
-        void nationalPlaybackController?.notifyCameraChanged(true).catch((error) => {
-          setPlaybackError(error instanceof Error ? error.message : String(error));
-        });
+        nationalPlaybackController?.notifyCameraChanged();
       };
       instance.on("moveend", nationalMoveHandler);
 
@@ -2970,6 +2993,7 @@ export function App() {
       if (snapshot.playing || snapshot.preparingQuality) controller.pause();
       else {
         void controller.play().catch((error) => {
+          if (isRadarSourceSuperseded(error)) return;
           setPlaybackError(error instanceof Error ? error.message : String(error));
         });
       }
@@ -2997,7 +3021,9 @@ export function App() {
           }
         }
       } catch (error) {
-        setPlaybackError(error instanceof Error ? error.message : String(error));
+        if (!isRadarSourceSuperseded(error)) {
+          setPlaybackError(error instanceof Error ? error.message : String(error));
+        }
       } finally {
         scrubRunningRef.current = false;
         if (queuedScrubRef.current !== null) queueScrub(queuedScrubRef.current);

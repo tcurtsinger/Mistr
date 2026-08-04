@@ -7,7 +7,7 @@ import {
 import { observationId } from "./NationalHistoryWorkingSetController";
 
 describe("National playback quality preparation", () => {
-  it("returns to the complete overview and releases old regional detail", async () => {
+  it("leaves existing residency untouched below the sharp threshold", async () => {
     const fixture = qualityFixture();
     const result = await prepareNationalPlaybackQuality({
       ...fixture.options,
@@ -15,10 +15,12 @@ describe("National playback quality preparation", () => {
     });
 
     expect(result).toEqual({ factor: 4, projectedGpuBytes: 0, detailedObservationCount: 0 });
-    expect(fixture.events).toEqual(["select:3:4", "prune:"]);
+    // No selection, no staging, no pruning: a complete-domain refined
+    // presentation survives a home-view playback session intact.
+    expect(fixture.events).toEqual([]);
   });
 
-  it("prepares exact viewport detail for every retained observation before playback", async () => {
+  it("prefetches exact viewport detail for every retained observation without painting", async () => {
     const fixture = qualityFixture({ 1: 120_000_000 });
     const result = await prepareNationalPlaybackQuality({
       ...fixture.options,
@@ -31,7 +33,7 @@ describe("National playback quality preparation", () => {
       detailedObservationCount: 3,
     });
     expect(fixture.events).toEqual([
-      "stage:3:1",
+      "prefetch:3:1",
       "prune:3",
       "prefetch:1:1",
       "prefetch:2:1",
@@ -48,18 +50,17 @@ describe("National playback quality preparation", () => {
     expect(result.factor).toBe(2);
     expect(result.projectedGpuBytes).toBe(130_000_000);
     expect(fixture.events).toEqual([
-      "stage:3:1",
+      "prefetch:3:1",
       "prune:3",
-      "select:3:4",
       "prune:",
-      "stage:3:2",
+      "prefetch:3:2",
       "prune:3",
       "prefetch:1:2",
       "prefetch:2:2",
     ]);
   });
 
-  it("restores the complete overview when no fine all-frame level fits", async () => {
+  it("returns the common factor without selecting when no fine all-frame level fits", async () => {
     const fixture = qualityFixture({ 1: 230_000_000, 2: 210_000_000 });
     const result = await prepareNationalPlaybackQuality({
       ...fixture.options,
@@ -67,7 +68,8 @@ describe("National playback quality preparation", () => {
     });
 
     expect(result.factor).toBe(4);
-    expect(fixture.events.slice(-2)).toEqual(["select:3:4", "prune:"]);
+    expect(fixture.events.at(-1)).toBe("prune:");
+    expect(fixture.events.some((event) => event.startsWith("select"))).toBe(false);
   });
 
   it("cleans partial detail when ownership is superseded", async () => {
@@ -83,7 +85,7 @@ describe("National playback quality preparation", () => {
       },
     })).rejects.toThrow("superseded");
 
-    expect(fixture.events.slice(-2)).toEqual(["select:3:4", "prune:"]);
+    expect(fixture.events.at(-1)).toBe("prune:");
   });
 
   it("requests exact then half-resolution detail only above the regional threshold", () => {
@@ -107,19 +109,6 @@ function qualityFixture(projected: Partial<Record<1 | 2, number>> = {}) {
       bounds: { west: -102, south: 35, east: -94, north: 42 },
       ownershipCheck() {},
       workingSet: {
-        async stageSelectedDetail(
-          observation: NationalHistoryObservation,
-          _bounds: unknown,
-          _timeline: readonly string[],
-          _ownership: () => void,
-          _beforeCommit: undefined,
-          factor: 1 | 2 = 1,
-        ) {
-          preparedFactor = factor;
-          detailed = 1;
-          events.push(`stage:${observationId(observation).split(":")[0]}:${factor}`);
-          return {} as never;
-        },
         async prefetchDetail(
           observation: NationalHistoryObservation,
           _bounds: unknown,
@@ -127,7 +116,12 @@ function qualityFixture(projected: Partial<Record<1 | 2, number>> = {}) {
           _ownership: () => void,
           factor: 1 | 2 = 1,
         ) {
-          detailed += 1;
+          if (observationId(observation) === selectedObservationId) {
+            preparedFactor = factor;
+            detailed = 1;
+          } else {
+            detailed += 1;
+          }
           events.push(`prefetch:${observationId(observation).split(":")[0]}:${factor}`);
           return {} as never;
         },
@@ -145,11 +139,6 @@ function qualityFixture(projected: Partial<Record<1 | 2, number>> = {}) {
             detailed = 0;
           }
           events.push(`prune:${ids.map((id) => id.split(":")[0]).join(",")}`);
-        },
-        async selectResidentAndWait(id: string, factor: number) {
-          preparedFactor = factor as 1 | 2 | 4;
-          events.push(`select:${id.split(":")[0]}:${factor}`);
-          return {} as never;
         },
       },
     },
