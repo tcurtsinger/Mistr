@@ -1443,9 +1443,9 @@ function residentGpuBytes(presentation: PresentationResources): number {
 }
 
 // A 256-cell chunk plus halos is allocated separately, then filled across
-// three animation frames. This leaves headroom for texture state restoration
-// inside the 4 ms budget instead of treating one whole chunk as atomic work.
-const TEXTURE_UPLOAD_ROWS_PER_SLICE = 96;
+// nine animation frames. The smaller row band preserves headroom for texture
+// state restoration and WebView2 scheduling variance inside the 4 ms budget.
+const TEXTURE_UPLOAD_ROWS_PER_SLICE = 32;
 
 async function uploadRawTextureTimeSliced(
   gl: WebGL2RenderingContext,

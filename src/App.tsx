@@ -120,6 +120,10 @@ import {
   nationalPollingFallbackDelayMs,
   runNationalPollingLoop,
 } from "./national-radar/NationalPollingLoop";
+import {
+  rollbackNationalHistoryUntilSettled,
+  snapshotProvesNationalHistoryRollback,
+} from "./national-radar/NationalRollbackLoop";
 import { colorForReflectivity } from "./radar-renderer/palette";
 import { RadarChrome } from "./ui/RadarChrome";
 import {
@@ -1492,6 +1496,36 @@ export function App() {
         });
       };
 
+      const rollbackNationalHistoryCommit = async (
+        activeClient: PackedSweepTransferClient,
+        observation: NationalHistoryObservation,
+      ): Promise<NationalHistorySnapshot> => {
+        return rollbackNationalHistoryUntilSettled({
+          shouldContinue: () => !cancelled,
+          rollback: () => activeClient.rollbackNationalHistoryFrame(observation),
+          async recoverRolledBack() {
+            const snapshot = await activeClient.nationalHistorySnapshot();
+            return snapshotProvesNationalHistoryRollback(snapshot, observation)
+              ? snapshot
+              : null;
+          },
+          isTerminal: (error) => (
+            nationalHistoryErrorCode(error) === "national_history_generation_stale"
+          ),
+          onFailure(error) {
+            setNationalRequestError(
+              `National history is rolling back before acquisition can continue: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          },
+          waitBeforeRetry: (attempt) => waitMilliseconds(
+            Math.min(1_000, 25 * (2 ** (attempt - 1))),
+          ),
+          cancellationError: () => new RadarSourceSupersededError(
+            "National history rollback was cancelled during application teardown",
+          ),
+        });
+      };
+
       const resetNationalAfterRendererFinalizeForDiagnostics = (
         activeLayer: NationalGridLayer,
       ) => {
@@ -1760,7 +1794,7 @@ export function App() {
           }
           if (!backendFinalized && !rendererFinalized) {
             try {
-              await activeClient.rollbackNationalHistoryFrame(preparation.observation);
+              await rollbackNationalHistoryCommit(activeClient, preparation.observation);
             } catch {
               // A newer generation may already own the backend. Preserve the
               // original mutation error rather than relabeling it.
@@ -1944,7 +1978,10 @@ export function App() {
             }
             if (!backendFinalized && !rendererFinalized) {
               try {
-                await activeClient.rollbackNationalHistoryFrame(historyPreparation.observation);
+                await rollbackNationalHistoryCommit(
+                  activeClient,
+                  historyPreparation.observation,
+                );
               } catch {
                 // Preserve the acquisition/rendering failure that caused rollback.
               }
