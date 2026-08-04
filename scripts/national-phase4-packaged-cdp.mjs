@@ -101,6 +101,12 @@ try {
   );
   const transferSnapshot = await waitForReleasedTransferCredits();
 
+  const failedSiteRecovery = await evaluate(
+    serialized("window.__MISTR_NATIONAL_PHASE4__.proveFailedSiteRestoresNational('KTLX')"),
+    true,
+    300_000,
+  );
+
   await evaluate(serialized("window.__MISTR_NATIONAL_PHASE4__.startSite('KTLX')"), true, 300_000);
   await delay(500);
   const restoredSite = {
@@ -122,6 +128,7 @@ try {
     activePlayback,
     contextReset,
     transferSnapshot,
+    failedSiteRecovery,
     restoredSite,
   };
   report.failures = validateNationalPhase4Acceptance(report);

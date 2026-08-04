@@ -100,6 +100,23 @@ export function validateNationalPhase4Acceptance(report) {
 
   const credits = report.transferSnapshot;
   if (credits?.creditLimit !== 2 || credits?.heldCredits !== 0 || credits?.inFlightCredits !== 0) failures.push("shared two-credit release");
+  const failedSite = report.failedSiteRecovery;
+  const restoredGeneration = failedSite?.after?.painted?.generation;
+  const restoredRetained = failedSite?.history?.retained ?? [];
+  if (
+    failedSite?.failureMessage !== "diagnostic Site transition failure after National cancellation"
+    || failedSite?.before?.painted?.source?.kind !== "national"
+    || failedSite?.after?.painted?.source?.kind !== "national"
+    || failedSite?.after?.transition
+    || !(restoredGeneration > failedSite?.before?.painted?.generation)
+    || restoredRetained.length < 1
+    || restoredRetained.some((observation) => observation.generation !== restoredGeneration)
+    || failedSite?.renderer?.status !== "painted"
+    || failedSite?.renderer?.generation !== restoredGeneration
+    || failedSite?.renderer?.paintReceipt?.generation !== restoredGeneration
+    || failedSite?.transfer?.generation !== restoredGeneration
+    || failedSite?.backfillStartCountAfter !== failedSite?.backfillStartCountBefore + 1
+  ) failures.push("failed Site transition restores active National session");
   const site = report.restoredSite;
   if (
     site?.sourceState?.painted?.source?.kind !== "site"

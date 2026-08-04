@@ -290,7 +290,10 @@ export function App() {
     let latestNationalHistory: NationalHistorySnapshot | null = null;
     let latestNationalInspection: NationalPointLookup | null = null;
     let nationalHistorySession = 0;
+    let nationalBackfillStartCount = 0;
     let nationalMrmsSession: NationalMrmsSession<NationalPhase3Report> | null = null;
+    let lastNationalRestorationAfterSiteFailure: Promise<NationalPhase3Report> | null = null;
+    let failNextSiteFromNationalForDiagnostics = false;
     let nationalRefinement: Promise<NationalHistoryWorkingSetResult | void> | null = null;
     let nationalAcquisitionOperation: Promise<unknown> | null = null;
     let nationalResidentOnlyReservations = 0;
@@ -1070,6 +1073,10 @@ export function App() {
         nationalWorkingSet?.cancel();
         const pollingSession = livePollingSession;
         await activeClient.begin(generation);
+        if (failNextSiteFromNationalForDiagnostics) {
+          failNextSiteFromNationalForDiagnostics = false;
+          throw new Error("diagnostic Site transition failure after National cancellation");
+        }
         const lease = await activeClient.requestPhase5Live(site, false, 180);
         let createdLayer: RadarCustomLayer | null = null;
         let createdController: ResidentPlaybackController | null = null;
@@ -1195,6 +1202,32 @@ export function App() {
         );
       };
 
+      const restoreNationalAfterSiteFailure = (generation: number) => {
+        const sourceState = radarSessionCoordinatorRef.current!.snapshot();
+        if (
+          cancelled
+          || transferGeneration !== generation
+          || sourceState.transition
+          || sourceState.painted?.source.kind !== "national"
+        ) return;
+        const session = nationalMrmsSession;
+        if (!session) {
+          setNationalRequestError("National radar could not restart after the Site request failed");
+          return;
+        }
+        const restoration = session.start();
+        lastNationalRestorationAfterSiteFailure = restoration;
+        void restoration.then(
+          () => setNationalRequestError(null),
+          (error: unknown) => {
+            if (isRadarSourceSuperseded(error)) return;
+            setNationalRequestError(
+              `National radar restart failed: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          },
+        );
+      };
+
       if (!layer) throw new Error("selected-site renderer is unavailable");
       siteLevel2Session = new SiteLevel2Session({
         coordinator: radarSessionCoordinatorRef.current!,
@@ -1223,6 +1256,9 @@ export function App() {
           };
         },
         onPaintAccepted: (report) => acceptSiteBootstrap(report),
+        onTransitionFailed: (_error, generation) => {
+          restoreNationalAfterSiteFailure(generation);
+        },
       });
       siteLevel2SessionRef.current = siteLevel2Session;
       const removeSiteAfterNationalPaint = () => {
@@ -1656,6 +1692,7 @@ export function App() {
       };
 
       const runNationalBackfill = async (generation: number) => {
+        nationalBackfillStartCount += 1;
         const historySession = nationalHistorySession + 1;
         nationalHistorySession = historySession;
         setLiveHistoryStatus("loading");
@@ -2270,6 +2307,42 @@ export function App() {
           ?? Promise.reject(new Error("National session is unavailable")),
         startSite: (site = "KTLX") => siteLevel2Session?.start(normalizeRadarSite(site))
           ?? Promise.reject(new Error("Site session is unavailable")),
+        async proveFailedSiteRestoresNational(site = "KTLX") {
+          if (!client || !siteLevel2Session || !nationalLayer) {
+            throw new Error("National failed-Site recovery diagnostic is unavailable");
+          }
+          const before = radarSessionCoordinatorRef.current!.snapshot();
+          const backfillStartCountBefore = nationalBackfillStartCount;
+          if (before.transition || before.painted?.source.kind !== "national") {
+            throw new Error("National must be the settled painted source before recovery proof");
+          }
+          failNextSiteFromNationalForDiagnostics = true;
+          let failureMessage = "";
+          try {
+            await siteLevel2Session.start(normalizeRadarSite(site), { persistOnPaint: false });
+            throw new Error("diagnostic Site transition unexpectedly succeeded");
+          } catch (error) {
+            failureMessage = error instanceof Error ? error.message : String(error);
+            if (failureMessage !== "diagnostic Site transition failure after National cancellation") {
+              throw error;
+            }
+          } finally {
+            failNextSiteFromNationalForDiagnostics = false;
+          }
+          const restoration = lastNationalRestorationAfterSiteFailure;
+          if (!restoration) throw new Error("failed Site transition did not restart National");
+          await restoration;
+          return {
+            failureMessage,
+            before,
+            after: radarSessionCoordinatorRef.current!.snapshot(),
+            history: latestNationalHistory,
+            renderer: nationalLayer.getSnapshot(),
+            transfer: await client.transferSnapshot(),
+            backfillStartCountBefore,
+            backfillStartCountAfter: nationalBackfillStartCount,
+          };
+        },
         async waitForHistory(frameCount = 20, timeoutMs = 300_000) {
           if (!Number.isSafeInteger(frameCount) || frameCount < 1 || frameCount > 20) {
             throw new RangeError("National history wait requires 1 to 20 observations");
@@ -3147,6 +3220,17 @@ export interface NationalPhase4ContextResetReport extends NationalPhase3ContextR
   activityDelta: NationalHistoryActivitySnapshot;
 }
 
+export interface NationalPhase4FailedSiteRecoveryReport {
+  failureMessage: string;
+  before: RadarSessionSnapshot;
+  after: RadarSessionSnapshot;
+  history: NationalHistorySnapshot | null;
+  renderer: NationalGridRendererSnapshot;
+  transfer: import("./packed-sweep/transferClient").TransferSnapshot;
+  backfillStartCountBefore: number;
+  backfillStartCountAfter: number;
+}
+
 type Phase4State =
   | { kind: "idle" }
   | { kind: "running"; stage: string }
@@ -3432,6 +3516,7 @@ declare global {
     report(): NationalPhase4Report;
     startNational(): Promise<NationalPhase3Report>;
     startSite(site?: string): Promise<Phase5Report>;
+    proveFailedSiteRestoresNational(site?: string): Promise<NationalPhase4FailedSiteRecoveryReport>;
     waitForHistory(frameCount?: number, timeoutMs?: number): Promise<NationalPhase4Report>;
     play(): Promise<void>;
     pause(): void;

@@ -17,6 +17,19 @@ describe("National Phase 4 packaged acceptance", () => {
       "4 ms upload slice budget",
     ]));
   });
+
+  it("requires a failed Site transition to restore a new active National generation", () => {
+    const report = validReport();
+    report.failedSiteRecovery.after.painted.generation = 8;
+    expect(validateNationalPhase4Acceptance(report)).toContain(
+      "failed Site transition restores active National session",
+    );
+
+    delete report.failedSiteRecovery;
+    expect(validateNationalPhase4Acceptance(report)).toContain(
+      "failed Site transition restores active National session",
+    );
+  });
 });
 
 function validReport() {
@@ -139,6 +152,16 @@ function validReport() {
       },
     },
     transferSnapshot: { creditLimit: 2, heldCredits: 0, inFlightCredits: 0 },
+    failedSiteRecovery: {
+      failureMessage: "diagnostic Site transition failure after National cancellation",
+      before: { painted: { source: { kind: "national", domain: "conus" }, generation: 8 } },
+      after: { painted: { source: { kind: "national", domain: "conus" }, generation: 10 } },
+      history: { retained: [{ generation: 10 }] },
+      renderer: { status: "painted", generation: 10, paintReceipt: { generation: 10 } },
+      transfer: { generation: 10 },
+      backfillStartCountBefore: 1,
+      backfillStartCountAfter: 2,
+    },
     restoredSite: {
       sourceState: { painted: { source: { kind: "site", siteIcao: "KTLX" } }, transition: null },
       display: { lastComplete: { site: "KTLX" } },
