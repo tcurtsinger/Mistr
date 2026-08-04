@@ -282,6 +282,23 @@ Phase 3 adds source, renderer, UI, and packaged checks without beginning history
 
 The dedicated command is `npm run test:national:phase3:packaged`; reports and 4K screenshots are generated only under ignored `artifacts/national-phase-3/`. Phase 3 exit also requires `npm run verify`, `npm run docs:check`, `npm run public:check`, `git diff --check`, and unchanged packaged Phase 4, 5, and 6 regression commands. Hidden `window.__MISTR_NATIONAL_PHASE3__` is evidence-only; the existing Phase 4/5/6 APIs remain required.
 
+### National Phase 4 history and playback gate
+
+Phase 4 adds bounded-history, transaction, residency, and playback tests without weakening the merged one-frame or Site paths:
+
+1. Backend store tests prove current/predecessor/newer chronology, identity mismatch rejection without losing the staged transaction, 20-frame one-oldest eviction, and the same store/snapshot model at a non-shipping 30-frame limit.
+2. Working-set tests prove every lease releases, a complete GPU fence remains provisional until backend commit, and supersession after the fence repaints the prior presentation.
+3. Playback tests prove play and direct scrub select factor 4, fine refinement waits for pause/settle, overview camera changes do not create a refinement loop, and the same controller accepts the diagnostic 30-frame cap.
+4. Polling/backfill may run only outside a resident-only activity reservation. The measured 1,000-transition and scrub intervals require zero network, response, decode, IPC, point-decode, and upload deltas.
+5. The packaged release run retains 20 exact chronological observations, spans at least 30 minutes, and keeps every factor-4 common presentation GPU resident below the 200 MiB target and 256 MiB hard ceiling.
+6. Oldest/newest direct scrub and 1,000 chronological transitions require matching generation/observation/content/presentation receipts without disk, network, decode, IPC, or upload work.
+7. High-zoom pause refines the selected exact factor-1 viewport and bounded adjacent temporal window while all 20 common presentations remain complete. Active play returns atomically to factor 4 and keeps that quality locked.
+8. Exact point lookup must name one retained painted identity; a late identity result is rejected.
+9. Real `WEBGL_lose_context` recovery increments context epoch, restores the selected observation and all 20 common residents from CPU-owned bytes, and records zero backend activity.
+10. The final broker has two credits and zero held/in-flight ownership, and a National-to-KTLX transition ends with one settled Site timeline.
+
+The dedicated command is `npm run test:national:phase4:packaged`; reports and 4K screenshots are generated only under ignored `artifacts/national-phase-4/`. Phase 4 exit also requires `npm run verify`, documentation/public/whitespace checks, the merged National Phase 2 and 3 packaged gates, and unchanged selected-site Phase 4, 5, and 6 packaged regressions. Hidden `window.__MISTR_NATIONAL_PHASE4__` is evidence-only; all earlier diagnostic APIs remain required.
+
 ## 7. Performance plan
 
 ### Test scenarios

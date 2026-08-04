@@ -2,7 +2,7 @@
 
 ## 1. Architecture principles
 
-1. **Bound each source.** Site remains the qualified polar engine. Phase 3 paints one NOAA numeric National observation through a separate session and gridded renderer rather than changing Level II into a mosaic engine.
+1. **Bound each source.** Site remains the qualified polar engine. National retains at most 20 exact NOAA MRMS observations through a separate session and gridded renderer rather than changing Level II into a mosaic engine.
 2. **One authoritative state machine.** UI components display state; they do not infer data readiness.
 3. **No radar tiles in the selected-site hot path.** Radar observations are decoded datasets, not MapLibre raster sources.
 4. **No bulk JSON.** Large numeric data crosses the Tauri boundary as packed bytes.
@@ -19,9 +19,10 @@ flowchart LR
     UI["React product UI"] --> ORCH["Radar Session Coordinator"]
     ORCH --> SITE["SiteLevel2Session"]
     ORCH --> NAT["NationalMrmsSession"]
-    NDIAG["Hidden Phase 2/3 diagnostics"] --> MRMS["Strict NOAA MRMS adapter"]
+    NDIAG["Hidden National Phase 2/3/4 diagnostics"] --> MRMS["Strict NOAA MRMS adapter"]
     MRMS --> NORMGRID["Exact grid and value-aware levels"]
-    NORMGRID --> PGRID["PackedGrid v1"]
+    NORMGRID --> NHIST["Bounded exact National history"]
+    NHIST --> PGRID["PackedGrid v1"]
     PGRID --> IPC
     NAT --> MRMS
     SITE --> ACQ["Rust acquisition service"]
@@ -54,7 +55,7 @@ flowchart LR
 
 ### 3.1 Rust process
 
-The Tauri process owns network access, chunk assembly, decoding, normalization, directly indexed memory caches, hashes, and fixture capture. Merged Phase 2 supplies the fixed-host MRMS adapter, strict GRIB2 Template 5.41/PNG decoder, exact raw-code grid, numeric overview pyramid, and `PackedGrid v1` encoder. Phase 3 retains the base grid as point-interrogation authority while transferring only bounded presentation chunks.
+The Tauri process owns network access, chunk assembly, decoding, normalization, directly indexed memory caches, hashes, and fixture capture. Merged Phase 2 supplies the fixed-host MRMS adapter, strict GRIB2 Template 5.41/PNG decoder, exact raw-code grid, numeric overview pyramid, and `PackedGrid v1` encoder. Phase 4 retains immutable compressed observations and complete factor-4 overview frames chronologically while exact point interrogation re-decodes only the painted retained identity under a one-operation gate.
 
 Rules:
 
@@ -72,7 +73,7 @@ The renderer owns:
 - React controls and diagnostics.
 - The authoritative frontend mirror of the radar state machine.
 - Parsing the small header of `PackedSweep v1`.
-- Parsing bounded `PackedGrid v1` manifests and individual numeric chunks for the Phase 3 National working set.
+- Parsing bounded `PackedGrid v1` manifests and individual numeric chunks for the National history working set.
 - Typed-array views over received bytes.
 - MapLibre custom-layer registration.
 - WebGL resource creation, selection, draw, and release.
@@ -104,7 +105,7 @@ The prototype should not have separate browser and packaged provider implementat
 - Return the final paint identity for coordinator acceptance.
 - Reject a completion when a newer Site or National request has superseded it.
 
-Phase 1 implemented these two components. Phase 3 now places `NationalMrmsSession` behind the same coordinator without changing the Site engine.
+Phase 1 implemented these two components. Merged Phase 3 places `NationalMrmsSession` behind the same coordinator without changing the Site engine; Phase 4 extends only that session's source-specific history.
 
 ### Merged Phase 2 MRMS and `PackedGrid v1` path
 
@@ -112,7 +113,7 @@ Phase 1 implemented these two components. Phase 3 now places `NationalMrmsSessio
 - The decoder bounds compressed, expanded GRIB, PNG, and normalized bytes; rejects markup returned with HTTP 200; pins the reviewed discipline, identification, grid, product, packing, bitmap, orientation, bit depth, scaling, and status contract; and preserves every structurally valid 16-bit raw code.
 - `MrmsNumericPyramid` builds power-of-two levels with strongest-valid, then missing, then no-coverage reduction. It never averages numeric/status codes.
 - `PackedGrid v1` carries one complete bounded frame manifest plus bounded big-endian numeric chunks with generation, source identity, measured time, content hash, transform, encoding, presentation level, chunk geometry, halo bounds, length, and payload hash.
-- `NationalPhase2State` holds a directly indexed, count- and byte-bounded prepared cache. Phase 3 retains exactly one current base grid plus factors 1, 2, and 4; Phase 4 will extend ownership to bounded chronological history.
+- `NationalPhase2State` remains the Phase 2 diagnostic cache. Product history is owned separately by `NationalHistoryState`, which retains immutable compressed objects plus complete factor-4 `PackedGrid` overviews under a 20-frame/180 MiB contract and exposes only one bounded fine-presentation cache.
 - National manifests and chunks acquire credits from the existing `TransferBroker`; there is no second credit pool. Partial, stale, or invalid payload work releases its ownership and never changes paint truth.
 
 ### Phase 3 static National renderer path
@@ -122,6 +123,16 @@ Phase 1 implemented these two components. Phase 3 now places `NationalMrmsSessio
 - `NationalGridLayer` owns separate active/staged presentations, `R16UI` numeric textures, the reflectivity palette, spatial sampling shaders, coverage identity, GPU fences, and visible-first context rehydration.
 - The old Site layer remains enabled until National has acquired, decoded, transferred, and uploaded every required chunk. Immediately before the first complete National draw, Site is disabled; acceptance then releases the Site loop. The inverse transition follows the same atomic rule.
 - Exact inspection asks Rust for the retained base cell using the painted generation, observation time, content hash, and a unique inspection identity. Late or cross-source replies are ignored.
+
+### Phase 4 bounded National history path
+
+- `NationalHistoryState` stages one `current`, `predecessor`, or `newer` observation at a time, validates strict chronology and exact identity, commits only after a complete GPU fence receipt, and evicts at most one oldest observation above the configured limit.
+- `NationalHistoryWorkingSetController` keeps a complete factor-4 domain presentation for every retained observation. Manifest/chunk leases still come from the sole two-credit broker. The renderer divides each texture into bounded row bands and uploads those bands over animation frames, with every measured slice limited to at most 4 ms.
+- `NationalGridLayer` indexes common/detail resources by observation identity, tracks retained versus resident versus painted truth, and measures all resident, staged, and transaction-retired GPU resources against the 200 MiB target and 256 MiB ceiling.
+- History mutations are provisional after their GPU fence. The renderer retains the prior resource graph until the backend commit succeeds; supersession or failure repaints the prior complete observation before the transaction is released.
+- `NationalPlaybackController` selects only resident factor-4 presentations during play and active scrub. Polling/backfill are suspended while resident-only activity owns the hot path, so selection performs no network, decode, IPC, or upload work.
+- Paused/settled high-zoom selection may stage an exact factor-1 viewport plus a bounded adjacent temporal window. Fine detail never changes timeline, measured time, age, source, or interrogation identity, and cannot replace individual playback frames while the quality lock is active.
+- Context recovery rehydrates the visible presentation first and then every common resident from retained CPU bytes. It does not request the network or rebuild source history.
 
 ### `AcquisitionService`
 
@@ -277,21 +288,21 @@ Mistr does not build a national mosaic from Level II sites and never switches so
 The approved model is one coordinator with exactly one active source generation and one painted source truth:
 
 - `SiteLevel2Session` owns the currently implemented per-site Level II path.
-- `NationalMrmsSession` owns the Phase 3 one-observation CONUS path. It does not yet poll or backfill.
+- `NationalMrmsSession` owns the explicit CONUS path. On the Phase 4 branch it paints current first, backfills up to 19 predecessors, then polls inventory for strictly newer observations.
 - Site and National keep independent timelines, but only the painted source exposes one timeline at a time.
 - During transition the old source may remain visibly painted, but superseded backfill stops and the replacement does not become UI truth until a complete receipt commits.
 - After commit, the old source releases its complete loop; Mistr does not keep two permanent warm radar histories.
 - MapLibre source-loaded state, hidden opacity, and tile events are not radar readiness signals.
 
-Merged Phases 1 and 2 established coordination and data transport. The active Phase 3 branch completes the first painted National source while deliberately retaining a one-observation timeline.
+Merged Phases 1 through 3 establish coordination, data transport, and one complete painted National source. The active Phase 4 branch extends the source-specific timeline and working set without creating a second coordinator or keeping two permanent radar loops.
 
 ## 9. Cache architecture
 
 Separate three concerns:
 
-1. **Raw object cache:** immutable downloaded Level II/III objects keyed by bucket/key plus content metadata. Phase 3 National remains process-owned in memory and does not add a directory-scanned disk cache.
-2. **Normalized data cache:** Mistr-owned `PackedSweep` files for Site plus the bounded, directly indexed in-memory MRMS base grid and value-aware levels.
-3. **GPU working set:** the active Site loop or the active National complete overview/detail presentation, never two permanent histories.
+1. **Raw object cache:** immutable downloaded Level II/III objects keyed by bucket/key plus content metadata. National keeps at most 20 exact compressed observations in Rust-owned process memory and does not add a directory-scanned disk cache.
+2. **Normalized data cache:** Mistr-owned `PackedSweep` files for Site plus the bounded, directly indexed National factor-4 overviews and one fine-presentation cache.
+3. **GPU working set:** the active Site loop or the active National all-frame common level plus selected/adjacent detail, never two permanent histories.
 
 The prototype must not reuse GustAVO's PNG tile cache.
 

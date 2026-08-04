@@ -1,6 +1,6 @@
 # Mistr
 
-**Status:** Mistr is the product. The selected-site Windows Alpha is implemented and packaged-validated. National Phases 1 and 2 are merged. Phase 3 implements and packaged-validates one static, interrogable CONUS observation with an explicit National/Site control on its review branch; it is not shipped from `main`, and National history/playback remain Phase 4 work.
+**Status:** Mistr is the product. The selected-site Windows Alpha is implemented and packaged-validated. National Phases 1 through 3 are merged, including one static interrogable CONUS observation and the explicit National/Site control. Phase 4 implements and packaged-validates 20-observation National history, polling, resident playback/scrubbing, quality locking, detail refinement, and all-frame recovery on `codex/mistr-national-history`; those capabilities are not shipped from `main` until review and merge.
 
 Mistr is a focused desktop radar instrument for selected-site storm inspection. Its Alpha product contract lives in [PRODUCT.md](../PRODUCT.md), and its implemented interface rules live in [DESIGN.md](../DESIGN.md).
 
@@ -12,13 +12,13 @@ Radar Session Coordinator -> SiteLevel2Session -> AWS radar data -> decode and n
 
 The historical phase documents record how this architecture was selected, bounded, tested, and reviewed. They remain useful to future maintainers, but forward product work is planned directly in Mistr rather than as a GustAVO integration rehearsal.
 
-The active Phase 3 National path is:
+The active Phase 4 National path is:
 
 ```text
-fixed NOAA MRMS host -> strict GRIB2/PNG decoder -> exact u16 grid -> value-aware levels -> PackedGrid v1 -> shared two-credit IPC -> National numeric-grid WebGL2 renderer -> coverage-aware GPU receipt
+fixed NOAA MRMS host -> strict chronological history -> exact u16/value-aware levels -> PackedGrid v1 -> shared two-credit IPC -> all-frame common GPU residency -> quality-locked playback/scrub -> coverage-aware GPU receipt
 ```
 
-It paints only the newest single observation. Bounded 20-observation history, polling, and playback-quality locking do not begin until Phase 4.
+It paints the newest observation first, backfills up to 19 strictly older observations, then polls for strictly newer inventory. Every retained frame keeps a complete factor-4 GPU presentation for zero-I/O playback/scrub; paused high-zoom selection may refine without changing observation truth.
 
 ## Alpha direction
 
@@ -29,7 +29,7 @@ It paints only the newest single observation. Bounded 20-observation history, po
 - Keep `Smooth` and `Native` as explicit spatial views of that same observation; inspection always reports native gate/status truth even when the display-only weak-return curve makes a measured low return transparent.
 - Preserve the fixture, packaged-runtime, performance, and recovery gates as part of product engineering.
 - Keep prototype phase labels, benchmark controls, and diagnostic internals out of the normal interface.
-- Expose National only through the complete Phase 3 session/renderer/paint-truth path; never expose partial acquisition, chunk, or staging state as product truth.
+- Expose National history only through complete backend/GPU commit and coverage-receipt truth; never expose partial acquisition, chunk, staging, or provisional mutation state as product truth.
 
 ## Documentation map
 
@@ -64,10 +64,11 @@ The numbered documents and phase reports below are historical architecture and a
 | [23_ALPHA_UI_AND_SITE_HARDENING.md](23_ALPHA_UI_AND_SITE_HARDENING.md) | Full operational WSR-88D catalog, bounded discovery, startup/status truth, and hands-on UI remediation |
 | [24_VISIBLE_FIRST_STARTUP_AND_RECENT_BACKFILL.md](24_VISIBLE_FIRST_STARTUP_AND_RECENT_BACKFILL.md) | Basemap-independent first paint, lazy archive diagnostics, predecessor backfill, and truthful partial-history states |
 | [25_RADAR_RENDERING_QUALITY.md](25_RADAR_RENDERING_QUALITY.md) | Product reflectivity palette and weak-return visibility, operational map context, `Smooth`/`Native` spatial modes, native interrogation truth, and rendering acceptance gates |
-| [26_NATIONAL_RADAR_IMPLEMENTATION_PLAN.md](26_NATIONAL_RADAR_IMPLEMENTATION_PLAN.md) | Approved explicit-source CONUS MRMS plan with 20 exact retained observations, a level-of-detail GPU working set designed for later 30-frame extension, phased delivery, and acceptance gates; Phases 1 and 2 are merged and Phase 3 static rendering is active for review |
+| [26_NATIONAL_RADAR_IMPLEMENTATION_PLAN.md](26_NATIONAL_RADAR_IMPLEMENTATION_PLAN.md) | Approved explicit-source CONUS MRMS plan with 20 exact retained observations, a level-of-detail GPU working set designed for later 30-frame extension, phased delivery, and acceptance gates; Phases 1 through 3 are merged and Phase 4 history is active for review |
 | [27_PACKED_GRID_V1.md](27_PACKED_GRID_V1.md) | National Phase 2 big-endian manifest/chunk schema, exact numeric metadata, geometry, integrity, and shared-credit transfer contract |
 | [28_NATIONAL_STATIC_RENDERER_DECISION.md](28_NATIONAL_STATIC_RENDERER_DECISION.md) | National Phase 3 numeric-grid renderer, coverage receipts, exact interrogation, atomic source handoff, and context-recovery contract |
 | [phase-reports/NATIONAL_PHASE_3_STATIC_RENDERER.md](phase-reports/NATIONAL_PHASE_3_STATIC_RENDERER.md) | Phase 3 packaged Windows/WebView2 static National evidence and measured memory/timing ledger |
+| [phase-reports/NATIONAL_PHASE_4_HISTORY_PLAYBACK.md](phase-reports/NATIONAL_PHASE_4_HISTORY_PLAYBACK.md) | Phase 4 packaged Windows/WebView2 20-frame history, zero-I/O playback, quality lock, memory, recovery, and handoff evidence |
 | [phase-reports/PHASE_2_PACKED_WIRE_AND_IPC.md](phase-reports/PHASE_2_PACKED_WIRE_AND_IPC.md) | Phase 2 cross-language, packaged IPC, timing, and memory evidence |
 | [phase-reports/PHASE_3_STATIC_GPU_RENDERER.md](phase-reports/PHASE_3_STATIC_GPU_RENDERER.md) | Phase 3 packaged GPU, alignment, palette, coexistence, and performance evidence |
 | [phase-reports/PHASE_4_RESIDENT_PLAYBACK.md](phase-reports/PHASE_4_RESIDENT_PLAYBACK.md) | Phase 4 real 20-observation residency, 4K playback, paint truth, and resource evidence |

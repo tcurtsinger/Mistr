@@ -4,7 +4,7 @@
 |---|---|
 | Decision date | 2026-08-03 |
 | Last plan amendment | 2026-08-03 — 20-observation retained history, level-of-detail GPU working set, theoretical-domain encoding, time-sliced uploads, and cross-source freshness evidence |
-| Status | Approved plan; Phases 1 and 2 merged in PRs #15/#16; Phase 3 static National source active on `codex/mistr-national-static-renderer` for review |
+| Status | Approved plan; Phases 1 through 3 merged in PRs #15/#16/#17; Phase 4 bounded National history active on `codex/mistr-national-history` for review |
 | Planned source | NOAA Multi-Radar/Multi-Sensor System (MRMS) `MergedBaseReflectivityQC` |
 | Initial geographic scope | Contiguous United States (CONUS) |
 | Initial retained history | 20 exact observations, approximately 38 minutes at the normal two-minute publication cadence |
@@ -16,7 +16,7 @@ This document defines the next Mistr radar milestone: a truthful, bounded Nation
 
 The plan deliberately avoids the failure modes demonstrated by GustAVO's national/site radar path. National radar will not be assembled from individual Level II sites inside Mistr, represented as a large set of animated MapLibre tile sources, or automatically substituted for site radar at a zoom threshold. It will be a separate NOAA-produced gridded observation type with the same generation, ownership, paint-receipt, playback, recovery, and UI-truth standards already required by Mistr.
 
-This remains the governing phased contract. The owner authorized and merged Phase 1 through PR #15, then authorized and merged Phase 2 through PR #16 at `d87f27f`. The owner separately authorized Phase 3 on 2026-08-03. Phase 3 authorization extends only to one static current National observation, its renderer/working set, exact point interrogation, atomic source handoff, and visible source controls; it does not authorize National polling, history, playback, scrubbing, or playback-quality locking.
+This remains the governing phased contract. The owner authorized and merged Phase 1 through PR #15, Phase 2 through PR #16, and Phase 3 through PR #17 at `be4b05b`. The owner separately authorized Phase 4 on 2026-08-03. Phase 4 authorization extends only to bounded rolling National history, polling, all-frame residency, playback/scrubbing quality locking, paused detail refinement, exact retained-frame interrogation, and recovery; it does not authorize the Phase 5 long-session/platform hardening matrix.
 
 ## 2. Accepted product decisions
 
@@ -507,7 +507,7 @@ Exit gate: Mistr can acquire and transfer exact National observations safely, bu
 
 ### Phase 3 — Static end-to-end National source
 
-**Active branch status:** implemented and packaged-validated for review on `codex/mistr-national-static-renderer`. It exposes one complete current CONUS observation only; Phase 4 history and playback remain absent.
+**Merged status:** implemented, packaged-validated, reviewed, and merged through PR #17 at `be4b05b`. Merged `main` exposes one complete current CONUS observation only.
 
 Deliverables:
 
@@ -531,6 +531,8 @@ Phase 3 packaged evidence at 3840 by 2160 paints the complete 28-chunk factor-4 
 
 ### Phase 4 — Bounded rolling National history
 
+**Active branch status:** implemented and packaged-validated for review on `codex/mistr-national-history`. It extends the merged one-frame product without beginning Phase 5.
+
 Deliverables:
 
 - newest-first paint and bounded predecessor backfill;
@@ -545,6 +547,8 @@ Deliverables:
 - rapid source-switch and supersession coverage.
 
 Exit gate: all 20 retained observations play and scrub entirely from GPU residency at the normal CONUS overview with bounded memory and zero hot-path acquisition, decode, disk, IPC, or upload activity. At high zoom, all frames maintain normal cadence and consistent visual quality at the common complete level; finer selected-frame detail stages only after playback pauses or scrubbing settles. The prior frame is held only when the target lacks the common level itself.
+
+Phase 4 packaged evidence at 3840 by 2160 retains 20 exact chronological observations spanning 37.67 minutes, keeps every complete factor-4 overview resident, completes 1,000 transitions plus oldest/newest direct scrubs with zero network/decode/IPC/upload activity, and records a 65,292,096-byte peak GPU allocation with a 1.30 ms maximum upload slice. High-zoom playback locks to the complete factor-4 level while paused selection and its bounded adjacent temporal window refine to exact factor-1 viewport detail. Real context loss restores all 20 common residents from retained CPU bytes at epoch 2 with zero backend activity, both shared credits return, and National safely hands back to KTLX. Complete evidence is in [National Phase 4 History and Playback](phase-reports/NATIONAL_PHASE_4_HISTORY_PLAYBACK.md).
 
 ### Phase 5 — Packaged Windows/WebView2 hardening
 
@@ -713,6 +717,14 @@ The owner separately authorized Phase 3 after that merge. The Phase 3 branch:
 2. preserved the two protected untracked SVG files without modification;
 3. implements only the static National session, numeric-grid renderer, bounded overview/detail working sets, exact point interrogation, explicit source UI, source-aware recenter, and context recovery;
 4. retains all Site diagnostic APIs and the single global two-credit broker; and
-5. will stop at the Phase 3 exit gate after full source/packaged regressions, commit, push, and a Ready-for-review PR.
+5. stopped at the Phase 3 exit gate, opened Ready-for-review PR #17, and was merged by the owner at `be4b05b`.
 
-Phase 4 remains blocked on Phase 3 review, owner merge, and separate owner authorization.
+The owner separately authorized Phase 4 after that merge. The Phase 4 branch:
+
+1. started from merged commit `be4b05b` after verifying `main` and `origin/main` matched;
+2. preserved the two protected untracked SVG files without modification;
+3. implements only bounded current/predecessor/newer National history, 20 common overview residents, common-quality playback/scrub, paused/settled detail, exact retained-frame lookup, and all-frame recovery;
+4. retains every Phase 2/3 National and Phase 4/5/6 Site diagnostic API plus the single global two-credit broker; and
+5. stops at the Phase 4 exit gate after full source/packaged regressions, commit, push, and a Ready-for-review PR.
+
+Phase 5 remains blocked on Phase 4 review, owner merge, and separate owner authorization.

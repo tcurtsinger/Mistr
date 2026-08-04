@@ -145,6 +145,12 @@ export interface NationalGridRendererSnapshot {
   coverageVersion?: number;
   coverageComplete: boolean;
   residentChunkCount: number;
+  residentObservationIds: readonly string[];
+  commonResidentObservationIds: readonly string[];
+  detailedObservationIds: readonly string[];
+  selectedObservationId?: string;
+  playbackQualityFactor?: number;
+  mutationAwaitingCommit: boolean;
   stagedChunkCount: number;
   gpuResourceBytes: number;
   peakGpuResourceBytes: number;
@@ -181,11 +187,35 @@ interface PresentationResources {
   uploadedBytes: number;
 }
 
+interface ResidentObservation {
+  common: PresentationResources | null;
+  detail: PresentationResources | null;
+}
+
+interface RendererResidencyState {
+  residents: Map<string, ResidentObservation>;
+  timelineObservationIds: string[];
+  active: PresentationResources | null;
+  fallback: PresentationResources | null;
+  playbackQualityFactor: number | undefined;
+}
+
+interface PendingResidencyMutation {
+  previous: RendererResidencyState;
+  added: PresentationResources[];
+  retireOnSuccess: PresentationResources[];
+  deferExternalCommit: boolean;
+}
+
+interface AwaitingExternalCommit {
+  mutation: PendingResidencyMutation;
+  receipt: NationalPaintReceipt;
+}
+
 interface PendingPaint {
   sync: WebGLSync;
   resources: PresentationResources;
-  previous: PresentationResources | null;
-  previousFallback: PresentationResources | null;
+  mutation: PendingResidencyMutation | null;
   drawSequence: number;
 }
 
@@ -225,10 +255,13 @@ export class NationalGridLayer implements CustomLayerInterface {
   private uniforms: Uniforms | null = null;
   private active: PresentationResources | null = null;
   private fallback: PresentationResources | null = null;
+  private residents = new Map<string, ResidentObservation>();
+  private timelineObservationIds: string[] = [];
+  private playbackQualityFactor: number | undefined;
   private staging: PresentationResources | null = null;
   private pendingPaint: PendingPaint | null = null;
-  private commitPrevious: PresentationResources | null | undefined;
-  private commitFallback: PresentationResources | null | undefined;
+  private pendingResidencyMutation: PendingResidencyMutation | null = null;
+  private awaitingExternalCommit: AwaitingExternalCommit | null = null;
   private paintWaiter: PaintWaiter | null = null;
   private displayMode: RadarDisplayMode;
   private presentationEnabled = true;
@@ -326,12 +359,9 @@ export class NationalGridLayer implements CustomLayerInterface {
           this.pendingPaint = {
             sync,
             resources: this.active,
-            previous: this.commitPrevious ?? null,
-            previousFallback: this.commitFallback ?? null,
+            mutation: this.pendingResidencyMutation,
             drawSequence: this.drawSequence,
           };
-          this.commitPrevious = undefined;
-          this.commitFallback = undefined;
           gl.flush();
           this.map?.triggerRepaint();
         }
@@ -339,7 +369,10 @@ export class NationalGridLayer implements CustomLayerInterface {
         restoreGlState(gl, state);
       }
     } catch (error) {
-      this.rollbackPendingCommit(error);
+      if (this.pendingPaint) this.rollbackPendingCommit(error);
+      else if (this.pendingResidencyMutation) {
+        this.rollbackResidencyMutation(this.pendingResidencyMutation, error);
+      }
       this.fail(error);
     }
   }
@@ -355,10 +388,22 @@ export class NationalGridLayer implements CustomLayerInterface {
     }
     this.rehydrationToken += 1;
     this.rollbackStaging();
-    this.deletePresentation(gl, this.active);
-    if (this.fallback !== this.active) this.deletePresentation(gl, this.fallback);
+    const uncommitted = this.awaitingExternalCommit?.mutation;
+    if (uncommitted) {
+      this.restoreResidencyState(uncommitted.previous);
+      for (const added of uniquePresentations(uncommitted.added)) {
+        if (!this.presentationIsReferenced(added)) this.deletePresentation(gl, added);
+      }
+      this.awaitingExternalCommit = null;
+    }
+    for (const presentation of this.allResidentPresentations()) {
+      this.deletePresentation(gl, presentation);
+    }
     this.active = null;
     this.fallback = null;
+    this.residents.clear();
+    this.timelineObservationIds = [];
+    this.playbackQualityFactor = undefined;
     this.deleteSharedResources(gl);
     this.detachContextListeners(map);
     this.gl = null;
@@ -372,7 +417,14 @@ export class NationalGridLayer implements CustomLayerInterface {
     coverage: NationalViewportCoverage,
   ): void {
     if (!this.gl || !this.program) throw new Error("National renderer is not ready for staging");
-    if (this.recovering || this.paintWaiter || this.staging || this.pendingPaint) {
+    if (
+      this.recovering
+      || this.paintWaiter
+      || this.staging
+      || this.pendingPaint
+      || this.pendingResidencyMutation
+      || this.awaitingExternalCommit
+    ) {
       throw new Error("National renderer already owns an uncommitted presentation");
     }
     assertCoverageMatchesManifest(manifest, coverage);
@@ -399,24 +451,22 @@ export class NationalGridLayer implements CustomLayerInterface {
     if (this.staging !== staging) throw new Error("National staging was cancelled before upload");
     const gl = this.gl;
     if (!gl || gl.isContextLost()) throw new Error("National renderer lost its WebGL context during upload");
-    const started = performance.now();
-    const texture = uploadRawTexture(gl, chunk);
-    const elapsed = performance.now() - started;
-    if (elapsed > this.uploadBudgetMs) {
-      gl.deleteTexture(texture);
-      throw new Error(
-        `National chunk upload used ${elapsed.toFixed(3)} ms, exceeding the ${this.uploadBudgetMs} ms frame budget`,
-      );
-    }
+    const { texture, maximumSliceMs } = await uploadRawTextureTimeSliced(
+      gl,
+      chunk,
+      this.uploadBudgetMs,
+      () => this.staging === staging && this.gl === gl && !gl.isContextLost(),
+      "National chunk upload",
+    );
     const resource: GpuChunk = {
       packed: chunk,
       texture,
       gpuBytes: chunk.rawCodes.byteLength,
     };
     staging.chunks.set(chunk.descriptor.index, resource);
-    staging.maximumUploadSliceMs = Math.max(staging.maximumUploadSliceMs, elapsed);
+    staging.maximumUploadSliceMs = Math.max(staging.maximumUploadSliceMs, maximumSliceMs);
     staging.uploadedBytes += resource.gpuBytes;
-    this.maximumUploadSliceMs = Math.max(this.maximumUploadSliceMs, elapsed);
+    this.maximumUploadSliceMs = Math.max(this.maximumUploadSliceMs, maximumSliceMs);
     this.uploadCount += 1;
     this.uploadBytes += resource.gpuBytes;
     this.peakGpuResourceBytes = Math.max(this.peakGpuResourceBytes, this.currentGpuBytes());
@@ -424,42 +474,190 @@ export class NationalGridLayer implements CustomLayerInterface {
   }
 
   commitStaging(): Promise<NationalPaintReceipt> {
-    const staging = this.staging;
-    if (!staging || !this.gl) throw new Error("National renderer has no staged presentation");
-    const required = assertCoverageMatchesManifest(staging.manifest, staging.coverage);
-    if (required.some((descriptor) => !staging.chunks.has(descriptor.index))) {
-      throw new Error("National renderer cannot commit incomplete viewport coverage");
+    const staging = this.requireCompleteStaging();
+    const identity = nationalObservationIdentity(staging.manifest);
+    const alreadyResident = this.residents.has(identity.observationId);
+    const timeline = alreadyResident
+      ? [...this.timelineObservationIds]
+      : [identity.observationId];
+    return this.commitStagedResidency(
+      timeline,
+      identity.observationId,
+      staging.manifest.presentationFactor,
+      !alreadyResident,
+      false,
+    );
+  }
+
+  commitInitialHistoryStaging(): Promise<NationalPaintReceipt> {
+    const staging = this.requireCompleteStaging();
+    const identity = nationalObservationIdentity(staging.manifest);
+    return this.commitStagedResidency(
+      [identity.observationId],
+      identity.observationId,
+      staging.manifest.presentationFactor,
+      true,
+      true,
+    );
+  }
+
+  commitHistoryStaging(
+    timelineObservationIds: readonly string[],
+    selectedObservationId: string,
+    selectedPresentationFactor = 4,
+    deferExternalCommit = false,
+  ): Promise<NationalPaintReceipt> {
+    this.requireCompleteStaging();
+    return this.commitStagedResidency(
+      timelineObservationIds,
+      selectedObservationId,
+      selectedPresentationFactor,
+      false,
+      deferExternalCommit,
+    );
+  }
+
+  finalizeHistoryMutation(receipt: NationalPaintReceipt): void {
+    const pending = this.requireExternalMutation(receipt);
+    if (this.gl && !this.gl.isContextLost()) {
+      for (const retired of uniquePresentations(pending.mutation.retireOnSuccess)) {
+        if (!this.presentationIsReferenced(retired)) this.deletePresentation(this.gl, retired);
+      }
     }
-    staging.stagingDurationMs = performance.now() - staging.stagingStartedAt;
-    const previous = this.active;
-    const previousFallback = this.fallback;
-    if (
-      staging.manifest.presentationFactor === 1
-      && previous?.manifest.presentationFactor === 4
-      && previous.coverage.kind === "complete_domain"
-    ) {
-      this.fallback = previous;
+    this.awaitingExternalCommit = null;
+    this.emit();
+  }
+
+  rollbackHistoryMutation(
+    receipt: NationalPaintReceipt,
+  ): Promise<NationalPaintReceipt | undefined> {
+    const pending = this.requireExternalMutation(receipt);
+    this.restoreResidencyState(pending.mutation.previous);
+    if (this.gl && !this.gl.isContextLost()) {
+      for (const added of uniquePresentations(pending.mutation.added)) {
+        if (!this.presentationIsReferenced(added)) this.deletePresentation(this.gl, added);
+      }
     }
-    this.active = staging;
-    this.staging = null;
+    this.awaitingExternalCommit = null;
     this.paintReceipt = undefined;
     this.status = "ready";
-    this.pendingPaint = null;
-    this.commitPrevious = previous;
-    this.commitFallback = previousFallback;
     this.map?.triggerRepaint();
-    return new Promise((resolve, reject) => {
-      const timeout = globalThis.setTimeout(() => {
-        if (this.paintWaiter?.timeout === timeout) this.paintWaiter = null;
-        this.rollbackCommittedPresentation(
-          previous,
-          previousFallback,
-          new Error("National paint receipt timed out"),
-        );
-        reject(new Error("National paint receipt timed out"));
-      }, PAINT_TIMEOUT_MS);
-      this.paintWaiter = { resolve, reject, timeout };
-    });
+    this.emit();
+    if (!this.active) return Promise.resolve(undefined);
+    return this.waitForCommittedPaint(PAINT_TIMEOUT_MS, "National rollback paint receipt timed out");
+  }
+
+  commitPrefetchedStaging(timelineObservationIds: readonly string[]): void {
+    const staging = this.requireCompleteStaging();
+    const identity = nationalObservationIdentity(staging.manifest);
+    if (identity.observationId === this.getSnapshot().selectedObservationId) {
+      throw new Error("selected National detail requires an authoritative paint receipt");
+    }
+    const previous = this.captureResidencyState();
+    const { residents, retireOnSuccess } = this.residentsWithStaging(
+      previous.residents,
+      staging,
+      timelineObservationIds,
+      false,
+    );
+    this.residents = residents;
+    this.timelineObservationIds = [...timelineObservationIds];
+    this.staging = null;
+    const transientGpuBytes = this.currentGpuBytes(retireOnSuccess);
+    if (transientGpuBytes > 256 * 1024 * 1024) {
+      this.restoreResidencyState(previous);
+      this.staging = staging;
+      throw new Error("National prefetched detail exceeds the 256 MiB hard ceiling");
+    }
+    if (this.gl && !this.gl.isContextLost()) {
+      for (const retired of uniquePresentations(retireOnSuccess)) {
+        if (!this.presentationIsReferenced(retired)) this.deletePresentation(this.gl, retired);
+      }
+    }
+    this.peakGpuResourceBytes = Math.max(this.peakGpuResourceBytes, transientGpuBytes);
+    this.status = this.active ? "painted" : "ready";
+    this.emit();
+  }
+
+  selectResidentAndWait(
+    observationId: string,
+    presentationFactor = this.playbackQualityFactor ?? 4,
+  ): Promise<NationalPaintReceipt> {
+    if (
+      this.recovering
+      || this.paintWaiter
+      || this.pendingPaint
+      || this.pendingResidencyMutation
+      || this.awaitingExternalCommit
+    ) {
+      return Promise.reject(new Error("National renderer already owns an uncommitted paint"));
+    }
+    const selected = this.presentationFor(observationId, presentationFactor);
+    if (
+      selected === this.active
+      && receiptMatches(this.paintReceipt, selected, this.contextEpoch)
+    ) {
+      return Promise.resolve(this.paintReceipt!);
+    }
+    const previous = this.captureResidencyState();
+    this.active = selected;
+    this.fallback = presentationFactor === 4
+      ? null
+      : this.presentationFor(observationId, 4);
+    this.paintReceipt = undefined;
+    this.status = "ready";
+    this.pendingResidencyMutation = {
+      previous,
+      added: [],
+      retireOnSuccess: [],
+      deferExternalCommit: false,
+    };
+    this.map?.triggerRepaint();
+    return this.waitForCommittedPaint(PAINT_TIMEOUT_MS, "National paint receipt timed out");
+  }
+
+  setPlaybackQualityLock(presentationFactor: number | undefined): void {
+    if (presentationFactor !== undefined && presentationFactor !== 4) {
+      throw new Error("Phase 4 playback quality lock requires the complete factor-4 level");
+    }
+    this.playbackQualityFactor = presentationFactor;
+    this.emit();
+  }
+
+  async waitForCommonResidency(timeoutMs = 60_000): Promise<void> {
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 120_000) {
+      throw new RangeError("National residency wait must be between 100 and 120000 ms");
+    }
+    const started = performance.now();
+    while (true) {
+      const snapshot = this.getSnapshot();
+      if (
+        snapshot.residentObservationIds.length > 0
+        && snapshot.commonResidentObservationIds.length === snapshot.residentObservationIds.length
+      ) return;
+      if (snapshot.status === "error" || snapshot.status === "removed") {
+        throw new Error(snapshot.error ?? "National renderer cannot restore common residency");
+      }
+      if (performance.now() - started > timeoutMs) {
+        throw new Error("National common residency recovery timed out");
+      }
+      await nextAnimationFrame();
+    }
+  }
+
+  pruneDetailResidency(keepObservationIds: readonly string[]): void {
+    const keep = new Set(keepObservationIds);
+    const selected = this.getSnapshot().selectedObservationId;
+    for (const [observationId, resident] of this.residents) {
+      if (!resident.detail || keep.has(observationId)) continue;
+      if (observationId === selected && this.active === resident.detail) {
+        throw new Error("cannot prune the selected detailed National presentation");
+      }
+      const detail = resident.detail;
+      this.residents.set(observationId, { ...resident, detail: null });
+      if (this.gl && !this.gl.isContextLost()) this.deletePresentation(this.gl, detail);
+    }
+    this.emit();
   }
 
   rollbackStaging(): void {
@@ -487,6 +685,18 @@ export class NationalGridLayer implements CustomLayerInterface {
 
   getSnapshot(): NationalGridRendererSnapshot {
     const identity = this.active ? nationalObservationIdentity(this.active.manifest) : undefined;
+    const residentObservationIds = this.timelineObservationIds.filter((observationId) => (
+      this.residents.has(observationId)
+    ));
+    const commonResidentObservationIds = residentObservationIds.filter((observationId) => {
+      const common = this.residents.get(observationId)?.common;
+      return Boolean(common && presentationIsResident(common));
+    });
+    const detailedObservationIds = residentObservationIds.filter((observationId) => {
+      const detail = this.residents.get(observationId)?.detail;
+      return Boolean(detail && presentationIsResident(detail));
+    });
+    const residentPresentations = this.allResidentPresentations();
     return {
       status: this.status,
       displayMode: this.displayMode,
@@ -502,8 +712,16 @@ export class NationalGridLayer implements CustomLayerInterface {
         : 0,
       coverageVersion: this.active?.coverage.version,
       coverageComplete: Boolean(this.active) && presentationIsResident(this.active!),
-      residentChunkCount: (this.active ? residentChunkCount(this.active) : 0)
-        + (this.fallback && this.fallback !== this.active ? residentChunkCount(this.fallback) : 0),
+      residentChunkCount: residentPresentations.reduce(
+        (total, presentation) => total + residentChunkCount(presentation),
+        0,
+      ),
+      residentObservationIds,
+      commonResidentObservationIds,
+      detailedObservationIds,
+      selectedObservationId: identity?.observationId,
+      playbackQualityFactor: this.playbackQualityFactor,
+      mutationAwaitingCommit: this.awaitingExternalCommit !== null,
       stagedChunkCount: this.staging?.chunks.size ?? 0,
       gpuResourceBytes: this.currentGpuBytes(),
       peakGpuResourceBytes: this.peakGpuResourceBytes,
@@ -628,8 +846,6 @@ export class NationalGridLayer implements CustomLayerInterface {
     }
     gl.deleteSync(pending.sync);
     this.pendingPaint = null;
-    this.commitPrevious = undefined;
-    this.commitFallback = undefined;
     if (result === gl.WAIT_FAILED) {
       throw new Error("National GPU completion fence failed");
     }
@@ -656,19 +872,16 @@ export class NationalGridLayer implements CustomLayerInterface {
     this.paintReceipt = receipt;
     this.status = "painted";
     this.recovering = false;
-    if (
-      pending.previous
-      && pending.previous !== pending.resources
-      && pending.previous !== this.fallback
-    ) {
-      this.deletePresentation(gl, pending.previous);
-    }
-    if (pending.resources.manifest.presentationFactor === 4) {
-      if (this.fallback && this.fallback !== pending.resources) {
-        this.deletePresentation(gl, this.fallback);
+    if (pending.mutation) {
+      if (pending.mutation.deferExternalCommit) {
+        this.awaitingExternalCommit = { mutation: pending.mutation, receipt };
+      } else {
+        for (const retired of uniquePresentations(pending.mutation.retireOnSuccess)) {
+          if (!this.presentationIsReferenced(retired)) this.deletePresentation(gl, retired);
+        }
       }
-      this.fallback = null;
     }
+    this.pendingResidencyMutation = null;
     const waiter = this.paintWaiter;
     this.paintWaiter = null;
     if (waiter) {
@@ -696,6 +909,168 @@ export class NationalGridLayer implements CustomLayerInterface {
     return staging;
   }
 
+  private requireCompleteStaging(): PresentationResources {
+    const staging = this.staging;
+    if (!staging || !this.gl) throw new Error("National renderer has no staged presentation");
+    const required = assertCoverageMatchesManifest(staging.manifest, staging.coverage);
+    if (required.some((descriptor) => !staging.chunks.has(descriptor.index))) {
+      throw new Error("National renderer cannot commit incomplete viewport coverage");
+    }
+    staging.stagingDurationMs = performance.now() - staging.stagingStartedAt;
+    return staging;
+  }
+
+  private commitStagedResidency(
+    timelineObservationIds: readonly string[],
+    selectedObservationId: string,
+    selectedPresentationFactor: number,
+    replaceAll: boolean,
+    deferExternalCommit: boolean,
+  ): Promise<NationalPaintReceipt> {
+    if (
+      this.paintWaiter
+      || this.pendingPaint
+      || this.pendingResidencyMutation
+      || this.awaitingExternalCommit
+    ) {
+      throw new Error("National renderer cannot commit residency during an unfinished paint");
+    }
+    const staging = this.requireCompleteStaging();
+    validateResidentTimeline(timelineObservationIds, selectedObservationId);
+    const previous = this.captureResidencyState();
+    const { residents, retireOnSuccess } = this.residentsWithStaging(
+      previous.residents,
+      staging,
+      timelineObservationIds,
+      replaceAll,
+    );
+    this.residents = residents;
+    this.timelineObservationIds = [...timelineObservationIds];
+    this.active = presentationFromResidents(
+      residents,
+      selectedObservationId,
+      selectedPresentationFactor,
+    );
+    this.fallback = selectedPresentationFactor === 4
+      ? null
+      : presentationFromResidents(residents, selectedObservationId, 4);
+    this.staging = null;
+    this.paintReceipt = undefined;
+    this.status = "ready";
+    this.pendingPaint = null;
+    this.pendingResidencyMutation = {
+      previous,
+      added: [staging],
+      retireOnSuccess,
+      deferExternalCommit,
+    };
+    if (this.currentGpuBytes() > 256 * 1024 * 1024) {
+      this.restoreResidencyState(previous);
+      this.pendingResidencyMutation = null;
+      this.staging = staging;
+      throw new Error("National resident working set exceeds the 256 MiB hard ceiling");
+    }
+    this.peakGpuResourceBytes = Math.max(this.peakGpuResourceBytes, this.currentGpuBytes());
+    this.map?.triggerRepaint();
+    return this.waitForCommittedPaint(PAINT_TIMEOUT_MS, "National paint receipt timed out");
+  }
+
+  private residentsWithStaging(
+    priorResidents: Map<string, ResidentObservation>,
+    staging: PresentationResources,
+    timelineObservationIds: readonly string[],
+    replaceAll: boolean,
+  ): { residents: Map<string, ResidentObservation>; retireOnSuccess: PresentationResources[] } {
+    const residents = replaceAll
+      ? new Map<string, ResidentObservation>()
+      : cloneResidents(priorResidents);
+    const retireOnSuccess: PresentationResources[] = [];
+    if (replaceAll) {
+      retireOnSuccess.push(...presentationsFromResidents(priorResidents));
+    }
+    const identity = nationalObservationIdentity(staging.manifest);
+    const prior = residents.get(identity.observationId) ?? { common: null, detail: null };
+    if (staging.manifest.presentationFactor === 4) {
+      if (prior.common && prior.common !== staging) retireOnSuccess.push(prior.common);
+      if (prior.detail) retireOnSuccess.push(prior.detail);
+      residents.set(identity.observationId, { common: staging, detail: null });
+    } else {
+      if (prior.detail && prior.detail !== staging) retireOnSuccess.push(prior.detail);
+      residents.set(identity.observationId, { ...prior, detail: staging });
+    }
+    const keep = new Set(timelineObservationIds);
+    for (const [observationId, resident] of [...residents]) {
+      if (keep.has(observationId)) continue;
+      if (resident.common) retireOnSuccess.push(resident.common);
+      if (resident.detail) retireOnSuccess.push(resident.detail);
+      residents.delete(observationId);
+    }
+    for (const observationId of timelineObservationIds) {
+      if (!residents.get(observationId)?.common) {
+        throw new Error(`National timeline observation ${observationId} lacks a complete common level`);
+      }
+    }
+    return { residents, retireOnSuccess };
+  }
+
+  private presentationFor(
+    observationId: string,
+    presentationFactor: number,
+  ): PresentationResources {
+    return presentationFromResidents(this.residents, observationId, presentationFactor);
+  }
+
+  private captureResidencyState(): RendererResidencyState {
+    return {
+      residents: cloneResidents(this.residents),
+      timelineObservationIds: [...this.timelineObservationIds],
+      active: this.active,
+      fallback: this.fallback,
+      playbackQualityFactor: this.playbackQualityFactor,
+    };
+  }
+
+  private restoreResidencyState(state: RendererResidencyState): void {
+    this.residents = cloneResidents(state.residents);
+    this.timelineObservationIds = [...state.timelineObservationIds];
+    this.active = state.active;
+    this.fallback = state.fallback;
+    this.playbackQualityFactor = state.playbackQualityFactor;
+  }
+
+  private requireExternalMutation(receipt: NationalPaintReceipt): AwaitingExternalCommit {
+    const pending = this.awaitingExternalCommit;
+    if (!pending || !sameReceiptIdentity(pending.receipt, receipt)) {
+      throw new Error("National history mutation receipt is not awaiting backend commit");
+    }
+    return pending;
+  }
+
+  private waitForCommittedPaint(timeoutMs: number, message: string): Promise<NationalPaintReceipt> {
+    return new Promise((resolve, reject) => {
+      const timeout = globalThis.setTimeout(() => {
+        if (this.paintWaiter?.timeout !== timeout) return;
+        this.paintWaiter = null;
+        if (this.pendingPaint && this.gl && !this.gl.isContextLost()) {
+          this.gl.deleteSync(this.pendingPaint.sync);
+          this.pendingPaint = null;
+        }
+        this.rollbackResidencyMutation(this.pendingResidencyMutation, new Error(message));
+        reject(new Error(message));
+      }, timeoutMs);
+      this.paintWaiter = { resolve, reject, timeout };
+    });
+  }
+
+  private allResidentPresentations(): PresentationResources[] {
+    return presentationsFromResidents(this.residents);
+  }
+
+  private presentationIsReferenced(presentation: PresentationResources): boolean {
+    return this.allResidentPresentations().includes(presentation)
+      || this.staging === presentation;
+  }
+
   private createSharedResources(gl: WebGL2RenderingContext) {
     this.program = createProgram(gl);
     this.uniforms = resolveUniforms(gl, this.program);
@@ -720,10 +1095,11 @@ export class NationalGridLayer implements CustomLayerInterface {
   private startTimeSlicedRehydration(gl: WebGL2RenderingContext) {
     const token = this.rehydrationToken + 1;
     this.rehydrationToken = token;
-    const presentations = [this.active, this.fallback]
-      .filter((presentation, index, values): presentation is PresentationResources => (
-        Boolean(presentation) && values.indexOf(presentation) === index
-      ));
+    const presentations = uniquePresentations([
+      ...(this.active ? [this.active] : []),
+      ...(this.fallback ? [this.fallback] : []),
+      ...this.allResidentPresentations(),
+    ]);
     this.paintReceipt = undefined;
     void (async () => {
       for (const presentation of presentations) {
@@ -735,17 +1111,15 @@ export class NationalGridLayer implements CustomLayerInterface {
             || this.gl !== gl
             || gl.isContextLost()
           ) return;
-          const started = performance.now();
-          const texture = uploadRawTexture(gl, resource.packed);
-          const elapsed = performance.now() - started;
-          if (elapsed > this.uploadBudgetMs) {
-            gl.deleteTexture(texture);
-            throw new Error(
-              `National recovery chunk upload used ${elapsed.toFixed(3)} ms, exceeding the ${this.uploadBudgetMs} ms frame budget`,
-            );
-          }
+          const { texture, maximumSliceMs } = await uploadRawTextureTimeSliced(
+            gl,
+            resource.packed,
+            this.uploadBudgetMs,
+            () => token === this.rehydrationToken && this.gl === gl && !gl.isContextLost(),
+            "National recovery chunk upload",
+          );
           resource.texture = texture;
-          this.maximumUploadSliceMs = Math.max(this.maximumUploadSliceMs, elapsed);
+          this.maximumUploadSliceMs = Math.max(this.maximumUploadSliceMs, maximumSliceMs);
           this.uploadCount += 1;
           this.uploadBytes += resource.gpuBytes;
           this.peakGpuResourceBytes = Math.max(this.peakGpuResourceBytes, this.currentGpuBytes());
@@ -786,22 +1160,23 @@ export class NationalGridLayer implements CustomLayerInterface {
     if (!pending) return;
     if (this.gl && !this.gl.isContextLost()) this.gl.deleteSync(pending.sync);
     this.pendingPaint = null;
-    this.rollbackCommittedPresentation(pending.previous, pending.previousFallback, error);
+    this.rollbackResidencyMutation(pending.mutation, error);
   }
 
-  private rollbackCommittedPresentation(
-    previous: PresentationResources | null,
-    previousFallback: PresentationResources | null,
+  private rollbackResidencyMutation(
+    mutation: PendingResidencyMutation | null,
     error: unknown,
   ) {
-    this.commitPrevious = undefined;
-    this.commitFallback = undefined;
-    const failed = this.active;
-    if (failed && failed !== previous && this.gl && !this.gl.isContextLost()) {
-      this.deletePresentation(this.gl, failed);
+    if (mutation) {
+      const failedPresentations = uniquePresentations(mutation.added);
+      this.restoreResidencyState(mutation.previous);
+      if (this.gl && !this.gl.isContextLost()) {
+        for (const failed of failedPresentations) {
+          if (!this.presentationIsReferenced(failed)) this.deletePresentation(this.gl, failed);
+        }
+      }
     }
-    this.active = previous;
-    this.fallback = previousFallback;
+    this.pendingResidencyMutation = null;
     this.paintReceipt = undefined;
     const waiter = this.paintWaiter;
     this.paintWaiter = null;
@@ -815,11 +1190,11 @@ export class NationalGridLayer implements CustomLayerInterface {
   private beginRecovery() {
     if (this.recovering) return;
     this.recovering = true;
-    const interruptedPrevious = this.pendingPaint?.previous ?? this.commitPrevious;
-    const interruptedFallback = this.pendingPaint?.previousFallback ?? this.commitFallback;
-    if (interruptedPrevious) {
-      this.active = interruptedPrevious;
-      this.fallback = interruptedFallback ?? null;
+    const interruptedMutation = this.pendingPaint?.mutation
+      ?? this.pendingResidencyMutation
+      ?? this.awaitingExternalCommit?.mutation;
+    if (interruptedMutation) {
+      this.restoreResidencyState(interruptedMutation.previous);
       const waiter = this.paintWaiter;
       this.paintWaiter = null;
       if (waiter) {
@@ -828,8 +1203,8 @@ export class NationalGridLayer implements CustomLayerInterface {
       }
     }
     this.pendingPaint = null;
-    this.commitPrevious = undefined;
-    this.commitFallback = undefined;
+    this.pendingResidencyMutation = null;
+    this.awaitingExternalCommit = null;
     this.contextEpoch += 1;
     this.status = "recovering";
     this.paintReceipt = undefined;
@@ -839,7 +1214,10 @@ export class NationalGridLayer implements CustomLayerInterface {
 
   private dropGpuHandlesForLostContext() {
     this.rehydrationToken += 1;
-    for (const presentation of [this.active, this.fallback, this.staging]) {
+    for (const presentation of uniquePresentations([
+      ...this.allResidentPresentations(),
+      ...(this.staging ? [this.staging] : []),
+    ])) {
       if (!presentation) continue;
       for (const chunk of presentation.chunks.values()) chunk.texture = null;
     }
@@ -899,19 +1277,21 @@ export class NationalGridLayer implements CustomLayerInterface {
     this.contextListenersAttached = false;
   }
 
-  private currentGpuBytes() {
-    const active = this.active
-      ? residentGpuBytes(this.active)
-      : 0;
-    const fallback = this.fallback && this.fallback !== this.active
-      ? residentGpuBytes(this.fallback)
-      : 0;
-    const staging = this.staging
-      ? residentGpuBytes(this.staging)
-      : 0;
+  private currentGpuBytes(extraPresentations: readonly PresentationResources[] = []) {
+    const owned = uniquePresentations([
+      ...this.allResidentPresentations(),
+      ...(this.staging ? [this.staging] : []),
+      ...(this.pendingResidencyMutation?.retireOnSuccess ?? []),
+      ...(this.awaitingExternalCommit?.mutation.retireOnSuccess ?? []),
+      ...extraPresentations,
+    ]);
+    const resident = owned.reduce(
+      (total, presentation) => total + residentGpuBytes(presentation),
+      0,
+    );
     const shared = (this.paletteTexture ? PALETTE_WIDTH * 4 : 0)
       + (this.quadBuffer ? 12 * 4 : 0);
-    return active + fallback + staging + shared;
+    return resident + shared;
   }
 
   private fail(error: unknown) {
@@ -929,6 +1309,66 @@ export class NationalGridLayer implements CustomLayerInterface {
 
   private emit() {
     this.options.onSnapshot?.(this.getSnapshot());
+  }
+}
+
+function cloneResidents(
+  residents: Map<string, ResidentObservation>,
+): Map<string, ResidentObservation> {
+  return new Map(
+    [...residents].map(([observationId, resident]) => [
+      observationId,
+      { ...resident },
+    ]),
+  );
+}
+
+function presentationsFromResidents(
+  residents: Map<string, ResidentObservation>,
+): PresentationResources[] {
+  const presentations: PresentationResources[] = [];
+  for (const resident of residents.values()) {
+    if (resident.common) presentations.push(resident.common);
+    if (resident.detail) presentations.push(resident.detail);
+  }
+  return uniquePresentations(presentations);
+}
+
+function uniquePresentations(
+  presentations: readonly PresentationResources[],
+): PresentationResources[] {
+  return presentations.filter((presentation, index) => presentations.indexOf(presentation) === index);
+}
+
+function presentationFromResidents(
+  residents: Map<string, ResidentObservation>,
+  observationId: string,
+  presentationFactor: number,
+): PresentationResources {
+  const resident = residents.get(observationId);
+  const presentation = presentationFactor === 4
+    ? resident?.common
+    : resident?.detail?.manifest.presentationFactor === presentationFactor
+      ? resident.detail
+      : null;
+  if (!presentation || !presentationIsResident(presentation)) {
+    throw new Error(
+      `National observation ${observationId} is not complete at factor ${presentationFactor}`,
+    );
+  }
+  return presentation;
+}
+
+function validateResidentTimeline(
+  timelineObservationIds: readonly string[],
+  selectedObservationId: string,
+) {
+  if (timelineObservationIds.length < 1 || timelineObservationIds.length > 20) {
+    throw new Error("National resident timeline must contain 1 to 20 observations");
+  }
+  const unique = new Set(timelineObservationIds);
+  if (unique.size !== timelineObservationIds.length || !unique.has(selectedObservationId)) {
+    throw new Error("National resident timeline and selection must be unique and consistent");
   }
 }
 
@@ -954,10 +1394,103 @@ function residentGpuBytes(presentation: PresentationResources): number {
   return bytes;
 }
 
-function uploadRawTexture(gl: WebGL2RenderingContext, chunk: PackedGridChunk): WebGLTexture {
-  clearPriorWebGlErrors(gl);
+// A 256-cell chunk plus halos is allocated separately, then filled across
+// three animation frames. This leaves headroom for texture state restoration
+// inside the 4 ms budget instead of treating one whole chunk as atomic work.
+const TEXTURE_UPLOAD_ROWS_PER_SLICE = 96;
+
+async function uploadRawTextureTimeSliced(
+  gl: WebGL2RenderingContext,
+  chunk: PackedGridChunk,
+  uploadBudgetMs: number,
+  shouldContinue: () => boolean,
+  diagnosticLabel: string,
+): Promise<{ texture: WebGLTexture; maximumSliceMs: number }> {
+  const allocationStarted = performance.now();
   const texture = gl.createTexture();
   if (!texture) throw new Error("National renderer could not allocate a chunk texture");
+  let maximumSliceMs = 0;
+  let nextRow = 0;
+  try {
+    if (!shouldContinue()) throw new Error(`${diagnosticLabel} was cancelled`);
+    withBoundRawTexture(gl, texture, () => {
+      clearPriorWebGlErrors(gl);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.R16UI,
+        chunk.descriptor.haloWidth,
+        chunk.descriptor.haloHeight,
+        0,
+        gl.RED_INTEGER,
+        gl.UNSIGNED_SHORT,
+        null,
+      );
+      const error = gl.getError();
+      if (error !== gl.NO_ERROR) throw new Error(`National chunk texture allocation failed (GL ${error})`);
+    });
+    const allocationElapsed = performance.now() - allocationStarted;
+    if (allocationElapsed > uploadBudgetMs) {
+      throw new Error(
+        `${diagnosticLabel} allocation used ${allocationElapsed.toFixed(3)} ms, exceeding the ${uploadBudgetMs} ms frame budget`,
+      );
+    }
+    maximumSliceMs = allocationElapsed;
+    await nextAnimationFrame();
+    while (nextRow < chunk.descriptor.haloHeight) {
+      if (!shouldContinue()) throw new Error(`${diagnosticLabel} was cancelled`);
+      const rowCount = Math.min(
+        TEXTURE_UPLOAD_ROWS_PER_SLICE,
+        chunk.descriptor.haloHeight - nextRow,
+      );
+      const started = performance.now();
+      withBoundRawTexture(gl, texture, () => {
+        clearPriorWebGlErrors(gl);
+        const firstValue = nextRow * chunk.descriptor.haloWidth;
+        const values = chunk.rawCodes.subarray(
+          firstValue,
+          firstValue + rowCount * chunk.descriptor.haloWidth,
+        );
+        gl.texSubImage2D(
+          gl.TEXTURE_2D,
+          0,
+          0,
+          nextRow,
+          chunk.descriptor.haloWidth,
+          rowCount,
+          gl.RED_INTEGER,
+          gl.UNSIGNED_SHORT,
+          values,
+        );
+        const error = gl.getError();
+        if (error !== gl.NO_ERROR) throw new Error(`National chunk texture upload failed (GL ${error})`);
+      });
+      const elapsed = performance.now() - started;
+      if (elapsed > uploadBudgetMs) {
+        throw new Error(
+          `${diagnosticLabel} used ${elapsed.toFixed(3)} ms, exceeding the ${uploadBudgetMs} ms frame budget`,
+        );
+      }
+      maximumSliceMs = Math.max(maximumSliceMs, elapsed);
+      nextRow += rowCount;
+      if (nextRow < chunk.descriptor.haloHeight) await nextAnimationFrame();
+    }
+    return { texture, maximumSliceMs };
+  } catch (error) {
+    gl.deleteTexture(texture);
+    throw error;
+  }
+}
+
+function withBoundRawTexture(
+  gl: WebGL2RenderingContext,
+  texture: WebGLTexture,
+  operation: () => void,
+): void {
   const previousActive = gl.getParameter(gl.ACTIVE_TEXTURE) as number;
   const previousUnpack = gl.getParameter(gl.UNPACK_ALIGNMENT) as number;
   gl.activeTexture(gl.TEXTURE0);
@@ -965,27 +1498,7 @@ function uploadRawTexture(gl: WebGL2RenderingContext, chunk: PackedGridChunk): W
   try {
     gl.bindTexture(gl.TEXTURE_2D, texture);
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 2);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texImage2D(
-      gl.TEXTURE_2D,
-      0,
-      gl.R16UI,
-      chunk.descriptor.haloWidth,
-      chunk.descriptor.haloHeight,
-      0,
-      gl.RED_INTEGER,
-      gl.UNSIGNED_SHORT,
-      chunk.rawCodes,
-    );
-    const error = gl.getError();
-    if (error !== gl.NO_ERROR) throw new Error(`National chunk texture upload failed (GL ${error})`);
-    return texture;
-  } catch (error) {
-    gl.deleteTexture(texture);
-    throw error;
+    operation();
   } finally {
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, previousUnpack);
     gl.activeTexture(gl.TEXTURE0);
@@ -1179,6 +1692,20 @@ function receiptMatches(
     && receipt.presentationFactor === resources.manifest.presentationFactor
     && receipt.coverageVersion === resources.coverage.version
     && receipt.contextEpoch === contextEpoch;
+}
+
+function sameReceiptIdentity(
+  left: NationalPaintReceipt,
+  right: NationalPaintReceipt,
+): boolean {
+  return left.generation === right.generation
+    && left.observationId === right.observationId
+    && left.observationTimeUnixMs === right.observationTimeUnixMs
+    && left.contentSha256 === right.contentSha256
+    && left.presentationFactor === right.presentationFactor
+    && left.coverageVersion === right.coverageVersion
+    && left.contextEpoch === right.contextEpoch
+    && left.drawSequence === right.drawSequence;
 }
 
 function nextAnimationFrame(): Promise<void> {
