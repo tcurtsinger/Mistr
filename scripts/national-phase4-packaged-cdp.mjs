@@ -1,10 +1,14 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { CdpClient, fetchJsonWithTimeout, openWebSocketWithTimeout } from "./cdp-client.mjs";
-import { validateNationalPhase4Acceptance } from "./national-phase4-packaged-validation.mjs";
+import {
+  validateNationalPartialPlaybackChrome,
+  validateNationalPhase4Acceptance,
+} from "./national-phase4-packaged-validation.mjs";
 
 const port = Number(process.env.MISTR_CDP_PORT ?? 9344);
 const output = resolve(process.env.MISTR_NATIONAL_PHASE4_OUTPUT ?? "artifacts/national-phase-4");
+const chromeOnly = process.env.MISTR_NATIONAL_CHROME_ONLY === "1";
 if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) throw new Error("invalid CDP port");
 
 await mkdir(output, { recursive: true });
@@ -28,6 +32,76 @@ try {
 
   const startedAt = new Date().toISOString();
   await evaluate(serialized("window.__MISTR_NATIONAL_PHASE4__.startNational()"), true, 300_000);
+  await evaluate(
+    serialized("window.__MISTR_NATIONAL_PHASE4__.waitForHistory(4, 600000)"),
+    true,
+    660_000,
+  );
+  const partialPeak = await evaluate(
+    serialized("window.__MISTR_NATIONAL_PHASE3__.peak()"),
+    true,
+    60_000,
+  );
+  await evaluate(
+    serialized(`window.__MISTR_NATIONAL_PHASE4__.inspect(${partialPeak.longitude}, ${partialPeak.latitude})`),
+    true,
+    60_000,
+  );
+  await evaluate("window.__MISTR_NATIONAL_PHASE4__.play()", true, 60_000);
+  await waitForReport(
+    "report.playback?.playing===true && report.history?.retained?.length>=4 && report.history.retained.length<20",
+    60_000,
+  );
+  let partialPlaybackChrome = await observePlaybackChrome(1_500);
+  const partialPlaybackScreenshot = await captureScreenshot();
+  const compactScreenshots = [];
+  if (chromeOnly) {
+    const compactViewports = [];
+    for (const [width, height] of [[878, 640], [720, 540]]) {
+      await call("Browser.setWindowBounds", {
+        windowId: window.result.windowId,
+        bounds: { width, height, windowState: "normal" },
+      });
+      await delay(300);
+      compactViewports.push(await observePlaybackChrome(750));
+      compactScreenshots.push({ width, data: await captureScreenshot() });
+    }
+    partialPlaybackChrome = { ...partialPlaybackChrome, compactViewports };
+  }
+  const partialPlaybackFailures = validateNationalPartialPlaybackChrome(partialPlaybackChrome);
+  const partialPlaybackReport = {
+    schemaVersion: 1,
+    startedAt,
+    completedAt: new Date().toISOString(),
+    userAgent: await evaluate("navigator.userAgent"),
+    partialPlaybackChrome,
+    failures: partialPlaybackFailures,
+    status: partialPlaybackFailures.length === 0 ? "PASS" : "FAIL",
+  };
+  await writeFile(
+    resolve(output, "partial-playback-chrome-report.json"),
+    `${JSON.stringify(partialPlaybackReport, null, 2)}\n`,
+  );
+  await writeFile(
+    resolve(output, "national-partial-playback-chrome-4k.png"),
+    Buffer.from(partialPlaybackScreenshot, "base64"),
+  );
+  for (const screenshot of compactScreenshots) {
+    await writeFile(
+      resolve(output, `national-partial-playback-chrome-${screenshot.width}.png`),
+      Buffer.from(screenshot.data, "base64"),
+    );
+  }
+  if (chromeOnly) {
+    console.log(JSON.stringify(partialPlaybackReport, null, 2));
+    if (partialPlaybackFailures.length > 0) process.exitCode = 1;
+  } else {
+  await evaluate("window.__MISTR_NATIONAL_PHASE4__.pause()");
+  await evaluate(
+    serialized("window.__MISTR_NATIONAL_PHASE4__.waitForInspectionIdle()"),
+    true,
+    60_000,
+  );
   const partialHistoryControls = await observePartialHistoryControls();
   await evaluate(
     "window.__MISTR_NATIONAL_PHASE4__.beginResidentEvidence()",
@@ -164,6 +238,7 @@ try {
     startedAt,
     completedAt: new Date().toISOString(),
     userAgent: await evaluate("navigator.userAgent"),
+    partialPlaybackChrome,
     partialHistoryControls,
     history,
     transitions,
@@ -186,6 +261,7 @@ try {
   console.log(JSON.stringify({
     status: report.status,
     retainedCount: history?.history?.retained?.length,
+    partialPlaybackBarMaxRectDelta: partialPlaybackChrome?.playbackBarMaxRectDelta,
     partialHistoryEnabledStagingSamples: partialHistoryControls?.enabledStableStagingSampleCount,
     historyMinutes: ((history?.history?.retained?.at(-1)?.observationTimeUnixMs ?? 0)
       - (history?.history?.retained?.[0]?.observationTimeUnixMs ?? 0)) / 60_000,
@@ -208,6 +284,7 @@ try {
     failures: report.failures,
   }, null, 2));
   if (report.failures.length > 0) process.exitCode = 1;
+  }
 } finally {
   if (residentEvidenceHeld) {
     await evaluate("window.__MISTR_NATIONAL_PHASE4__?.endResidentEvidence()").catch(() => {});
@@ -286,6 +363,65 @@ async function observePartialHistoryControls() {
     }
     throw new Error('National history did not reach 20 observations while controls were observed');
   })()`), true, 660_000);
+}
+
+async function observePlaybackChrome(durationMs) {
+  return evaluate(serialized(`(async()=>{
+    const rect=element=>{
+      const value=element?.getBoundingClientRect();
+      return value?{left:value.left,top:value.top,width:value.width,height:value.height}:null;
+    };
+    const samples=[];
+    const deadline=performance.now()+${durationMs};
+    while(performance.now()<deadline){
+      const report=window.__MISTR_NATIONAL_PHASE4__.report();
+      const sample=document.querySelector('.sample-readout');
+      samples.push({
+        playbackBar:rect(document.querySelector('.playback-bar')),
+        timeline:rect(document.querySelector('.timeline')),
+        telemetry:rect(document.querySelector('.telemetry-readouts')),
+        sampleReadout:rect(sample),
+        sampleText:sample?.textContent?.trim()??'',
+        sampleState:sample?.dataset.inspectionState??null,
+        sampleBusy:sample?.getAttribute('aria-busy')??null,
+        announcement:document.querySelector('.radar-announcement')?.textContent?.replace(/\s+/g,' ').trim()??'',
+        buttonDisabled:document.querySelector('.playback-toggle')?.disabled??null,
+        loadingNotice:/Loading recent observations/i.test(document.querySelector('.radar-notice')?.textContent??''),
+        playing:report?.playback?.playing===true,
+        retainedCount:report?.history?.retained?.length??0,
+      });
+      await new Promise(resolve=>setTimeout(resolve,16));
+    }
+    const maxRectDelta=key=>{
+      const baseline=samples[0]?.[key];
+      if(!baseline||samples.some(sample=>!sample[key])) return null;
+      return Math.max(...samples.flatMap(sample=>[
+        Math.abs(sample[key].left-baseline.left),
+        Math.abs(sample[key].top-baseline.top),
+        Math.abs(sample[key].width-baseline.width),
+        Math.abs(sample[key].height-baseline.height),
+      ]));
+    };
+    const pending=samples.filter(sample=>sample.sampleState==='pending');
+    return {
+      innerWidth,
+      innerHeight,
+      sampleCount:samples.length,
+      playingSampleCount:samples.filter(sample=>sample.playing).length,
+      partialHistorySampleCount:samples.filter(sample=>sample.retainedCount>=2&&sample.retainedCount<20).length,
+      loadingNoticeSampleCount:samples.filter(sample=>sample.loadingNotice).length,
+      buttonDisabledSampleCount:samples.filter(sample=>sample.buttonDisabled!==false).length,
+      falseOutsideCoverageSampleCount:samples.filter(sample=>sample.sampleText==='OUTSIDE RADAR COVERAGE').length,
+      pendingSampleCount:pending.length,
+      pendingPresentationMismatchCount:pending.filter(sample=>sample.sampleText!=='--.- dBZ'||sample.sampleBusy!=='true').length,
+      playbackBarMaxRectDelta:maxRectDelta('playbackBar'),
+      timelineMaxRectDelta:maxRectDelta('timeline'),
+      telemetryMaxRectDelta:maxRectDelta('telemetry'),
+      sampleReadoutMaxRectDelta:maxRectDelta('sampleReadout'),
+      distinctSampleTexts:[...new Set(samples.map(sample=>sample.sampleText))],
+      distinctAnnouncements:[...new Set(samples.map(sample=>sample.announcement))],
+    };
+  })()`), true, durationMs + 30_000);
 }
 
 async function captureScreenshot() {

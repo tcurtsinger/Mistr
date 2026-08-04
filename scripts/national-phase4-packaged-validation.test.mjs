@@ -50,6 +50,36 @@ describe("National Phase 4 packaged acceptance", () => {
       "partial-history playback control availability",
     );
   });
+
+  it("rejects playback-time telemetry shifts or false coverage placeholders", () => {
+    const report = validReport();
+    report.partialPlaybackChrome.timelineMaxRectDelta = 18;
+    report.partialPlaybackChrome.falseOutsideCoverageSampleCount = 4;
+    report.partialPlaybackChrome.distinctAnnouncements.push("11.5 dBZ.");
+    expect(validateNationalPhase4Acceptance(report)).toContain(
+      "stable partial-history playback chrome",
+    );
+  });
+
+  it("rejects unstable compact playback chrome when viewport evidence is present", () => {
+    const report = validReport();
+    report.partialPlaybackChrome.compactViewports = [
+      { ...report.partialPlaybackChrome, innerWidth: 878, innerHeight: 640 },
+      { ...report.partialPlaybackChrome, innerWidth: 720, innerHeight: 540 },
+    ];
+    report.partialPlaybackChrome.compactViewports[1].sampleReadoutMaxRectDelta = 4;
+    expect(validateNationalPhase4Acceptance(report)).toContain(
+      "stable compact partial-history playback chrome",
+    );
+  });
+
+  it("fails closed on malformed compact viewport evidence", () => {
+    const report = validReport();
+    report.partialPlaybackChrome.compactViewports = null;
+    expect(validateNationalPhase4Acceptance(report)).toContain(
+      "stable compact partial-history playback chrome",
+    );
+  });
 });
 
 function validReport() {
@@ -98,6 +128,24 @@ function validReport() {
     };
   };
   return {
+    partialPlaybackChrome: {
+      innerWidth: 3_840,
+      innerHeight: 2_160,
+      sampleCount: 90,
+      playingSampleCount: 90,
+      partialHistorySampleCount: 90,
+      loadingNoticeSampleCount: 90,
+      buttonDisabledSampleCount: 0,
+      falseOutsideCoverageSampleCount: 0,
+      pendingSampleCount: 12,
+      pendingPresentationMismatchCount: 0,
+      playbackBarMaxRectDelta: 0,
+      timelineMaxRectDelta: 0,
+      telemetryMaxRectDelta: 0,
+      sampleReadoutMaxRectDelta: 0,
+      distinctSampleTexts: ["--.- dBZ", "11.5 dBZ"],
+      distinctAnnouncements: ["PLAYING"],
+    },
     partialHistoryControls: {
       partialSampleCount: 240,
       buttonFoundSampleCount: 240,

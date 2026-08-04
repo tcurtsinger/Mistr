@@ -1,5 +1,6 @@
 import { isSupportedRadarSite } from "../data/radarSites";
 import type { RadarDisplayMode } from "../radar-renderer/RadarCustomLayer";
+import type { GateInterrogation } from "../radar-renderer/cpuModel";
 
 export interface TimelineFrame {
   observationId: string;
@@ -26,6 +27,15 @@ export interface RendererStatusLike {
   error?: string;
 }
 
+export type InspectionState = "idle" | "pending" | "settled" | "outside" | "unavailable";
+
+export interface InspectionReadoutPresentation {
+  accessibleLabel: string;
+  busy: boolean;
+  kind: "hint" | "pending" | "status" | "value";
+  label: string;
+}
+
 export type LiveHistoryStatus = "loading" | "partial" | "full";
 
 export function normalizeRadarDisplayMode(value: string | null | undefined): RadarDisplayMode {
@@ -34,6 +44,72 @@ export function normalizeRadarDisplayMode(value: string | null | undefined): Rad
 
 export function radarDisplayModeLabel(mode: RadarDisplayMode): "Smooth" | "Native" {
   return mode === "smooth" ? "Smooth" : "Native";
+}
+
+export function inspectionReadoutPresentation(
+  state: InspectionState,
+  interrogation: GateInterrogation | null,
+): InspectionReadoutPresentation {
+  if (state === "idle") {
+    return {
+      accessibleLabel: "No radar point selected.",
+      busy: false,
+      kind: "hint",
+      label: "CLICK TO INSPECT",
+    };
+  }
+  if (state === "pending") {
+    return {
+      accessibleLabel: "Radar sample updating.",
+      busy: true,
+      kind: "pending",
+      label: "--.- dBZ",
+    };
+  }
+  if (state === "outside") {
+    return {
+      accessibleLabel: "Selected point is outside radar coverage.",
+      busy: false,
+      kind: "status",
+      label: "OUT OF RANGE",
+    };
+  }
+  if (state === "unavailable" || !interrogation) {
+    return {
+      accessibleLabel: "Radar sample is temporarily unavailable.",
+      busy: false,
+      kind: "status",
+      label: "UNAVAILABLE",
+    };
+  }
+  if (interrogation.status === "valid" && interrogation.value !== null) {
+    return {
+      accessibleLabel: `${interrogation.value.toFixed(1)} ${interrogation.units}.`,
+      busy: false,
+      kind: "value",
+      label: `${interrogation.value.toFixed(1)} ${interrogation.units}`,
+    };
+  }
+  if (interrogation.status === "valid") {
+    return {
+      accessibleLabel: "Radar sample is temporarily unavailable.",
+      busy: false,
+      kind: "status",
+      label: "UNAVAILABLE",
+    };
+  }
+  const status = ({
+    below_threshold: ["BELOW THRESHOLD", "Radar value is below the reporting threshold."],
+    range_folded: ["RANGE FOLDED", "Radar value is range folded."],
+    missing: ["DATA MISSING", "Radar data is missing at the selected point."],
+    no_coverage: ["NO COVERAGE", "No radar coverage exists at the selected point."],
+  } as const)[interrogation.status];
+  return {
+    accessibleLabel: status[1],
+    busy: false,
+    kind: "status",
+    label: status[0],
+  };
 }
 
 export function normalizeRadarSite(value: string | null | undefined, fallback = "KTLX"): string {

@@ -3,6 +3,7 @@ const HARD_CEILING_BYTES = 256 * 1024 * 1024;
 
 export function validateNationalPhase4Acceptance(report) {
   const failures = [];
+  failures.push(...validateNationalPartialPlaybackChrome(report.partialPlaybackChrome));
   const partialControls = report.partialHistoryControls;
   if (
     !(partialControls?.partialSampleCount > 0)
@@ -161,6 +162,24 @@ export function validateNationalPhase4Acceptance(report) {
   return failures;
 }
 
+export function validateNationalPartialPlaybackChrome(chrome) {
+  const failures = [];
+  if (!stablePlaybackChrome(chrome)) failures.push("stable partial-history playback chrome");
+  if (chrome?.compactViewports !== undefined) {
+    const expected = [[878, 640], [720, 540]];
+    if (
+      !Array.isArray(chrome.compactViewports)
+      || chrome.compactViewports.length !== expected.length
+      || chrome.compactViewports.some((viewport, index) => (
+        viewport?.innerWidth !== expected[index][0]
+        || viewport?.innerHeight !== expected[index][1]
+        || !stablePlaybackChrome(viewport)
+      ))
+    ) failures.push("stable compact partial-history playback chrome");
+  }
+  return failures;
+}
+
 function observationId(observation) {
   return `${observation?.observationTimeUnixMs}:${observation?.contentSha256}`;
 }
@@ -171,6 +190,29 @@ function strictlyIncreasing(values) {
 
 function sameMembers(left, right) {
   return left.length === right.length && left.every((value) => right.includes(value));
+}
+
+function stableRect(maxDelta) {
+  return Number.isFinite(maxDelta) && maxDelta <= 0.25;
+}
+
+function stablePlaybackChrome(chrome) {
+  return chrome?.sampleCount >= 30
+    && chrome.playingSampleCount === chrome.sampleCount
+    && chrome.partialHistorySampleCount === chrome.sampleCount
+    && chrome.loadingNoticeSampleCount > 0
+    && chrome.buttonDisabledSampleCount === 0
+    && chrome.falseOutsideCoverageSampleCount === 0
+    && chrome.pendingSampleCount > 0
+    && chrome.pendingPresentationMismatchCount === 0
+    && chrome.distinctSampleTexts?.includes("--.- dBZ")
+    && chrome.distinctSampleTexts.some((label) => /^-?\d+\.\d dBZ$/.test(label))
+    && stableRect(chrome.playbackBarMaxRectDelta)
+    && stableRect(chrome.timelineMaxRectDelta)
+    && stableRect(chrome.telemetryMaxRectDelta)
+    && stableRect(chrome.sampleReadoutMaxRectDelta)
+    && chrome.distinctAnnouncements?.length === 1
+    && ["", "PLAYING"].includes(chrome.distinctAnnouncements[0]);
 }
 
 function zeroActivity(activity) {

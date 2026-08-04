@@ -13,8 +13,10 @@ import type { GateInterrogation } from "../radar-renderer/cpuModel";
 import type { RadarDisplayMode } from "../radar-renderer/RadarCustomLayer";
 import {
   radarDisplayModeLabel,
+  inspectionReadoutPresentation,
   timelinePosition,
   type FrameAgePresentation,
+  type InspectionState,
 } from "./radarChromeModel";
 
 export interface RadarChromeProps {
@@ -26,7 +28,7 @@ export interface RadarChromeProps {
   frameCount: number;
   frameIndex: number;
   interrogation: GateInterrogation | null;
-  inspectionSelected: boolean;
+  inspectionState: InspectionState;
   onRecenter(): void;
   onSelectNational(): void;
   onSelectDisplayMode(mode: RadarDisplayMode): void;
@@ -60,7 +62,7 @@ export function RadarChrome({
   frameCount,
   frameIndex,
   interrogation,
-  inspectionSelected,
+  inspectionState,
   onRecenter,
   onSelectNational,
   onSelectDisplayMode,
@@ -178,11 +180,7 @@ export function RadarChrome({
     closePanel();
   };
   const timestamp = formatScanTimestamp(displayedAtUnixMs);
-  const sample = formatSample(interrogation);
-  const sampleDisplay = sample
-    ?? (inspectionSelected ? "OUTSIDE RADAR COVERAGE" : "CLICK TO INSPECT");
-  const sampleAnnouncement = sample
-    ?? (inspectionSelected ? "Outside radar coverage." : "No radar point selected.");
+  const sample = inspectionReadoutPresentation(inspectionState, interrogation);
   const availableToolbarTools: ToolbarTool[] = [
     ...(siteSelectionReady ? ["site" as const] : []),
     ...(recenterReady ? ["recenter" as const] : []),
@@ -352,16 +350,24 @@ export function RadarChrome({
           </div>
         </div>
         <span aria-hidden="true" className="instrument-divider" />
-        <output
-          aria-label={frameAge.accessibleLabel}
-          className={`frame-age frame-age--${frameAge.kind}`}
-          data-frame-age-kind={frameAge.kind}
-        >
-          {frameAge.label}
-        </output>
-        <output className={`sample-readout${sample ? " sample-readout--active" : ""}`}>
-          {sampleDisplay}
-        </output>
+        <div className="telemetry-readouts">
+          <output
+            aria-label={frameAge.accessibleLabel}
+            className={`frame-age frame-age--${frameAge.kind}`}
+            data-frame-age-kind={frameAge.kind}
+          >
+            {frameAge.label}
+          </output>
+          <span aria-hidden="true" className="instrument-divider" />
+          <output
+            aria-busy={sample.busy}
+            aria-label={sample.accessibleLabel}
+            className={`sample-readout sample-readout--${sample.kind}`}
+            data-inspection-state={inspectionState}
+          >
+            {sample.label}
+          </output>
+        </div>
         </section>
       )}
 
@@ -374,12 +380,14 @@ export function RadarChrome({
         </p>
       ) : null}
 
-      <p aria-live="polite" className="sr-only">
+      <p aria-live="polite" className="sr-only radar-announcement">
         {radarNotice || preparingFailed
           ? ""
           : preparingLabel
           ? `Preparing radar. ${preparingLabel}.`
-          : `${playbackStatus}. ${sampleAnnouncement}`}
+          : playing
+            ? playbackStatus
+            : `${playbackStatus}. ${sample.accessibleLabel}`}
       </p>
     </div>
   );
@@ -660,14 +668,6 @@ function formatScanTimestamp(unixMs: number | undefined) {
     zone,
     accessible: `${dateText} ${timeText} ${zone}`.trim(),
   };
-}
-
-function formatSample(interrogation: GateInterrogation | null): string | null {
-  if (!interrogation) return null;
-  if (interrogation.status !== "valid" || interrogation.value === null) {
-    return interrogation.status.replaceAll("_", " ").toUpperCase();
-  }
-  return `${interrogation.value.toFixed(1)} ${interrogation.units}`;
 }
 
 function PlayIcon() {

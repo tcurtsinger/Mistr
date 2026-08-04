@@ -141,6 +141,7 @@ import {
   playbackPresentation,
   radarInitializationLabel,
   rendererFailureMessage,
+  type InspectionState,
   type LiveHistoryStatus,
   type TimelineFrame,
 } from "./ui/radarChromeModel";
@@ -207,7 +208,7 @@ export function App() {
     display: initialLiveDisplay(),
   });
   const [interrogation, setInterrogation] = useState<GateInterrogation | null>(null);
-  const [inspectionSelected, setInspectionSelected] = useState(false);
+  const [inspectionState, setInspectionState] = useState<InspectionState>("idle");
   const [paintedSourceKind, setPaintedSourceKind] = useState<RadarSweepCpuModel["sourceKind"]>(
     "nexrad_level2_archive_ii",
   );
@@ -653,7 +654,9 @@ export function App() {
             const paintedModel = modelsById.get(receipt.observationId);
             if (paintedModel) {
               interrogationObservationRef.current = receipt.observationId;
-              setInterrogation(interrogateLngLat(paintedModel, point));
+              const nextInterrogation = interrogateLngLat(paintedModel, point);
+              setInterrogation(nextInterrogation);
+              setInspectionState(nextInterrogation ? "settled" : "outside");
             }
           }
           publish({
@@ -705,12 +708,12 @@ export function App() {
             || renderer.paintReceipt.observationId !== paintedTruth.observationId
           ) {
             setInterrogation(null);
-            setInspectionSelected(false);
+            setInspectionState("idle");
             return;
           }
           inspectionPointRef.current = point;
           interrogationObservationRef.current = null;
-          setInspectionSelected(true);
+          setInspectionState("pending");
           setInterrogation(null);
           placeInspectionMarker(instance, event.lngLat, inspectionMarkerRef);
           // The shared refresh path also runs for every later playback/scrub
@@ -723,18 +726,19 @@ export function App() {
         if (!paintedModel) {
           setInterrogation(null);
           latestNationalInspection = null;
-          setInspectionSelected(false);
+          setInspectionState("idle");
           return;
         }
-        setInspectionSelected(true);
-        setInterrogation(interrogateLngLat(paintedModel, point));
+        const nextInterrogation = interrogateLngLat(paintedModel, point);
+        setInspectionState(nextInterrogation ? "settled" : "outside");
+        setInterrogation(nextInterrogation);
         inspectionPointRef.current = point;
         interrogationObservationRef.current = paintedModel.observationId;
         placeInspectionMarker(instance, event.lngLat, inspectionMarkerRef);
       };
       instance.on("click", clickHandler);
       setInterrogation(null);
-      setInspectionSelected(false);
+      setInspectionState("idle");
       focusRadar(instance, diagnosticModel);
       globalThis.__MISTR_PHASE4__ = {
         report: () => ({
@@ -919,7 +923,7 @@ export function App() {
             inspectionPointRef.current = null;
             interrogationObservationRef.current = null;
             setInterrogation(null);
-            setInspectionSelected(false);
+            setInspectionState("idle");
           }
           if (!prependingHistory) {
             liveDisplay = publishLiveDisplay(
@@ -1223,7 +1227,7 @@ export function App() {
         liveDisplay = report.display;
         publishPhase5(report);
         setInterrogation(null);
-        setInspectionSelected(false);
+        setInspectionState("idle");
         inspectionMarkerRef.current?.remove();
         inspectionMarkerRef.current = null;
         inspectionPointRef.current = null;
@@ -1443,9 +1447,17 @@ export function App() {
           ) return null;
           latestNationalInspection = lookup;
           setInterrogation(nationalPointInterrogation(lookup));
+          setInspectionState("settled");
           return lookup;
-        } catch {
-          if (inspectionRequestRef.current === request.inspectionId) setInterrogation(null);
+        } catch (error) {
+          if (inspectionRequestRef.current === request.inspectionId) {
+            setInterrogation(null);
+            setInspectionState(
+              nationalHistoryErrorCode(error) === "national_point_outside_coverage"
+                ? "outside"
+                : "unavailable",
+            );
+          }
           return null;
         }
       });
@@ -1468,6 +1480,7 @@ export function App() {
         interrogationObservationRef.current = receipt.observationId;
         latestNationalInspection = null;
         setInterrogation(null);
+        setInspectionState("pending");
         const result = await nationalInspectionLookupQueue.enqueue({
           receipt,
           inspectionId,
@@ -2123,7 +2136,7 @@ export function App() {
           setLiveHistoryStatus("loading");
           setInterrogation(null);
           latestNationalInspection = null;
-          setInspectionSelected(false);
+          setInspectionState("idle");
           inspectionMarkerRef.current?.remove();
           inspectionMarkerRef.current = null;
           inspectionPointRef.current = null;
@@ -2288,6 +2301,7 @@ export function App() {
               Math.floor(firstValid / model.gateCount),
               firstValid % model.gateCount,
             ));
+            setInspectionState("settled");
           }
           focusRadar(instance, model);
           return phase6Report();
@@ -2747,7 +2761,7 @@ export function App() {
           if (!receipt) throw new Error("National renderer has no authoritative receipt");
           inspectionPointRef.current = { longitude, latitude };
           interrogationObservationRef.current = null;
-          setInspectionSelected(true);
+          setInspectionState("pending");
           return refreshNationalInterrogation(receipt);
         },
         async waitForInspection(observationId, timeoutMs = 60_000) {
@@ -3018,7 +3032,7 @@ export function App() {
     setSiteRequestError(null);
     setNationalRequestError(null);
     setInterrogation(null);
-    setInspectionSelected(false);
+    setInspectionState("idle");
     inspectionMarkerRef.current?.remove();
     inspectionMarkerRef.current = null;
     inspectionPointRef.current = null;
@@ -3051,7 +3065,7 @@ export function App() {
     setNationalRequestError(null);
     setSiteRequestError(null);
     setInterrogation(null);
-    setInspectionSelected(false);
+    setInspectionState("idle");
     inspectionMarkerRef.current?.remove();
     inspectionMarkerRef.current = null;
     inspectionPointRef.current = null;
@@ -3106,7 +3120,7 @@ export function App() {
         frameCount={timelineFrames.length}
         frameIndex={frameIndex}
         interrogation={interrogation}
-        inspectionSelected={inspectionSelected}
+        inspectionState={inspectionState}
         onRecenter={recenterRadar}
         onSelectNational={selectNational}
         onSelectDisplayMode={selectDisplayMode}
