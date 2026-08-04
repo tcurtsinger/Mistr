@@ -17,6 +17,8 @@ import {
 import { nationalObservationIdentity } from "./model";
 
 const PALETTE_WIDTH = 1_024;
+export const NATIONAL_GPU_TARGET_BYTES = 200 * 1024 * 1024;
+export const NATIONAL_GPU_HARD_CEILING_BYTES = 256 * 1024 * 1024;
 const PALETTE_MIN_DBZ = -25;
 const PALETTE_MAX_DBZ = 70;
 const DEFAULT_UPLOAD_BUDGET_MS = 4;
@@ -344,7 +346,10 @@ export class NationalGridLayer implements CustomLayerInterface {
         gl.uniform1i(this.uniforms.smooth, this.displayMode === "smooth" ? 1 : 0);
         gl.activeTexture(gl.TEXTURE1);
         gl.bindTexture(gl.TEXTURE_2D, this.paletteTexture);
-        if (this.fallback && this.active.manifest.presentationFactor === 1) {
+        if (
+          this.fallback
+          && presentationUsesCommonFallback(this.active.manifest.presentationFactor)
+        ) {
           this.drawPresentation(gl, this.fallback, this.active.coverage);
         }
         this.drawPresentation(gl, this.active, null);
@@ -571,7 +576,7 @@ export class NationalGridLayer implements CustomLayerInterface {
     this.timelineObservationIds = [...timelineObservationIds];
     this.staging = null;
     const transientGpuBytes = this.currentGpuBytes(retireOnSuccess);
-    if (transientGpuBytes > 256 * 1024 * 1024) {
+    if (transientGpuBytes > NATIONAL_GPU_HARD_CEILING_BYTES) {
       this.restoreResidencyState(previous);
       this.staging = staging;
       throw new Error("National prefetched detail exceeds the 256 MiB hard ceiling");
@@ -624,11 +629,48 @@ export class NationalGridLayer implements CustomLayerInterface {
   }
 
   setPlaybackQualityLock(presentationFactor: number | undefined): void {
-    if (presentationFactor !== undefined && presentationFactor !== 4) {
-      throw new Error("Phase 4 playback quality lock requires the complete factor-4 level");
+    if (
+      presentationFactor !== undefined
+      && presentationFactor !== 4
+      && presentationFactor !== this.finestCompletePlaybackFactor()
+    ) {
+      throw new Error(`National playback factor ${presentationFactor} is not complete for every observation`);
     }
     this.playbackQualityFactor = presentationFactor;
     this.emit();
+  }
+
+  finestCompletePlaybackFactor(): 1 | 2 | 4 {
+    return commonPlaybackDetailFactor(this.residents, this.timelineObservationIds) ?? 4;
+  }
+
+  projectedUniformDetailGpuBytes(
+    observationId: string,
+    presentationFactor: 1 | 2,
+  ): number {
+    const resident = this.residents.get(observationId);
+    const detail = resident?.detail;
+    if (
+      !detail
+      || detail.manifest.presentationFactor !== presentationFactor
+      || !presentationIsResident(detail)
+    ) {
+      throw new Error(
+        `National observation ${observationId} lacks resident factor-${presentationFactor} detail`,
+      );
+    }
+    const commonBytes = this.timelineObservationIds.reduce((total, timelineId) => {
+      const common = this.residents.get(timelineId)?.common;
+      if (!common || !presentationIsResident(common)) {
+        throw new Error(`National observation ${timelineId} lacks complete common residency`);
+      }
+      return total + residentGpuBytes(common);
+    }, 0);
+    const sharedBytes = (this.paletteTexture ? PALETTE_WIDTH * 4 : 0)
+      + (this.quadBuffer ? 12 * 4 : 0);
+    return commonBytes
+      + residentGpuBytes(detail) * this.timelineObservationIds.length
+      + sharedBytes;
   }
 
   async waitForCommonResidency(timeoutMs = 60_000): Promise<void> {
@@ -995,7 +1037,7 @@ export class NationalGridLayer implements CustomLayerInterface {
       retireOnSuccess,
       deferExternalCommit,
     };
-    if (this.currentGpuBytes() > 256 * 1024 * 1024) {
+    if (this.currentGpuBytes() > NATIONAL_GPU_HARD_CEILING_BYTES) {
       this.restoreResidencyState(previous);
       this.pendingResidencyMutation = null;
       this.staging = staging;
@@ -1358,6 +1400,89 @@ export function commonResidencyReadyForSelection(
     && snapshot.paintReceipt !== undefined
     && snapshot.residentObservationIds.length > 0
     && snapshot.commonResidentObservationIds.length === snapshot.residentObservationIds.length;
+}
+
+export function presentationUsesCommonFallback(presentationFactor: number): boolean {
+  return presentationFactor === 1 || presentationFactor === 2;
+}
+
+export function commonResidencyReadyForInteraction(
+  snapshot: Pick<
+    NationalGridRendererSnapshot,
+    | "status"
+    | "mutationAwaitingCommit"
+    | "paintReceipt"
+    | "commonResidentObservationIds"
+  >,
+  retainedObservationCount: number,
+): boolean {
+  return retainedObservationCount > 0
+    && (snapshot.status === "painted" || snapshot.status === "staging")
+    && !snapshot.mutationAwaitingCommit
+    && snapshot.paintReceipt !== undefined
+    && snapshot.commonResidentObservationIds.length === retainedObservationCount;
+}
+
+export interface NationalPlaybackDetailResidency {
+  observationId: string;
+  presentationFactor: number;
+  coverage: NationalViewportCoverage;
+  complete: boolean;
+}
+
+export function completePlaybackDetailFactor(
+  timelineObservationIds: readonly string[],
+  details: readonly NationalPlaybackDetailResidency[],
+): 1 | 2 | undefined {
+  if (timelineObservationIds.length < 1) return undefined;
+  const byObservation = new Map(details.map((detail) => [detail.observationId, detail]));
+  const first = byObservation.get(timelineObservationIds[0]);
+  if (
+    !first?.complete
+    || (first.presentationFactor !== 1 && first.presentationFactor !== 2)
+    || first.coverage.kind !== "viewport"
+  ) return undefined;
+  for (const observationId of timelineObservationIds.slice(1)) {
+    const detail = byObservation.get(observationId);
+    if (
+      !detail?.complete
+      || detail.presentationFactor !== first.presentationFactor
+      || !samePlaybackCoverage(detail.coverage, first.coverage)
+    ) return undefined;
+  }
+  return first.presentationFactor;
+}
+
+function commonPlaybackDetailFactor(
+  residents: Map<string, ResidentObservation>,
+  timelineObservationIds: readonly string[],
+): 1 | 2 | undefined {
+  return completePlaybackDetailFactor(
+    timelineObservationIds,
+    timelineObservationIds.flatMap((observationId) => {
+      const detail = residents.get(observationId)?.detail;
+      return detail
+        ? [{
+            observationId,
+            presentationFactor: detail.manifest.presentationFactor,
+            coverage: detail.coverage,
+            complete: presentationIsResident(detail),
+          }]
+        : [];
+    }),
+  );
+}
+
+function samePlaybackCoverage(
+  left: NationalViewportCoverage,
+  right: NationalViewportCoverage,
+): boolean {
+  return left.kind === "viewport"
+    && right.kind === "viewport"
+    && left.requiredChunkIndices.length === right.requiredChunkIndices.length
+    && left.requiredChunkIndices.every((index, position) => (
+      index === right.requiredChunkIndices[position]
+    ));
 }
 
 function cloneResidents(

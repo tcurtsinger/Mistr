@@ -23,7 +23,10 @@ export interface NationalHistoryWorkingSetResult {
   manifestWireBytes: number;
   chunkWireBytes: number;
   chunkCount: number;
+  projectedGpuBytes: number;
 }
+
+export type NationalDetailPresentationFactor = 1 | 2;
 
 type HistoryTransferClient = Pick<
   PackedSweepTransferClient,
@@ -99,16 +102,17 @@ export class NationalHistoryWorkingSetController {
     timelineObservationIds: readonly string[],
     ownershipCheck: () => void,
     beforeCommit?: () => void | Promise<void>,
+    presentationFactor: NationalDetailPresentationFactor = 1,
   ): Promise<NationalHistoryWorkingSetResult> {
     return this.run(
       observation,
-      1,
+      presentationFactor,
       (manifest, version) => viewportCoverage(manifest, bounds, version),
       ownershipCheck,
       async () => this.layer.commitHistoryStaging(
         timelineObservationIds,
         observationId(observation),
-        1,
+        presentationFactor,
       ),
       beforeCommit,
       true,
@@ -121,10 +125,11 @@ export class NationalHistoryWorkingSetController {
     bounds: GeographicBounds,
     timelineObservationIds: readonly string[],
     ownershipCheck: () => void,
+    presentationFactor: NationalDetailPresentationFactor = 1,
   ): Promise<NationalHistoryWorkingSetResult> {
     return this.run(
       observation,
-      1,
+      presentationFactor,
       (manifest, version) => viewportCoverage(manifest, bounds, version),
       ownershipCheck,
       async () => {
@@ -148,7 +153,7 @@ export class NationalHistoryWorkingSetController {
 
   private run(
     observation: NationalHistoryObservation,
-    presentationFactor: 1 | 4,
+    presentationFactor: NationalDetailPresentationFactor | 4,
     coverageForManifest: (
       manifest: PackedGridManifest,
       coverageVersion: number,
@@ -181,7 +186,7 @@ export class NationalHistoryWorkingSetController {
 
   private async stage(
     observation: NationalHistoryObservation,
-    presentationFactor: 1 | 4,
+    presentationFactor: NationalDetailPresentationFactor | 4,
     coverageForManifest: (
       manifest: PackedGridManifest,
       coverageVersion: number,
@@ -258,6 +263,7 @@ export class NationalHistoryWorkingSetController {
         manifestWireBytes,
         chunkWireBytes,
         chunkCount: descriptors.length,
+        projectedGpuBytes,
       };
     } catch (error) {
       if (deferExternalCommit && receipt) {

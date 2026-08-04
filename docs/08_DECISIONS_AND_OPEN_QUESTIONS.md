@@ -180,9 +180,9 @@
 
 ### D029 — Phase 4 interaction suspends acquisition and locks common quality
 
-**Decision:** Playback and active dragging reserve the resident working set, wait for in-flight acquisition/refinement to settle, and then perform no network, disk, decode, bulk IPC, or texture-upload work. Every transition uses factor 4. Fine factor-1 detail is limited to a paused/settled selected frame and its bounded adjacent temporal window; camera changes during playback atomically remain on the already-complete common factor-4 set.
+**Decision:** Playback and active dragging reserve the resident working set, wait for in-flight acquisition/refinement to settle, and then perform no network, disk, grid decode, bulk IPC, or texture-upload work. At regional zoom, play first prepares the finest complete viewport presentation for every retained frame under the 200 MiB target: factor 1, then factor 2 if required, with factor 4 as the complete-domain fallback. Every transition uses the one locked factor. Camera changes cancel the old viewport work, keep the prior complete paint visible, and re-prepare one all-frame level before playback resumes. Exact point interrogation may continue through its separate latest-only bounded lookup path.
 
-**Reason:** The retained loop must play at normal cadence without I/O stalls or visible coarse/detail alternation, while still permitting exact paused inspection under the 256 MiB hard GPU ceiling.
+**Reason:** The retained loop must play at normal cadence without I/O stalls or visible coarse/detail alternation. User evidence showed that always locking factor 4 at regional zoom made Native visibly blocky and Smooth blurry even when exact viewport detail fit comfortably within the existing budget.
 
 ## 2. Decisions required before implementation
 

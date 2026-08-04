@@ -155,7 +155,7 @@ The source control's accessible name and tooltip follow the observation that act
 
 There is no left-edge application menu or About panel in Alpha. Recenter fits selected-site coverage or the supported CONUS domain according to painted truth. The source and view panels overlay the map, stay anchored to their originating icons, and never appear simultaneously.
 
-The bottom-center playback bar remains stable regardless of panel state. Site and active-branch National operation both use play/pause, direct observation scrubbing, the displayed timestamp, numeric frame age, and the active dBZ sample. National enables transport only after at least two observations are resident; partial backfill is named without blocking usable resident controls. Playback and active scrubbing use the complete all-frame overview quality, while a paused settled selection may refine spatially without changing its time, age, source, or inspection identity. The bar does not display the words `Fresh`, `Stale`, `Playing`, `Paused`, or `Newest`. Green means newest for the active source, even when the newest National mosaic is older than the prior Site scan.
+The bottom-center playback bar remains stable regardless of panel state. Site and National both use play/pause, direct observation scrubbing, the displayed timestamp, numeric frame age, and the active dBZ sample. Age and inspection form one fixed-width telemetry group with an internal divider; changing between a value, a pending lookup, and a source-native status cannot resize that group or move the timeline. National enables transport only after at least two observations are resident; partial backfill is named without blocking usable resident controls. At regional zoom, pressing play briefly names `Preparing sharp National playback for this map view` while Mistr prepares the finest complete all-frame viewport level that fits memory; the existing painted frame remains visible and the play button becomes a cancel action. Playback then uses that one quality for every frame without I/O or upload work. Paused selection may refine spatially without changing its time, age, source, or inspection identity. The bar does not display the words `Fresh`, `Stale`, `Playing`, `Paused`, or `Newest`. Green means newest for the active source, even when the newest National mosaic is older than the prior Site scan.
 
 On compact desktop windows, the icon-led toolbar retains its controls and accessible tooltips while the playback timeline keeps the largest flexible share. Displayed time, numeric age, and an active dBZ sample remain visible. The map is never converted into a dashboard grid.
 
@@ -199,6 +199,7 @@ Chrome is content-sized rather than viewport-filling. The toolbar and playback b
 - Bounded to the width needed by time, transport, timeline, age, and inspection truth rather than spanning most of a wide viewport.
 - Contains play/pause and a directly clickable/draggable scan timeline; no dedicated visible previous/next buttons.
 - During normal operation, exposes the displayed scan timestamp and numeric frame age without visible `Fresh`, `Stale`, `Playing`, `Paused`, or `Newest` labels. Play/pause remains clear through the familiar transport icon and accessible name.
+- Reserves fixed geometry for the age and inspection readout so lookup churn cannot shift the timeline, resize the bar, or create a strobe-like layout change.
 - The age is green only for the recent newest painted live scan. A historical or archive scan, and a latest-live scan older than the accepted recency threshold, uses white. The exact number and accessible label preserve truth without relying on color alone.
 - A focused timeline may respond to arrow keys one observation at a time.
 - While safe preceding observations load, already-resident transport remains available. Loading or one-frame waiting uses a compact exceptional notice rather than permanent normal-state metadata, and background history work never replaces numeric age or disables usable resident playback.
@@ -207,6 +208,8 @@ Chrome is content-sized rather than viewport-filling. The toolbar and playback b
 - Appears after a deliberate map click.
 - Uses a deliberately tiny crosshair/ring that marks the sampled point without obscuring nearby radar structure; the dBZ value appears in the playback bar.
 - Recomputes the value at the same geographic point whenever a different observation paints; a prior scan's value is never carried forward as current.
+- Shows a quiet `--.- dBZ` pending state while that exact observation-bound lookup runs. `OUT OF RANGE`, `NO COVERAGE`, missing data, and other status labels appear only from their matching settled state; pending work is never mislabeled as a coverage result.
+- Keeps playback-time screen-reader announcements stable instead of announcing every transient inspection refresh.
 - Dismisses without leaving a persistent tooltip island.
 
 ### Radar Framing

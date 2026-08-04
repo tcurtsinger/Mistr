@@ -1,5 +1,6 @@
 param(
     [switch]$SkipBuild,
+    [switch]$ChromeOnly,
     [int]$Port = 9344
 )
 
@@ -20,8 +21,11 @@ try {
     }
 
     $previousArguments = $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS
+    $previousChromeOnly = $env:MISTR_NATIONAL_CHROME_ONLY
     $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=$Port"
     $env:MISTR_CDP_PORT = "$Port"
+    if ($ChromeOnly) { $env:MISTR_NATIONAL_CHROME_ONLY = "1" }
+    else { Remove-Item Env:MISTR_NATIONAL_CHROME_ONLY -ErrorAction SilentlyContinue }
     $process = Start-Process -FilePath $executable -WorkingDirectory $root -WindowStyle Hidden -PassThru
     try {
         node scripts/national-phase4-packaged-cdp.mjs
@@ -33,6 +37,8 @@ try {
             $process.WaitForExit()
         }
         $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = $previousArguments
+        if ($null -eq $previousChromeOnly) { Remove-Item Env:MISTR_NATIONAL_CHROME_ONLY -ErrorAction SilentlyContinue }
+        else { $env:MISTR_NATIONAL_CHROME_ONLY = $previousChromeOnly }
         Remove-Item Env:MISTR_CDP_PORT -ErrorAction SilentlyContinue
     }
 }

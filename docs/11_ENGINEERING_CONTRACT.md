@@ -73,7 +73,7 @@ Mistr's normal UI follows `PRODUCT.md` and `DESIGN.md`; diagnostics remain hidde
 
 Merged Phase 3 owns the explicit `National`/`Site` source panel because it delivers the complete National session, numeric renderer, exact interrogation, and paint-truth path. Selecting Site reveals the existing searchable station list; supporting/accessibility copy identifies National as CONUS. Keyboard, focus-return, compact-layout, painted-truth, and one-panel behavior remain mandatory.
 
-The active Phase 4 branch exposes up to 20 exact National timeline observations. It enables playback only after two complete common-level observations are resident, uses direct scrubbing without separate previous/next controls, names partial backfill truthfully, and keeps fine-detail work out of active play/scrub. Hidden `window.__MISTR_NATIONAL_PHASE2__`, `window.__MISTR_NATIONAL_PHASE3__`, and `window.__MISTR_NATIONAL_PHASE4__` evidence APIs do not become normal controls.
+Merged Phase 4 exposes up to 20 exact National timeline observations. It enables playback only after two complete common-level observations are resident, uses direct scrubbing without separate previous/next controls, and names partial backfill truthfully. Regional play may perform one bounded all-frame factor-1/factor-2 preparation before motion begins; once locked, active play/scrub performs no acquisition, grid decode, bulk IPC, or upload work. Hidden `window.__MISTR_NATIONAL_PHASE2__`, `window.__MISTR_NATIONAL_PHASE3__`, and `window.__MISTR_NATIONAL_PHASE4__` evidence APIs do not become normal controls.
 
 Required surfaces:
 

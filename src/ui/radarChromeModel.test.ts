@@ -3,6 +3,7 @@ import {
   formatAge,
   formatAccessibleAge,
   frameAgePresentation,
+  inspectionReadoutPresentation,
   liveFailureLabel,
   userFacingRadarError,
   normalizeRadarSite,
@@ -15,6 +16,22 @@ import {
   rendererFailureMessage,
   timelinePosition,
 } from "./radarChromeModel";
+
+const interrogation = (
+  status: "valid" | "below_threshold" | "range_folded" | "missing" | "no_coverage",
+  value: number | null = null,
+) => ({
+  radialIndex: 0,
+  gateIndex: 0,
+  sourceAzimuthDegrees: 0,
+  slantRangeM: 0,
+  groundRangeM: 0,
+  rawCode: value ?? 0,
+  status,
+  value,
+  units: "dBZ" as const,
+  color: [0, 0, 0, 0] as const,
+});
 
 describe("radar chrome model", () => {
   it("restores only sites in the provider-qualified operational catalog", () => {
@@ -32,6 +49,34 @@ describe("radar chrome model", () => {
     expect(normalizeRadarDisplayMode(null)).toBe("smooth");
     expect(radarDisplayModeLabel("smooth")).toBe("Smooth");
     expect(radarDisplayModeLabel("native")).toBe("Native");
+  });
+
+  it("never presents an exact lookup in progress as outside radar coverage", () => {
+    expect(inspectionReadoutPresentation("pending", null)).toEqual({
+      accessibleLabel: "Radar sample updating.",
+      busy: true,
+      kind: "pending",
+      label: "--.- dBZ",
+    });
+    expect(inspectionReadoutPresentation("outside", null)).toMatchObject({
+      kind: "status",
+      label: "OUT OF RANGE",
+    });
+    expect(inspectionReadoutPresentation("unavailable", null)).toMatchObject({
+      kind: "status",
+      label: "UNAVAILABLE",
+    });
+  });
+
+  it("separates exact values and source-native statuses from UI request state", () => {
+    expect(inspectionReadoutPresentation("settled", interrogation("valid", 11.5)))
+      .toMatchObject({ kind: "value", label: "11.5 dBZ" });
+    expect(inspectionReadoutPresentation("settled", interrogation("no_coverage")))
+      .toMatchObject({ kind: "status", label: "NO COVERAGE" });
+    expect(inspectionReadoutPresentation("settled", interrogation("missing")))
+      .toMatchObject({ kind: "status", label: "DATA MISSING" });
+    expect(inspectionReadoutPresentation("settled", null))
+      .toMatchObject({ kind: "status", label: "UNAVAILABLE" });
   });
 
   it("follows the last painted observation rather than the requested selection", () => {
@@ -96,6 +141,10 @@ describe("radar chrome model", () => {
       playing: false,
       holdReason: "AWAITING_GPU_PAINT",
     }, 4, 20)).toBe("LOADING SCAN");
+    expect(playbackPresentation({
+      playing: false,
+      holdReason: "PREPARING_PLAYBACK_QUALITY",
+    }, 4, 20)).toBe("PREPARING PLAYBACK");
     expect(playbackPresentation({
       playing: true,
       holdReason: "GPU_RECOVERY_VISIBLE_FIRST",

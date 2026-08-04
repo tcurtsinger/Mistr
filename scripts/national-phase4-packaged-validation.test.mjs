@@ -10,11 +10,14 @@ describe("National Phase 4 packaged acceptance", () => {
     const report = validReport();
     report.transitions.activityDelta.networkRequests = 1;
     report.activePlayback.renderer.presentationFactor = 1;
+    report.activePlayback.renderer.playbackQualityFactor = 2;
+    report.activePlayback.activityAfter.networkRequests = 1;
     report.activePlayback.inspectionQueue.maxConcurrentCount = 2;
     report.history.renderer.maximumUploadSliceMs = 4.1;
     expect(validateNationalPhase4Acceptance(report)).toEqual(expect.arrayContaining([
       "zero hot-path backend activity",
       "high-zoom playback quality lock",
+      "zero sharp-playback transfer and upload work",
       "latest-only inspection lookup queue",
       "4 ms upload slice budget",
     ]));
@@ -30,6 +33,51 @@ describe("National Phase 4 packaged acceptance", () => {
     delete report.failedSiteRecovery;
     expect(validateNationalPhase4Acceptance(report)).toContain(
       "failed Site transition restores active National session",
+    );
+  });
+
+  it("permits bounded exact point refresh while sharp playback stays transfer-free", () => {
+    const report = validReport();
+    report.activePlayback.activityAfter.pointLookupDecodes = 8;
+    expect(validateNationalPhase4Acceptance(report)).toEqual([]);
+  });
+
+  it("requires usable playback controls while another National frame stages", () => {
+    const report = validReport();
+    report.partialHistoryControls.enabledStableStagingSampleCount = 0;
+    report.partialHistoryControls.enabledStableStagingRetainedCounts = [];
+    expect(validateNationalPhase4Acceptance(report)).toContain(
+      "partial-history playback control availability",
+    );
+  });
+
+  it("rejects playback-time telemetry shifts or false coverage placeholders", () => {
+    const report = validReport();
+    report.partialPlaybackChrome.timelineMaxRectDelta = 18;
+    report.partialPlaybackChrome.falseOutsideCoverageSampleCount = 4;
+    report.partialPlaybackChrome.distinctAnnouncements.push("11.5 dBZ.");
+    expect(validateNationalPhase4Acceptance(report)).toContain(
+      "stable partial-history playback chrome",
+    );
+  });
+
+  it("rejects unstable compact playback chrome when viewport evidence is present", () => {
+    const report = validReport();
+    report.partialPlaybackChrome.compactViewports = [
+      { ...report.partialPlaybackChrome, innerWidth: 878, innerHeight: 640 },
+      { ...report.partialPlaybackChrome, innerWidth: 720, innerHeight: 540 },
+    ];
+    report.partialPlaybackChrome.compactViewports[1].sampleReadoutMaxRectDelta = 4;
+    expect(validateNationalPhase4Acceptance(report)).toContain(
+      "stable compact partial-history playback chrome",
+    );
+  });
+
+  it("fails closed on malformed compact viewport evidence", () => {
+    const report = validReport();
+    report.partialPlaybackChrome.compactViewports = null;
+    expect(validateNationalPhase4Acceptance(report)).toContain(
+      "stable compact partial-history playback chrome",
     );
   });
 });
@@ -80,6 +128,34 @@ function validReport() {
     };
   };
   return {
+    partialPlaybackChrome: {
+      innerWidth: 3_840,
+      innerHeight: 2_160,
+      sampleCount: 90,
+      playingSampleCount: 90,
+      partialHistorySampleCount: 90,
+      loadingNoticeSampleCount: 90,
+      buttonDisabledSampleCount: 0,
+      falseOutsideCoverageSampleCount: 0,
+      pendingSampleCount: 12,
+      pendingPresentationMismatchCount: 0,
+      playbackBarMaxRectDelta: 0,
+      timelineMaxRectDelta: 0,
+      telemetryMaxRectDelta: 0,
+      sampleReadoutMaxRectDelta: 0,
+      distinctSampleTexts: ["--.- dBZ", "11.5 dBZ"],
+      distinctAnnouncements: ["PLAYING"],
+    },
+    partialHistoryControls: {
+      partialSampleCount: 240,
+      buttonFoundSampleCount: 240,
+      stableStagingSampleCount: 180,
+      enabledStableStagingSampleCount: 180,
+      partialRetainedCounts: Array.from({ length: 18 }, (_, index) => index + 2),
+      stableStagingRetainedCounts: Array.from({ length: 18 }, (_, index) => index + 2),
+      enabledStableStagingRetainedCounts: Array.from({ length: 18 }, (_, index) => index + 2),
+      firstDisabledStableStaging: null,
+    },
     history: {
       history: {
         historyLimit: 20,
@@ -115,8 +191,19 @@ function validReport() {
       },
     },
     activePlayback: {
-      playback: { playing: true, qualityLockFactor: 4 },
-      renderer: { ...renderer, playbackQualityFactor: 4 },
+      playback: { playing: true, qualityLockFactor: 1 },
+      renderer: {
+        ...renderer,
+        presentationFactor: 1,
+        playbackQualityFactor: 1,
+        detailedObservationIds: ids,
+        gpuResourceBytes: 150_000_000,
+        peakGpuResourceBytes: 170_000_000,
+      },
+      activityBefore: { ...activity },
+      activityAfter: { ...activity },
+      rendererBefore: renderer,
+      rendererAfter: renderer,
       inspectionQueue: {
         running: true,
         pending: true,

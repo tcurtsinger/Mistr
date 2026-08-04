@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   clearPriorWebGlErrors,
+  completePlaybackDetailFactor,
+  commonResidencyReadyForInteraction,
   commonResidencyReadyForSelection,
+  presentationUsesCommonFallback,
   sameNationalPresentationReceipt,
   type NationalPaintReceipt,
 } from "./NationalGridLayer";
@@ -60,6 +63,70 @@ describe("National WebGL upload error isolation", () => {
       status: "painted",
       paintReceipt: undefined,
     })).toBe(false);
+  });
+
+  it("keeps completed playback residents interactive while another frame stages", () => {
+    const completedTimeline = {
+      mutationAwaitingCommit: false,
+      paintReceipt: receipt({ contextEpoch: 2 }),
+      commonResidentObservationIds: ["older", "newer"],
+    } as const;
+
+    expect(commonResidencyReadyForInteraction({
+      ...completedTimeline,
+      status: "staging",
+    }, 2)).toBe(true);
+    expect(commonResidencyReadyForInteraction({
+      ...completedTimeline,
+      status: "painted",
+    }, 2)).toBe(true);
+    expect(commonResidencyReadyForInteraction({
+      ...completedTimeline,
+      status: "recovering",
+    }, 2)).toBe(false);
+    expect(commonResidencyReadyForInteraction({
+      ...completedTimeline,
+      status: "staging",
+      mutationAwaitingCommit: true,
+    }, 2)).toBe(false);
+    expect(commonResidencyReadyForInteraction({
+      ...completedTimeline,
+      status: "staging",
+    }, 3)).toBe(false);
+  });
+
+  it("accepts fine playback only when every observation owns the same viewport chunks", () => {
+    const coverage = {
+      version: 1,
+      kind: "viewport" as const,
+      west: -102,
+      south: 35,
+      east: -94,
+      north: 42,
+      requiredChunkIndices: [10, 11, 38, 39],
+    };
+    const details = ["older", "newer"].map((observationId, index) => ({
+      observationId,
+      presentationFactor: 1,
+      coverage: { ...coverage, version: index + 1 },
+      complete: true,
+    }));
+
+    expect(completePlaybackDetailFactor(["older", "newer"], details)).toBe(1);
+    expect(completePlaybackDetailFactor(["older", "newer"], [
+      details[0],
+      {
+        ...details[1],
+        coverage: { ...details[1].coverage, requiredChunkIndices: [10, 11] },
+      },
+    ])).toBeUndefined();
+    expect(completePlaybackDetailFactor(["older", "newer"], [details[0]])).toBeUndefined();
+  });
+
+  it("draws the complete overview behind either viewport-detail factor", () => {
+    expect(presentationUsesCommonFallback(1)).toBe(true);
+    expect(presentationUsesCommonFallback(2)).toBe(true);
+    expect(presentationUsesCommonFallback(4)).toBe(false);
   });
 });
 

@@ -11,6 +11,7 @@ class FakeNationalLayer {
   selected: string;
   presentationFactor = 4;
   qualityLock: number | undefined;
+  completeFactor: 1 | 2 | 4 = 4;
   selectFactors: number[] = [];
   commonResidencyReady = true;
 
@@ -63,6 +64,10 @@ class FakeNationalLayer {
     this.qualityLock = factor;
   }
 
+  finestCompletePlaybackFactor() {
+    return this.completeFactor;
+  }
+
   waitForCommonResidency() {
     return Promise.resolve();
   }
@@ -93,7 +98,7 @@ class FakeNationalLayer {
 describe("NationalPlaybackController", () => {
   afterEach(() => vi.useRealTimers());
 
-  it("locks play and direct scrubbing to the all-frame factor-4 level", async () => {
+  it("uses the complete all-frame factor-4 fallback when no finer viewport is ready", async () => {
     vi.useFakeTimers();
     const observations = frames(3);
     const layer = new FakeNationalLayer(observations);
@@ -111,6 +116,91 @@ describe("NationalPlaybackController", () => {
     await controller.scrub(0);
     expect(layer.selectFactors.at(-1)).toBe(4);
     expect(controller.snapshot().selectedObservationId).toBe(observationId(observations[0]));
+  });
+
+  it("prepares and locks playback to complete exact viewport detail", async () => {
+    vi.useFakeTimers();
+    const observations = frames(3);
+    const layer = new FakeNationalLayer(observations);
+    let finishPreparation!: () => void;
+    const preparation = new Promise<void>((resolve) => { finishPreparation = resolve; });
+    const controller = new NationalPlaybackController(layer, observations, {
+      dwellMs: 100,
+      latestDwellMs: 100,
+      async preparePlaybackQuality(isCurrent) {
+        await preparation;
+        expect(isCurrent()).toBe(true);
+        layer.completeFactor = 1;
+        return 1;
+      },
+    });
+    controller.establishInitialPaint(layer.receipt());
+
+    const play = controller.play();
+    await vi.waitFor(() => {
+      expect(controller.snapshot()).toMatchObject({
+        playing: false,
+        preparingQuality: true,
+        holdReason: "PREPARING_PLAYBACK_QUALITY",
+      });
+    });
+    finishPreparation();
+    await play;
+
+    expect(layer.qualityLock).toBe(1);
+    expect(layer.getSnapshot().presentationFactor).toBe(1);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(layer.selectFactors.every((factor) => factor === 1)).toBe(true);
+    controller.pause();
+
+    await controller.scrub(0);
+    expect(layer.selectFactors.at(-1)).toBe(1);
+  });
+
+  it("treats user cancellation during quality preparation as a clean pause", async () => {
+    vi.useFakeTimers();
+    const observations = frames(3);
+    const layer = new FakeNationalLayer(observations);
+    let finishPreparation!: () => void;
+    const preparation = new Promise<void>((resolve) => {
+      finishPreparation = resolve;
+    });
+    let releases = 0;
+    const refined: string[] = [];
+    const controller = new NationalPlaybackController(layer, observations, {
+      refinementSettleMs: 50,
+      async acquireResidentOnlyActivity() {
+        return () => { releases += 1; };
+      },
+      async preparePlaybackQuality(isCurrent) {
+        await preparation;
+        if (!isCurrent()) throw new Error("superseded preparation");
+        return 1;
+      },
+      onRefinementRequested(observation) {
+        refined.push(observationId(observation));
+      },
+    });
+    controller.establishInitialPaint(layer.receipt());
+
+    const play = controller.play();
+    await vi.waitFor(() => expect(controller.snapshot().preparingQuality).toBe(true));
+    controller.pause();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(refined).toEqual([]);
+    finishPreparation();
+
+    await expect(play).resolves.toBeUndefined();
+    expect(controller.snapshot()).toMatchObject({
+      playing: false,
+      preparingQuality: false,
+    });
+    expect(layer.qualityLock).toBeUndefined();
+    expect(releases).toBe(1);
+    await vi.advanceTimersByTimeAsync(49);
+    expect(refined).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(refined).toEqual([observationId(observations.at(-1)!)]);
   });
 
   it("holds a direct scrub until context recovery restores every common resident", async () => {
@@ -217,12 +307,71 @@ describe("NationalPlaybackController", () => {
       onRefinementRequested: (observation) => refined.push(observationId(observation)),
     });
 
-    controller.notifyCameraChanged(false);
-    await Promise.resolve();
+    await controller.notifyCameraChanged(false);
     await vi.advanceTimersByTimeAsync(500);
 
     expect(layer.selectFactors).toEqual([4]);
     expect(refined).toEqual([]);
+  });
+
+  it("re-prepares the moved viewport before resuming active playback", async () => {
+    vi.useFakeTimers();
+    const observations = frames(3);
+    const layer = new FakeNationalLayer(observations);
+    let preparations = 0;
+    const controller = new NationalPlaybackController(layer, observations, {
+      dwellMs: 100,
+      latestDwellMs: 100,
+      async preparePlaybackQuality(isCurrent) {
+        expect(isCurrent()).toBe(true);
+        preparations += 1;
+        layer.completeFactor = preparations === 1 ? 1 : 2;
+        return layer.completeFactor;
+      },
+    });
+    controller.establishInitialPaint(layer.receipt());
+
+    await controller.play();
+    expect(controller.snapshot()).toMatchObject({ playing: true, qualityLockFactor: 1 });
+
+    await controller.notifyCameraChanged(true);
+
+    expect(preparations).toBe(2);
+    expect(controller.snapshot()).toMatchObject({ playing: true, qualityLockFactor: 2 });
+    expect(layer.selectFactors.at(-1)).toBe(2);
+    controller.pause();
+  });
+
+  it("cancels superseded quality preparation and restarts only for the newest camera", async () => {
+    const observations = frames(3);
+    const layer = new FakeNationalLayer(observations);
+    let finishFirstPreparation!: () => void;
+    const firstPreparation = new Promise<void>((resolve) => {
+      finishFirstPreparation = resolve;
+    });
+    let preparations = 0;
+    const controller = new NationalPlaybackController(layer, observations, {
+      async preparePlaybackQuality(isCurrent) {
+        preparations += 1;
+        if (preparations === 1) await firstPreparation;
+        if (!isCurrent()) return 4;
+        layer.completeFactor = 1;
+        return 1;
+      },
+    });
+    controller.establishInitialPaint(layer.receipt());
+
+    const initialPlay = controller.play();
+    await vi.waitFor(() => expect(controller.snapshot().preparingQuality).toBe(true));
+    const firstCamera = controller.notifyCameraChanged(true);
+    const newestCamera = controller.notifyCameraChanged(true);
+    finishFirstPreparation();
+    await initialPlay;
+    await Promise.all([firstCamera, newestCamera]);
+
+    expect(preparations).toBe(2);
+    expect(controller.snapshot()).toMatchObject({ playing: true, qualityLockFactor: 1 });
+    controller.pause();
   });
 });
 

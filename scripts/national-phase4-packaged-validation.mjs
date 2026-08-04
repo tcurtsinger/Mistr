@@ -3,6 +3,18 @@ const HARD_CEILING_BYTES = 256 * 1024 * 1024;
 
 export function validateNationalPhase4Acceptance(report) {
   const failures = [];
+  failures.push(...validateNationalPartialPlaybackChrome(report.partialPlaybackChrome));
+  const partialControls = report.partialHistoryControls;
+  if (
+    !(partialControls?.partialSampleCount > 0)
+    || partialControls?.buttonFoundSampleCount !== partialControls?.partialSampleCount
+    || !(partialControls?.stableStagingSampleCount > 0)
+    || partialControls?.enabledStableStagingSampleCount !== partialControls?.stableStagingSampleCount
+    || !sameMembers(
+      partialControls?.enabledStableStagingRetainedCounts ?? [],
+      partialControls?.stableStagingRetainedCounts ?? [],
+    )
+  ) failures.push("partial-history playback control availability");
   const history = report.history?.history;
   const renderer = report.history?.renderer;
   const playback = report.history?.playback;
@@ -63,12 +75,22 @@ export function validateNationalPhase4Acceptance(report) {
   ) failures.push("selected and temporal-window detail residency");
 
   const active = report.activePlayback;
+  const activeFactor = active?.playback?.qualityLockFactor;
   if (
     active?.playback?.playing !== true
-    || active?.playback?.qualityLockFactor !== 4
-    || active?.renderer?.playbackQualityFactor !== 4
-    || active?.renderer?.presentationFactor !== 4
+    || ![1, 2].includes(activeFactor)
+    || active?.renderer?.playbackQualityFactor !== activeFactor
+    || active?.renderer?.presentationFactor !== activeFactor
+    || active?.renderer?.detailedObservationIds?.length !== 20
+    || !sameMembers(active?.renderer?.detailedObservationIds ?? [], ids)
+    || !(active?.renderer?.gpuResourceBytes > 0 && active.renderer.gpuResourceBytes < TARGET_BYTES)
+    || !(active?.renderer?.peakGpuResourceBytes < HARD_CEILING_BYTES)
   ) failures.push("high-zoom playback quality lock");
+  if (
+    !sameSharpPlaybackActivity(active?.activityBefore, active?.activityAfter)
+    || active?.rendererBefore?.uploadCount !== active?.rendererAfter?.uploadCount
+    || active?.rendererBefore?.uploadBytes !== active?.rendererAfter?.uploadBytes
+  ) failures.push("zero sharp-playback transfer and upload work");
   if (
     active?.inspectionQueue?.maxConcurrentCount !== 1
     || !(active?.inspectionQueue?.startedCount > 0)
@@ -140,6 +162,24 @@ export function validateNationalPhase4Acceptance(report) {
   return failures;
 }
 
+export function validateNationalPartialPlaybackChrome(chrome) {
+  const failures = [];
+  if (!stablePlaybackChrome(chrome)) failures.push("stable partial-history playback chrome");
+  if (chrome?.compactViewports !== undefined) {
+    const expected = [[878, 640], [720, 540]];
+    if (
+      !Array.isArray(chrome.compactViewports)
+      || chrome.compactViewports.length !== expected.length
+      || chrome.compactViewports.some((viewport, index) => (
+        viewport?.innerWidth !== expected[index][0]
+        || viewport?.innerHeight !== expected[index][1]
+        || !stablePlaybackChrome(viewport)
+      ))
+    ) failures.push("stable compact partial-history playback chrome");
+  }
+  return failures;
+}
+
 function observationId(observation) {
   return `${observation?.observationTimeUnixMs}:${observation?.contentSha256}`;
 }
@@ -152,6 +192,42 @@ function sameMembers(left, right) {
   return left.length === right.length && left.every((value) => right.includes(value));
 }
 
+function stableRect(maxDelta) {
+  return Number.isFinite(maxDelta) && maxDelta <= 0.25;
+}
+
+function stablePlaybackChrome(chrome) {
+  return chrome?.sampleCount >= 30
+    && chrome.playingSampleCount === chrome.sampleCount
+    && chrome.partialHistorySampleCount === chrome.sampleCount
+    && chrome.loadingNoticeSampleCount > 0
+    && chrome.buttonDisabledSampleCount === 0
+    && chrome.falseOutsideCoverageSampleCount === 0
+    && chrome.pendingSampleCount > 0
+    && chrome.pendingPresentationMismatchCount === 0
+    && chrome.distinctSampleTexts?.includes("--.- dBZ")
+    && chrome.distinctSampleTexts.some((label) => /^-?\d+\.\d dBZ$/.test(label))
+    && stableRect(chrome.playbackBarMaxRectDelta)
+    && stableRect(chrome.timelineMaxRectDelta)
+    && stableRect(chrome.telemetryMaxRectDelta)
+    && stableRect(chrome.sampleReadoutMaxRectDelta)
+    && chrome.distinctAnnouncements?.length === 1
+    && ["", "PLAYING"].includes(chrome.distinctAnnouncements[0]);
+}
+
 function zeroActivity(activity) {
   return activity && Object.values(activity).every((value) => value === 0);
+}
+
+function sameSharpPlaybackActivity(before, after) {
+  const forbiddenHotPathFields = [
+    "networkRequests",
+    "responseBytes",
+    "decoderRuns",
+    "bulkIpcTransfers",
+    "bulkIpcBytes",
+  ];
+  return before
+    && after
+    && forbiddenHotPathFields.every((key) => after[key] === before[key]);
 }
