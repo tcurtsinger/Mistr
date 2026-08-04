@@ -60,6 +60,7 @@ export class NationalPlaybackController {
   private cameraChangeRequest = 0;
   private cameraPlaybackRestartPending = false;
   private preparingQuality = false;
+  private refinementAfterQualityPreparation = false;
   private playbackStartOperation: Promise<void> | null = null;
   private playbackActivityRelease: (() => void) | null = null;
   private readonly dwellMs: number;
@@ -183,8 +184,11 @@ export class NationalPlaybackController {
       );
     } finally {
       release?.();
+      const scheduleDeferredRefinement = this.refinementAfterQualityPreparation;
+      this.refinementAfterQualityPreparation = false;
       this.preparingQuality = false;
       this.emit();
+      if (scheduleDeferredRefinement) this.scheduleRefinement();
     }
   }
 
@@ -395,6 +399,10 @@ export class NationalPlaybackController {
   private scheduleRefinement() {
     this.clearRefinementTimer();
     if (this.playing || this.disposed) return;
+    if (this.preparingQuality) {
+      this.refinementAfterQualityPreparation = true;
+      return;
+    }
     this.refinementTimer = globalThis.setTimeout(() => {
       this.refinementTimer = null;
       const selected = this.layer.getSnapshot().selectedObservationId;
@@ -412,6 +420,7 @@ export class NationalPlaybackController {
   private clearRefinementTimer() {
     if (this.refinementTimer !== null) globalThis.clearTimeout(this.refinementTimer);
     this.refinementTimer = null;
+    this.refinementAfterQualityPreparation = false;
   }
 
   private acquireResidentOnlyActivity(): Promise<() => void> {

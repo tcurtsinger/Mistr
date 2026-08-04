@@ -158,6 +158,7 @@ describe("NationalPlaybackController", () => {
   });
 
   it("treats user cancellation during quality preparation as a clean pause", async () => {
+    vi.useFakeTimers();
     const observations = frames(3);
     const layer = new FakeNationalLayer(observations);
     let finishPreparation!: () => void;
@@ -165,7 +166,9 @@ describe("NationalPlaybackController", () => {
       finishPreparation = resolve;
     });
     let releases = 0;
+    const refined: string[] = [];
     const controller = new NationalPlaybackController(layer, observations, {
+      refinementSettleMs: 50,
       async acquireResidentOnlyActivity() {
         return () => { releases += 1; };
       },
@@ -174,12 +177,17 @@ describe("NationalPlaybackController", () => {
         if (!isCurrent()) throw new Error("superseded preparation");
         return 1;
       },
+      onRefinementRequested(observation) {
+        refined.push(observationId(observation));
+      },
     });
     controller.establishInitialPaint(layer.receipt());
 
     const play = controller.play();
     await vi.waitFor(() => expect(controller.snapshot().preparingQuality).toBe(true));
     controller.pause();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(refined).toEqual([]);
     finishPreparation();
 
     await expect(play).resolves.toBeUndefined();
@@ -189,6 +197,10 @@ describe("NationalPlaybackController", () => {
     });
     expect(layer.qualityLock).toBeUndefined();
     expect(releases).toBe(1);
+    await vi.advanceTimersByTimeAsync(49);
+    expect(refined).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(refined).toEqual([observationId(observations.at(-1)!)]);
   });
 
   it("holds a direct scrub until context recovery restores every common resident", async () => {
