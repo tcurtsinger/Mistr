@@ -90,8 +90,17 @@ describe("PackedSweepTransferClient", () => {
     await chunk.release();
     expect(releases).toBe(2);
     expect(requests).toEqual([
-      ["request_national_packed_grid_manifest", { session: 1, generation: 7 }],
-      ["request_national_packed_grid_chunk", { session: 1, generation: 7, chunkIndex: 0 }],
+      ["request_national_packed_grid_manifest", {
+        session: 1,
+        generation: 7,
+        presentationFactor: 4,
+      }],
+      ["request_national_packed_grid_chunk", {
+        session: 1,
+        generation: 7,
+        chunkIndex: 0,
+        presentationFactor: 4,
+      }],
     ]);
   });
 
@@ -114,6 +123,107 @@ describe("PackedSweepTransferClient", () => {
     await client.begin(7);
     await expect(client.requestNationalChunk(0)).rejects.toMatchObject({ code: "hash_mismatch" });
     expect(releases).toBe(1);
+  });
+
+  it("binds exact National point lookup to the painted identity rather than current transfer generation", async () => {
+    const requests: Array<Record<string, unknown> | undefined> = [];
+    const contentSha256 = "ab".repeat(32);
+    const invoke: InvokeFunction = async <T>(command: string, arguments_?: Record<string, unknown>) => {
+      if (command === "open_phase2_transfer_session") return snapshot(0) as T;
+      if (command === "begin_phase2_generation") return snapshot(Number(arguments_?.generation)) as T;
+      if (command === "lookup_national_grid_point" || command === "find_national_peak_point") {
+        requests.push(arguments_);
+        return {
+          inspectionId: arguments_?.inspectionId,
+          generation: arguments_?.generation,
+          observationTimeUnixMs: arguments_?.observationTimeUnixMs,
+          contentSha256: arguments_?.contentSha256,
+          objectKey: "CONUS/MergedBaseReflectivityQC_00.50/20260803/MRMS_MergedBaseReflectivityQC_00.50_20260803-162812.grib2.gz",
+          longitude: arguments_?.longitude ?? -96,
+          latitude: arguments_?.latitude ?? 36,
+          row: 100,
+          column: 200,
+          rawCode: 10_250,
+          status: "valid",
+          valueDbz: 26,
+        } as T;
+      }
+      throw new Error(`unexpected command ${command}`);
+    };
+    const client = new PackedSweepTransferClient(invoke);
+    await client.open();
+    await client.begin(12);
+    // Simulate a failed Site transition advancing transfer generation while
+    // the prior National observation remains the authoritative paint.
+    await client.begin(13);
+    const lookup = await client.lookupNationalPoint({
+      generation: 12,
+      observationTimeUnixMs: 1_785_775_692_000,
+      contentSha256,
+      inspectionId: "inspect-1",
+      longitude: -97,
+      latitude: 35,
+    });
+    expect(lookup).toMatchObject({ generation: 12, rawCode: 10_250, valueDbz: 26 });
+    expect(requests).toEqual([{
+      session: 1,
+      generation: 12,
+      observationTimeUnixMs: 1_785_775_692_000,
+      contentSha256,
+      inspectionId: "inspect-1",
+      longitude: -97,
+      latitude: 35,
+    }]);
+    const peak = await client.findNationalPeakPoint({
+      generation: 12,
+      observationTimeUnixMs: 1_785_775_692_000,
+      contentSha256,
+      inspectionId: "inspect-peak",
+    });
+    expect(peak).toMatchObject({ generation: 12, status: "valid", valueDbz: 26 });
+    expect(requests[1]).toEqual({
+      session: 1,
+      generation: 12,
+      observationTimeUnixMs: 1_785_775_692_000,
+      contentSha256,
+      inspectionId: "inspect-peak",
+    });
+  });
+
+  it("rejects a National point response whose dBZ disagrees with its exact raw code", async () => {
+    const hash = "ab".repeat(32);
+    const invoke: InvokeFunction = async <T>(command: string, arguments_?: Record<string, unknown>) => {
+      if (command === "open_phase2_transfer_session") return snapshot(0) as T;
+      if (command === "begin_phase2_generation") return snapshot(2) as T;
+      if (command === "lookup_national_grid_point") {
+        return {
+          inspectionId: arguments_?.inspectionId,
+          generation: arguments_?.generation,
+          observationTimeUnixMs: arguments_?.observationTimeUnixMs,
+          contentSha256: arguments_?.contentSha256,
+          objectKey: "CONUS/MergedBaseReflectivityQC_00.50/20260803/MRMS_MergedBaseReflectivityQC_00.50_20260803-162812.grib2.gz",
+          longitude: -97,
+          latitude: 35,
+          row: 1,
+          column: 1,
+          rawCode: 10_250,
+          status: "valid",
+          valueDbz: 99,
+        } as T;
+      }
+      throw new Error(`unexpected command ${command}`);
+    };
+    const client = new PackedSweepTransferClient(invoke);
+    await client.open();
+    await client.begin(2);
+    await expect(client.lookupNationalPoint({
+      generation: 2,
+      observationTimeUnixMs: 1_785_775_692_000,
+      contentSha256: hash,
+      inspectionId: "bad-dbz",
+      longitude: -97,
+      latitude: 35,
+    })).rejects.toMatchObject({ code: "invalid_national_point" });
   });
 
   it("passes only bounded canonical inputs to the Phase 5 live command", async () => {

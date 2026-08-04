@@ -115,16 +115,20 @@ export function parsePackedGridManifest(
   const height = view.getUint32(36, false);
   const presentationFactor = view.getUint16(80, false);
   const levelStepE6 = MRMS_BASE_STEP_E6 * presentationFactor;
-  const lastLatitudeE6 = regularGridLastE6(MRMS_FIRST_LATITUDE_E6, levelStepE6, height, false);
-  const lastLongitudeE6 = regularGridLastE6(MRMS_FIRST_LONGITUDE_E6, levelStepE6, width, true);
+  const footprintOffsetE6 = MRMS_BASE_STEP_E6 * (presentationFactor - 1) / 2;
+  const firstLatitudeE6 = MRMS_FIRST_LATITUDE_E6 - footprintOffsetE6;
+  const firstLongitudeE6 = MRMS_FIRST_LONGITUDE_E6 + footprintOffsetE6;
+  const lastLatitudeE6 = regularGridLastE6(firstLatitudeE6, levelStepE6, height, false);
+  const lastLongitudeE6 = regularGridLastE6(firstLongitudeE6, levelStepE6, width, true);
   if (
     presentationFactor < 1
     || presentationFactor > 16
     || !isPowerOfTwo(presentationFactor)
     || width !== Math.ceil(7000 / presentationFactor)
     || height !== Math.ceil(3500 / presentationFactor)
-    || view.getInt32(40, false) !== MRMS_FIRST_LATITUDE_E6
-    || view.getInt32(44, false) !== MRMS_FIRST_LONGITUDE_E6
+    || !Number.isSafeInteger(footprintOffsetE6)
+    || view.getInt32(40, false) !== firstLatitudeE6
+    || view.getInt32(44, false) !== firstLongitudeE6
     || lastLatitudeE6 === null
     || lastLongitudeE6 === null
     || view.getInt32(48, false) !== lastLatitudeE6

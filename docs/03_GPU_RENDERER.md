@@ -2,9 +2,9 @@
 
 ## 1. Objective
 
-Render measured selected-site radar data inside MapLibre without representing each observation as a raster tile pyramid. The basemap remains ordinary MapLibre content; selected-site radar uses its qualified polar WebGL2 layer. The approved future National source will use a separate numeric-grid custom layer rather than pretending MRMS is a polar sweep or a MapLibre radar-tile animation.
+Render measured radar data inside MapLibre without representing observations as provider-colored raster tiles. The basemap remains ordinary MapLibre content; selected-site radar uses its qualified polar WebGL2 layer, and Phase 3 National uses a separate numeric-grid custom layer rather than pretending MRMS is a polar sweep or a MapLibre radar-tile animation.
 
-Merged National Phase 1 changed no shaders, textures, renderer resources, memory limits, paint receipts, or context-recovery behavior. Phase 2 still adds no National renderer: it creates and cross-language-validates bounded numeric overview chunks behind a diagnostic API only. The existing polar Site renderer remains the sole painted radar path.
+Merged Phases 1 and 2 left the polar Site renderer unchanged while supplying source coordination and validated numeric chunks. The active Phase 3 branch adds `NationalGridLayer`; it shares neither polar textures nor independent transfer credits with Site.
 
 ## 2. Required rendering contract
 
@@ -135,13 +135,21 @@ Initial target budgets for one active 20-frame product loop:
 
 These are engineering bounds, not claims that every implementation will naturally meet them.
 
-### National Phase 2 working-set evidence
+### National numeric working set
 
-`MrmsNumericPyramid` preserves the exact 7,000 by 3,500 two-byte base grid in Rust and builds power-of-two presentation levels. Each reduction cell selects the strongest valid dBZ raw code; if there is no valid source it selects missing before no coverage. Ordinary image mipmaps and integer-code averaging are prohibited.
+`MrmsNumericPyramid` preserves the exact 7,000 by 3,500 two-byte base grid in Rust and builds power-of-two presentation levels. Each reduction cell selects the strongest valid dBZ raw code; if there is no valid source it selects missing before no coverage. Its geographic center is the center of the source-cell footprint it reduces, so overview and factor-1 detail remain spatially registered during refinement. Ordinary image mipmaps and integer-code averaging are prohibited.
 
 The diagnostic `PackedGrid v1` factor-4 level is 1,750 by 875. It is divided into 256-cell interiors with a one-cell sampling halo, producing 28 independently hashed chunks for the current fixed grid. One manifest and one bounded chunk transfer per global credit; the frontend never owns the full expanded base grid as one buffer.
 
-The packaged 30-observation extension simultaneously retains all 30 immutable compressed source objects in Rust while validating their overview working sets. It measured 3,104,644 numeric GPU payload bytes per frame including chunk halos. Twenty frames plus one staged frame measured 65,197,524 bytes; thirty plus one staged measured 96,243,964 bytes. Compressed/backend bytes are reported separately rather than counted as GPU memory. This is a schema and working-set diagnostic, not a GPU allocation or render claim: Phase 3 must still implement and measure texture allocation, time-sliced upload, complete-coverage paint receipts, rollback, and context recovery under the 200 MiB target and 256 MiB ceiling.
+The merged Phase 2 30-observation extension measured 3,104,644 numeric GPU payload bytes per factor-4 frame including chunk halos: 65,197,524 bytes for 20 frames plus staging and 96,243,964 bytes for 30 plus staging.
+
+Phase 3 implements the missing runtime contract. `NationalGridLayer` uploads `R16UI` chunk textures one lease and one animation frame at a time, with a hard configured upload slice no greater than 4 ms. It keeps active and staged presentations separate; a receipt fires only when every coverage-required chunk exists, all chunks draw, and a matching GPU fence completes. Receipts identify observation/generation/hash, presentation factor, coverage version and kind, required chunk count, context epoch, framebuffer, staging duration, maximum upload slice, and uploaded bytes.
+
+At the normal CONUS view, factor 4 is a complete 28-chunk presentation. At high zoom, Phase 3 retains that complete overview as a fallback outside the viewport while atomically painting only the eight factor-1 chunks required by the final measured 4K viewport. This prevents missing/no-coverage exact cells from revealing coarser radar underneath while preserving complete-domain coverage beyond the refined camera. The exact base grid remains in Rust for interrogation. The packaged run measured 3,108,788 overview GPU bytes, 4,173,812 stable/peak detailed-fallback bytes, a 0.70 ms working-set upload maximum, and a 1.40 ms recovery upload maximum. Exact viewport chunk count varies with camera coverage. This is a one-observation working set; the Phase 2 20/30-frame ledger remains the Phase 4 residency design constraint.
+
+Native uses nearest selected-level numeric sampling. Smooth applies bilinear interpolation only when all four contributing cells are valid; otherwise it falls back to the nearest valid cell and never blends across missing or no-coverage status. Both use the same premultiplied reflectivity palette and cannot change exact Rust-owned interrogation.
+
+On real context loss, CPU chunk arrays for the active complete presentation and its required complete-domain fallback remain authoritative. The layer discards stale WebGL handles, restores the prior complete presentation if a replacement was in flight, and rehydrates visible chunks before fallback one chunk per animation frame under the 4 ms ceiling. It issues a new context-epoch receipt only after the declared working set is resident, without network, disk, decode, or IPC work.
 
 ## 7. Geospatial placement
 

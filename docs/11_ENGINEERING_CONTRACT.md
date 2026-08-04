@@ -71,9 +71,9 @@ Large source fixtures may live in approved external/LFS storage, but their manif
 
 Mistr's normal UI follows `PRODUCT.md` and `DESIGN.md`; diagnostics remain hidden behind packaged APIs rather than becoming a second weather dashboard.
 
-National Phases 1 and 2 change no visible interface. Phase 2's MRMS preparation and `PackedGrid v1` transfer are callable only through `window.__MISTR_NATIONAL_PHASE2__` in packaged evidence. They must not add a placeholder source picker, disabled National option, MRMS status, or diagnostic counters. The later complete static-National phase owns the explicit `National`/`Site` control and must preserve current keyboard, focus, compact-layout, painted-truth, and one-panel behavior.
+National Phases 1 and 2 changed no visible interface. Phase 3 owns the explicit `National`/`Site` source panel because it also delivers the complete static National session, numeric renderer, exact interrogation, and paint-truth path. Selecting Site reveals the existing searchable station list; supporting/accessibility copy identifies National as CONUS. Keyboard, focus-return, compact-layout, painted-truth, and one-panel behavior remain mandatory.
 
-Phase 2 is also forbidden from adding a National renderer or product timeline. Its coordinator transition is non-persisting and non-painted; failure or completion restores the established Site diagnostic state.
+Phase 3 exposes exactly one National timeline observation and disabled movement controls. It is forbidden from adding polling, history, multi-frame residency, playback, scrubbing, or quality locking assigned to Phase 4. Hidden `window.__MISTR_NATIONAL_PHASE2__` and `window.__MISTR_NATIONAL_PHASE3__` evidence APIs do not become normal controls.
 
 Required surfaces:
 
@@ -81,6 +81,7 @@ Required surfaces:
 
 - MapLibre basemap.
 - Raw selected-site radar custom layer.
+- Separate National numeric-grid custom layer when National is painted.
 - Optional tiled comparison/fallback layer.
 - Diagnostic gate markers and radar range boundary.
 
@@ -126,6 +127,7 @@ npm run test:browser           # browser custom-layer/UI coverage
 npm run test:packaged          # real Tauri/WebView2 packaged smoke/scenarios
 npm run benchmark:renderer     # fixed fixture/camera performance run
 npm run test:national:phase2:packaged # live NOAA MRMS decode/wire/backpressure diagnostic
+npm run test:national:phase3:packaged # static National renderer/handoff/context evidence
 npm run benchmark:latency      # summarize captured live latency samples
 npm run debug:bundle           # create bounded diagnostics archive
 npm run tauri build            # installable/release-like artifact
@@ -240,7 +242,8 @@ Artifacts must be named deterministically enough to compare runs and bounded eno
 - Keep architecture, decoder, renderer, and UI changes separable in review.
 - User controls when any Mistr work is integrated or merged into GustAVO.
 - National phases use separate `codex/` branches and Ready-for-review pull requests; only the owner merges.
-- Phase 1 ended at the behavior-preserving coordinator and was merged through PR #15. Phase 2 ends after strict MRMS acquisition/decoding, value-aware levels, `PackedGrid v1`, shared-credit transfer, the non-shipping 30-frame diagnostic, synchronized documentation, full regression evidence, and PR review.
-- Phase 2 does not begin the National renderer, exact point lookup, product history/timeline, playback, or visible UI assigned to later phases.
+- Phase 1 ended at the behavior-preserving coordinator and merged through PR #15. Phase 2 ended after strict MRMS acquisition/decoding, value-aware levels, `PackedGrid v1`, shared-credit transfer, and the non-shipping 30-frame diagnostic, then merged through PR #16.
+- Phase 3 ends after one complete current National paint, overview/detail working sets, exact point interrogation, explicit source/recenter UI, atomic Site/National handoff, real context recovery, synchronized documentation, full regression evidence, and PR review.
+- Phase 3 does not begin National polling, predecessor backfill, history residency, playback, scrubbing, or playback-quality locking assigned to Phase 4.
 - The pre-existing `assets/radar.svg` and `assets/recenter.svg` files remain outside National work unless separately authorized.
 - Downloaded MRMS observations, arbitrary provider responses, local oracle environments, packaged reports, screenshots, and binaries remain ignored and must never be staged.

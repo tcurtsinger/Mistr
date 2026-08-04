@@ -28,6 +28,7 @@ export interface RadarChromeProps {
   interrogation: GateInterrogation | null;
   inspectionSelected: boolean;
   onRecenter(): void;
+  onSelectNational(): void;
   onSelectDisplayMode(mode: RadarDisplayMode): void;
   onScrub(index: number): void;
   onSelectSite(site: string): void;
@@ -39,6 +40,8 @@ export interface RadarChromeProps {
   preparingLabel?: string;
   radarNotice?: { kind: "info" | "error"; message: string };
   recenterReady: boolean;
+  paintedSourceKind: "site" | "national";
+  requestedSourceKind?: "site" | "national";
   requestedSite?: string;
   selectedSite: string;
   siteSelectionReady: boolean;
@@ -59,6 +62,7 @@ export function RadarChrome({
   interrogation,
   inspectionSelected,
   onRecenter,
+  onSelectNational,
   onSelectDisplayMode,
   onScrub,
   onSelectSite,
@@ -70,6 +74,8 @@ export function RadarChrome({
   preparingLabel,
   radarNotice,
   recenterReady,
+  paintedSourceKind,
+  requestedSourceKind,
   requestedSite,
   selectedSite,
   siteSelectionReady,
@@ -162,6 +168,10 @@ export function RadarChrome({
     onSelectSite(site);
     closePanel();
   };
+  const selectNational = () => {
+    onSelectNational();
+    closePanel();
+  };
   const selectDisplayMode = (mode: RadarDisplayMode) => {
     onSelectDisplayMode(mode);
     closePanel();
@@ -195,11 +205,14 @@ export function RadarChrome({
           aria-controls="mistr-context-site-panel"
           aria-expanded={openPanel === "context-sites"}
           aria-haspopup="dialog"
-          aria-label={`Choose radar site. ${selectedSite} is displayed.${requestedSite ? ` Updating ${requestedSite}.` : ""}`}
+          aria-label={`Choose radar source. ${paintedSourceKind === "national" ? "National CONUS" : `${selectedSite} Site`} is displayed.${requestedSourceKind === "national" ? " Updating National." : requestedSite ? ` Updating ${requestedSite}.` : ""}`}
           className="context-tool context-tool--site"
           data-control="radar-sites"
+          data-role="radar-source"
           data-displayed-site={selectedSite}
+          data-painted-source={paintedSourceKind}
           data-requested-site={requestedSite}
+          data-requested-source={requestedSourceKind}
           disabled={!siteSelectionReady}
           onClick={() => {
             if (openPanel === "context-sites") closePanel();
@@ -211,15 +224,19 @@ export function RadarChrome({
           onFocus={() => setToolbarTabStop("site")}
           ref={siteTriggerRef}
           tabIndex={effectiveToolbarTabStop === "site" ? 0 : -1}
-          tooltip={`Radar Site · ${selectedSite}`}
+          tooltip={`Radar Source · ${paintedSourceKind === "national" ? "National" : selectedSite}`}
           tooltipSuppressed={openPanel === "context-sites"}
           type="button"
         >
           <RadarSiteIcon />
-          {requestedSite ? <span aria-hidden="true" className="site-activity" /> : null}
+          {requestedSite || requestedSourceKind === "national"
+            ? <span aria-hidden="true" className="site-activity" />
+            : null}
         </IconToolButton>
         <IconToolButton
-          aria-label={`Recenter radar on ${selectedSite}`}
+          aria-label={paintedSourceKind === "national"
+            ? "Recenter National radar on the contiguous United States"
+            : `Recenter radar on ${selectedSite}`}
           className="context-tool context-tool--recenter"
           data-control="recenter-radar"
           disabled={!recenterReady}
@@ -271,11 +288,13 @@ export function RadarChrome({
       </div>
 
       {openPanel === "context-sites" ? (
-        <SitePanel
+        <SourcePanel
           className="tool-panel--site"
           currentSite={selectedSite}
           id="mistr-context-site-panel"
+          onSelectNational={selectNational}
           onSelect={selectSite}
+          paintedSourceKind={paintedSourceKind}
           selectionReady={siteSelectionReady}
           sites={sites}
         />
@@ -501,32 +520,65 @@ function ViewPanel({
   );
 }
 
-function SitePanel({
+function SourcePanel({
   className,
   currentSite,
   id,
+  onSelectNational,
   onSelect,
+  paintedSourceKind,
   selectionReady,
   sites,
 }: {
   className: string;
   currentSite: string;
   id: string;
+  onSelectNational(): void;
   onSelect(site: string): void;
+  paintedSourceKind: "site" | "national";
   selectionReady: boolean;
   sites: readonly RadarSiteOption[];
 }) {
   const [query, setQuery] = useState("");
+  const [sourceView, setSourceView] = useState<"site" | "national">(paintedSourceKind);
   const filteredSites = filterRadarSites(sites, query);
+
+  useEffect(() => setSourceView(paintedSourceKind), [paintedSourceKind]);
 
   return (
     <aside
-      aria-label="Choose radar site"
+      aria-label="Choose radar source"
       className={`tool-panel ${className}`}
       id={id}
       role="dialog"
     >
-      <PanelHeader eyebrow="Radar sites" supporting={`${sites.length} WSR-88D STATIONS`} />
+      <PanelHeader eyebrow="Radar source" supporting="NATIONAL COVERS CONUS" />
+      <div aria-label="Radar source" className="source-choices" role="radiogroup">
+        <button
+          aria-checked={sourceView === "national"}
+          disabled={!selectionReady}
+          onClick={() => {
+            setSourceView("national");
+            onSelectNational();
+          }}
+          role="radio"
+          type="button"
+        >
+          <span><strong>National</strong><small>CONUS MRMS mosaic</small></span>
+          {paintedSourceKind === "national" ? <CheckIcon /> : null}
+        </button>
+        <button
+          aria-checked={sourceView === "site"}
+          disabled={!selectionReady}
+          onClick={() => setSourceView("site")}
+          role="radio"
+          type="button"
+        >
+          <span><strong>Site</strong><small>One WSR-88D station</small></span>
+          {paintedSourceKind === "site" ? <CheckIcon /> : null}
+        </button>
+      </div>
+      {sourceView === "site" ? <>
       <div className="site-search">
         <SearchIcon />
         <input
@@ -545,7 +597,7 @@ function SitePanel({
       </p>
       <div className="site-list" id={`${id}-site-list`}>
         {filteredSites.map((site) => {
-          const current = site.id === currentSite;
+          const current = paintedSourceKind === "site" && site.id === currentSite;
           return (
             <button
               aria-current={current ? "true" : undefined}
@@ -563,6 +615,11 @@ function SitePanel({
           <p className="site-list__empty">No matching radar sites.</p>
         ) : null}
       </div>
+      </> : (
+        <p className="source-supporting">
+          National displays NOAA&apos;s processed, quality-controlled CONUS reflectivity mosaic.
+        </p>
+      )}
     </aside>
   );
 }

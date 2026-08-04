@@ -2,31 +2,31 @@
 
 **Checkpoint:** 2026-08-03
 
-**Merged baseline:** [PR #15 - Add National radar session foundation](https://github.com/tcurtsinger/Mistr/pull/15), merge commit `debf49b`
+**Merged baseline:** [PR #16 - Add National MRMS data and wire foundation](https://github.com/tcurtsinger/Mistr/pull/16), merge commit `d87f27f`
 
-**Active change:** National Phase 2 MRMS acquisition, strict decoder, levels, and `PackedGrid v1`; Ready-for-review PR pending from `codex/mistr-national-mrms-foundation`
+**Active change:** National Phase 3 static end-to-end source, numeric-grid renderer, exact interrogation, and explicit source control; Ready-for-review PR pending from `codex/mistr-national-static-renderer`
 
-**Branch:** `codex/mistr-national-mrms-foundation`
+**Branch:** `codex/mistr-national-static-renderer`
 
 This document is the durable starting point for the next Mistr development session. Verify the active branch, worktree, and any future pull-request checks or threads before acting because repository state can change after this checkpoint.
 
 ## Product decision
 
-Mistr is the product. The currently exposed product remains deliberately narrow: one selected NEXRAD site, live high-resolution base reflectivity, smooth pan and zoom, and a truthful recent-observation timeline. National radar is an approved post-Alpha milestone. The active branch contains diagnostic-only MRMS acquisition and transfer plumbing, but no National renderer, timeline, history product, or visible source control exists yet. Velocity UI, alerts, cameras, video, notifications, broad settings, and the wider GustAVO feature set remain outside the current product.
+Mistr is the product. Merged `main` remains the qualified selected-site Alpha plus the internal Phase 1/2 National foundation. The active Phase 3 branch adds the first complete visible National source: one newest NOAA MRMS CONUS observation with exact numeric interrogation and no automatic zoom handoff. This is review-branch behavior until merge. National history, polling, and playback do not exist yet and remain Phase 4 work. Velocity UI, alerts, cameras, video, notifications, broad settings, and the wider GustAVO feature set remain outside the product.
 
 Windows is the Alpha release platform. Shared Tauri, Rust, React, TypeScript, MapLibre, and WebGL code must continue to avoid unnecessary Windows-only assumptions so later macOS work remains practical.
 
 ## Current user experience
 
 - The radar map fills the window beneath the approved compact floating controls.
-- The content-sized top toolbar uses the sequence `Mistr | site icon, recenter icon | eye icon`. There is no left application menu or About panel.
-- The site icon opens the single canonical searchable site browser, recenter is a direct command, and the eye icon opens a radar-view popup containing only `Smooth` and `Native`. Its tooltip is `Radar View`; fixed product and elevation facts are not presented as controls.
-- The site control's accessible truth follows the radar that actually painted, never merely the requested site. Site acquisition retains a visible indicator and a compact notice naming both displayed and pending radar.
+- The content-sized top toolbar uses the sequence `Mistr | source icon, recenter icon | eye icon`. There is no left application menu or About panel.
+- The source panel begins with explicit `National` and `Site` choices. Selecting `Site` exposes the canonical searchable station browser; supporting and accessible text identifies National coverage as CONUS. Recenter follows the painted source, and the eye popup still contains only `Smooth` and `Native`.
+- The source control's accessible truth follows the radar that actually painted, never merely the requested source. Acquisition retains a visible indicator and a compact notice naming both displayed and pending radar.
 - During normal operation, the bottom bar shows displayed scan timestamp and numeric frame age alongside transport, direct timeline scrubbing, and active dBZ. It does not show `Fresh`, `Stale`, `Playing`, `Paused`, or `Newest`.
 - The age is green only for the recent newest painted live scan. Historical, archive, and old latest-live frames use white; numeric age and accessible text ensure color is not the only truth cue.
-- Direct timeline dragging scrubs resident observations; there are no dedicated previous/next buttons.
-- A map click leaves a reticle, and its dBZ value is recomputed whenever another observation paints.
-- `Smooth` filters only the spatial appearance of the current measured observation; `Native` shows exact nearest-sampled polar gates. Both modes preserve native gate/status interrogation, measured time, numeric age, and painted-frame truth.
+- Site direct timeline dragging scrubs resident observations; there are no dedicated previous/next buttons. Phase 3 National has exactly one timeline observation, so its playback and scrub controls are disabled without fabricating history.
+- A map click leaves a reticle. Site uses the existing exact polar interrogation; National sends a bounded identity-bound point request to Rust's exact retained base grid and discards stale responses.
+- `Smooth` filters only the spatial appearance of the current measured observation; `Native` shows exact nearest-sampled polar gates for Site and exact nearest selected-level cells for National. National smoothing never bridges missing/no-coverage cells. Both modes preserve exact backend interrogation, measured time, numeric age, and painted identity.
 - Both modes share a display-only weak-return curve: non-positive dBZ is visually transparent, positive returns increase progressively to full opacity at 20 dBZ, and native inspection remains exact. Mistr does not call this meteorological clutter removal.
 - Major roads, state boundaries, and important labels remain above radar with light-and-dark contrast. Motorway, trunk, and primary segments use one continuous zoom treatment instead of separate visibility bands. Far regional zooms keep coherent interstate and U.S.-highway networks while state and unnetworked routes fade in with the detailed source graph; local roads fade in gradually below radar. Matte water remains below radar without a polygon outline whose generated seams could change across zoom levels. Minor map detail remains subdued, and Mistr does not lower global radar opacity.
 - Initial load, successful site change, and recenter fit measured radar coverage; user pan and zoom remain free afterward.
@@ -95,9 +95,9 @@ Visible-first WebGL recovery remains in force. Context loss during an uncommitte
 
 The `window.__MISTR_PHASE4__`, `window.__MISTR_PHASE5__`, and `window.__MISTR_PHASE6__` diagnostic APIs remain required by packaged evidence runners. They are not normal product controls.
 
-The active branch adds `window.__MISTR_NATIONAL_PHASE2__` only for release-runtime acquisition and transfer evidence. It is not a normal product API and cannot publish a National paint receipt, source label, timeline, or persisted choice.
+The merged hidden `window.__MISTR_NATIONAL_PHASE2__` diagnostic remains available. Phase 3 adds hidden `window.__MISTR_NATIONAL_PHASE3__` packaged controls for source transition, camera refinement, exact/peak lookup, transfer-credit inspection, and real context reset; these are evidence surfaces rather than product controls.
 
-## Merged Phase 1 foundation and active Phase 2 data path
+## Merged Phases 1 and 2, active Phase 3 renderer
 
 Merged PR #15 supplies the internal source boundary required before National acquisition work:
 
@@ -109,7 +109,7 @@ Merged PR #15 supplies the internal source boundary required before National acq
 - failed or superseded transitions retain the previous painted source; and
 - no incomplete National UI, numeric-grid renderer, or National timeline was introduced.
 
-The active Phase 2 branch adds only the National data and wire foundation:
+Merged PR #16 adds the National data and wire foundation:
 
 - fixed anonymous HTTPS to `noaa-mrms-pds.s3.amazonaws.com`, exact current/previous UTC-day inventory, measured-time ordering, strict keys, no redirects, bounded response bodies, and rejection of HTML/XML in successful binary responses;
 - a product-specific decoder for the reviewed `MergedBaseReflectivityQC_00.50` GRIB2 Template 5.41/16-bit grayscale PNG contract, including exact product, time, 7,000 by 3,500 grid, orientation, scaling, and status checks;
@@ -120,13 +120,32 @@ The active Phase 2 branch adds only the National data and wire foundation:
 - National manifest and chunk leases through the existing single global two-credit broker; and
 - a non-shipping 30-observation release diagnostic that simultaneously retains every immutable compressed source object, validates the unchanged schema/working-set model, and returns to the prior Site loop without National paint or persistence.
 
-Phase 2 deliberately does not add `NationalMrmsSession`, a numeric-grid WebGL renderer, exact backend point lookup, product history/timeline/playback, polling integration, visible `National`/`Site` controls, or National paint receipts. Those remain later-phase work.
+The active Phase 3 branch adds:
+
+- `NationalMrmsSession` behind the one `RadarSessionCoordinator`, preserving source intent separately from the old painted source until a matching receipt commits;
+- one newest exact MRMS observation, with factor-4 complete-domain overview and factor-1 camera-detail working sets generated from the same retained base grid;
+- a separate `NationalGridLayer` using `R16UI` chunk textures, one-cell halos, Native nearest-cell sampling, and Smooth interpolation only across four valid cells;
+- a `NationalWorkingSetController` that validates complete coverage, transports and uploads one chunk lease at a time over animation frames, enforces a 4 ms per-frame upload ceiling, and rolls incomplete staging back;
+- authoritative receipts containing observation, generation, content hash, presentation factor, coverage version/kind, chunk count, context epoch, timing, bytes, and framebuffer size after a GPU fence;
+- exact Rust-owned base-grid point lookup tied to the painted generation, observation time, content hash, and geographic inspection identity;
+- explicit `National` and `Site` top-level choices with CONUS copy, source-aware recenter, one-observation National timeline truth, and persistence only after paint; and
+- visible-first rehydration after real WebGL context loss without network work.
+
+Phase 3 deliberately does not add a National polling loop, predecessor history, multi-frame residency, playback, scrubbing, or quality locking. Those remain Phase 4 work.
 
 The existing Phase 4, 5, 6, readiness, history, UI, and map-quality diagnostic surfaces remain required and unchanged.
 
 ## Validation state
 
-### Active Phase 2 evidence
+### Active Phase 3 evidence
+
+The packaged 3840x2160 Windows/WebView2 run acquired `MRMS_MergedBaseReflectivityQC_00.50_20260804-012808.grib2.gz`, retained 64,312,500 backend bytes, and painted all 28 factor-4 overview chunks. The overview used 3,108,788 GPU resource bytes and staged in 186.4 ms across animation frames. It then centered the strongest exact retained sample at 61.5 dBZ and painted an eight-chunk factor-1 viewport in 83.3 ms. The stable and peak detailed state retained all 28 overview chunks as complete-domain fallback, reported 36 resident chunks, and used 4,173,812 bytes. Working-set uploads peaked at 0.70 ms and time-sliced recovery uploads at 1.40 ms, both below the 4 ms ceiling.
+
+Native and Smooth preserved the same observation/time identity while 1,219,013 captured 4K pixels changed between their spatial presentations. A real `WEBGL_lose_context` reset rehydrated visible detail first and then the complete overview fallback one chunk per animation frame, advancing the receipt from context epoch 1 to 2 while preserving observation, presentation factor, coverage identity, and all 36 resident chunks. The final broker snapshot had exactly two available credits and zero held/in-flight credits. A National-to-KTLX transition then completed with Site paint truth and no mixed timeline. The dedicated command is `npm run test:national:phase3:packaged`; generated reports and screenshots remain ignored.
+
+Unit/source validation passes 40 frontend/script test files with 251 tests, 115 Rust library tests plus Rust binary targets, the production build, and documentation/public scans. The merged National Phase 2 packaged gate and the established packaged Phase 4/5/6 regressions also pass on this branch; exact final commands are recorded in the Phase 3 report.
+
+### Merged Phase 2 evidence
 
 The final real Windows/WebView2 release diagnostic acquired 30 distinct latest NOAA MRMS observations using 31 bounded network requests, spanning 57.90 minutes. It simultaneously retained all 30 immutable compressed source objects in 44,094,473 bytes, strictly decoded each exact 49,000,000-byte base grid, generated and wire-validated all 840 factor-4 chunks, and transferred the newest 28-chunk frame through the sole global broker. Holding two leases made a third return `credit_exhausted`; the final snapshot returned both credits.
 
@@ -134,7 +153,7 @@ The measured factor-4 numeric payload ledger is 3,104,644 bytes per frame includ
 
 After the diagnostic, the release runtime restored the existing 20-frame KTLX Site loop and `nexrad_level2_archive_ii` painted-source truth.
 
-The complete Phase 2 branch validation passed:
+The complete merged Phase 2 validation passed:
 
 - `npm run verify`: public scan of 241 candidate files, links across 78 Markdown files, 232 frontend tests, production TypeScript/Vite build, Rust formatting, clippy with warnings denied, 121 Rust tests across the library and binaries including the cached four-season MRMS oracle, and Rust check;
 - packaged National Phase 2: 30 retained and decoded observations, 840 validated chunks, the 30-frame memory extension, complete newest-frame transfer, two-credit backpressure/release, and Site restoration described above;
@@ -142,7 +161,7 @@ The complete Phase 2 branch validation passed:
 - packaged Phase 5: in-flight KAMX-to-KTLX supersession preserved the `live_sweep_failed` diagnostic code, then two chronological KTLX observations painted with two residents and direct oldest/newest scrubbing; and
 - packaged Phase 6: both release-runtime N0S, real WebGL context-recovery, minimize/restore, restart, and cold-start passes succeeded.
 
-These gates show that Phase 2 did not weaken the current selected-site product or its diagnostic APIs. They still do not constitute National rendering or product evidence.
+These gates show that Phase 2 did not weaken the current selected-site product or its diagnostic APIs. Phase 3's separate evidence is the first National rendering/product proof and remains one-frame-only.
 
 ### Merged Phase 1 evidence
 
@@ -197,7 +216,7 @@ Release readiness also corrects a demonstrated installer defect: prior bundles d
 
 ## Pull-request checkpoint
 
-PR #8, rolling-history [PR #9](https://github.com/tcurtsinger/Mistr/pull/9), release-readiness [PR #10](https://github.com/tcurtsinger/Mistr/pull/10), UI/live-site hardening [PR #11](https://github.com/tcurtsinger/Mistr/pull/11), rendering quality [PR #12](https://github.com/tcurtsinger/Mistr/pull/12), radar-chrome hardening [PR #13](https://github.com/tcurtsinger/Mistr/pull/13), radar legibility [PR #14](https://github.com/tcurtsinger/Mistr/pull/14), and National coordinator foundation [PR #15](https://github.com/tcurtsinger/Mistr/pull/15) are merged. National Phase 2 is isolated on `codex/mistr-national-mrms-foundation`; only the repository owner merges its eventual Ready-for-review PR.
+PR #8, rolling-history [PR #9](https://github.com/tcurtsinger/Mistr/pull/9), release-readiness [PR #10](https://github.com/tcurtsinger/Mistr/pull/10), UI/live-site hardening [PR #11](https://github.com/tcurtsinger/Mistr/pull/11), rendering quality [PR #12](https://github.com/tcurtsinger/Mistr/pull/12), radar-chrome hardening [PR #13](https://github.com/tcurtsinger/Mistr/pull/13), radar legibility [PR #14](https://github.com/tcurtsinger/Mistr/pull/14), National coordinator foundation [PR #15](https://github.com/tcurtsinger/Mistr/pull/15), and National MRMS data/wire foundation [PR #16](https://github.com/tcurtsinger/Mistr/pull/16) are merged. National Phase 3 is isolated on `codex/mistr-national-static-renderer`; only the repository owner merges its eventual Ready-for-review PR.
 
 Review workflow:
 
@@ -211,7 +230,7 @@ Review workflow:
 
 ## Next work after this checkpoint
 
-Complete and review National Phase 2 only. After its Ready-for-review PR passes review, the owner merges it and separately authorizes Phase 3. Do not begin the National renderer, product timeline/history/playback, exact point interrogation, or visible National controls on this branch. Microsoft Store packaging and signing remain paused.
+Complete and review National Phase 3 only. After its Ready-for-review PR passes review, the owner merges it and separately authorizes Phase 4. Do not begin National polling, predecessor history, multi-observation GPU residency, playback, scrubbing, or playback-quality locking on this branch. Microsoft Store packaging and signing remain paused.
 
 ## Public-repository safety
 

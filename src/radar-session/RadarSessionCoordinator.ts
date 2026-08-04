@@ -186,6 +186,12 @@ export function sameRadarSource(left: RadarSourceKey, right: RadarSourceKey): bo
       : false;
 }
 
+export function isPaintedNationalSource(
+  snapshot: Pick<RadarSessionSnapshot, "painted">,
+): boolean {
+  return snapshot.painted?.source.kind === "national";
+}
+
 function assertSourceKey(source: RadarSourceKey): void {
   if (source.kind === "site") {
     if (!isSupportedRadarSite(source.siteIcao)) {

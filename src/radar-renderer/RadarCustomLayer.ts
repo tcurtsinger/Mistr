@@ -396,6 +396,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
   private selectionSequence = 1;
   private selectedAt = 0;
   private displayMode: RadarDisplayMode;
+  private presentationEnabled = true;
   private peakGpuResourceBytes = 0;
   private frameUploadCount = 0;
   private frameUploadBytes = 0;
@@ -465,6 +466,12 @@ export class RadarCustomLayer implements CustomLayerInterface {
               : "initializing",
       this.runtimeError,
     );
+  }
+
+  setPresentationEnabled(enabled: boolean): void {
+    if (this.presentationEnabled === enabled) return;
+    this.presentationEnabled = enabled;
+    this.map?.triggerRepaint();
   }
 
   retryFailedSmoothDrawInNative(): RadarSelectionRequest | null {
@@ -580,6 +587,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
       if (this.recoveryPhase !== "ready") this.rejectRecoveryWaiters(this.runtimeError);
       return;
     }
+    if (!this.presentationEnabled) return;
     const frame = this.requireSelectedFrame();
     const model = frame.model;
     const started = performance.now();

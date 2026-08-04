@@ -4,7 +4,7 @@
 |---|---|
 | Decision date | 2026-08-03 |
 | Last plan amendment | 2026-08-03 — 20-observation retained history, level-of-detail GPU working set, theoretical-domain encoding, time-sliced uploads, and cross-source freshness evidence |
-| Status | Approved plan; Phase 1 merged in PR #15; Phase 2 data/wire foundation active on `codex/mistr-national-mrms-foundation`, not user-visible |
+| Status | Approved plan; Phases 1 and 2 merged in PRs #15/#16; Phase 3 static National source active on `codex/mistr-national-static-renderer` for review |
 | Planned source | NOAA Multi-Radar/Multi-Sensor System (MRMS) `MergedBaseReflectivityQC` |
 | Initial geographic scope | Contiguous United States (CONUS) |
 | Initial retained history | 20 exact observations, approximately 38 minutes at the normal two-minute publication cadence |
@@ -16,7 +16,7 @@ This document defines the next Mistr radar milestone: a truthful, bounded Nation
 
 The plan deliberately avoids the failure modes demonstrated by GustAVO's national/site radar path. National radar will not be assembled from individual Level II sites inside Mistr, represented as a large set of animated MapLibre tile sources, or automatically substituted for site radar at a zoom threshold. It will be a separate NOAA-produced gridded observation type with the same generation, ownership, paint-receipt, playback, recovery, and UI-truth standards already required by Mistr.
 
-This remains the governing phased contract. The owner authorized Phase 1 and merged it through PR #15, then separately authorized Phase 2 on 2026-08-03. Phase 2 authorization extends only to MRMS acquisition, strict decoding, numeric levels/chunks, `PackedGrid v1`, and hidden diagnostics; it does not authorize rendering, product history, exact point interrogation, or visible National controls.
+This remains the governing phased contract. The owner authorized and merged Phase 1 through PR #15, then authorized and merged Phase 2 through PR #16 at `d87f27f`. The owner separately authorized Phase 3 on 2026-08-03. Phase 3 authorization extends only to one static current National observation, its renderer/working set, exact point interrogation, atomic source handoff, and visible source controls; it does not authorize National polling, history, playback, scrubbing, or playback-quality locking.
 
 ## 2. Accepted product decisions
 
@@ -485,7 +485,7 @@ Exit gate: current Site behavior and all existing validation remain unchanged th
 
 ### Phase 2 — MRMS acquisition, decoder, and PackedGrid
 
-**Active branch status:** implemented and source/packaged validated for review behind diagnostics on `codex/mistr-national-mrms-foundation`. No National renderer, timeline, paint receipt, or visible control is present.
+**Merged status:** implemented and merged through PR #16 at commit `d87f27f`. Its diagnostic API remains available, but this status alone does not claim National paint or UI.
 
 Deliverables:
 
@@ -507,6 +507,8 @@ Exit gate: Mistr can acquire and transfer exact National observations safely, bu
 
 ### Phase 3 — Static end-to-end National source
 
+**Active branch status:** implemented and packaged-validated for review on `codex/mistr-national-static-renderer`. It exposes one complete current CONUS observation only; Phase 4 history and playback remain absent.
+
 Deliverables:
 
 - chunk-safe National WebGL renderer and bounded working-set controller;
@@ -524,6 +526,8 @@ Deliverables:
 - compact, keyboard, screen-reader, reduced-motion, and forced-color validation.
 
 Exit gate: selecting National produces one current, truthful, complete, interrogable observation and safe return to any Site.
+
+Phase 3 packaged evidence at 3840 by 2160 paints the complete 28-chunk factor-4 overview, retains it as a complete-domain fallback while refining an eight-chunk exact factor-1 viewport, records 0.70 ms working-set and 1.40 ms recovery upload maxima plus a 4,173,812-byte peak, proves exact 61.5 dBZ lookup, distinguishes Native and Smooth without identity drift, completes real time-sliced context recovery at epoch 2, returns every shared credit, and safely hands National back to KTLX. Exact detail chunk count varies with camera coverage. A deterministic age test covers a newest-for-National observation 3 minutes older than the prior newest Site observation; the compact packaged source panel is checked at 1024 by 640 with keyboard focus, forced colors, and reduced motion. Complete evidence is in [National Phase 3 Static Renderer](phase-reports/NATIONAL_PHASE_3_STATIC_RENDERER.md).
 
 ### Phase 4 — Bounded rolling National history
 
@@ -701,6 +705,14 @@ The owner separately authorized Phase 2 after that merge. The Phase 2 branch:
 2. preserved the two protected untracked SVG files without modification;
 3. implements only fixed-host MRMS acquisition/decoding, exact numeric representation, value-aware levels, `PackedGrid v1`, shared-credit transfer, bounded cache scaffolding, independent-oracle tests, and hidden release diagnostics;
 4. records an actual 30-observation diagnostic without changing the wire schema or working-set model; and
-5. will stop at the Phase 2 exit gate after commit, push, and a Ready-for-review PR.
+5. stopped at the Phase 2 exit gate, opened Ready-for-review PR #16, and was merged by the owner at `d87f27f`.
 
-Phase 3 remains blocked on Phase 2 review, owner merge, and separate owner authorization.
+The owner separately authorized Phase 3 after that merge. The Phase 3 branch:
+
+1. started from merged commit `d87f27f` after verifying `main` and `origin/main` matched;
+2. preserved the two protected untracked SVG files without modification;
+3. implements only the static National session, numeric-grid renderer, bounded overview/detail working sets, exact point interrogation, explicit source UI, source-aware recenter, and context recovery;
+4. retains all Site diagnostic APIs and the single global two-credit broker; and
+5. will stop at the Phase 3 exit gate after full source/packaged regressions, commit, push, and a Ready-for-review PR.
+
+Phase 4 remains blocked on Phase 3 review, owner merge, and separate owner authorization.

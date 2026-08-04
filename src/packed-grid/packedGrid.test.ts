@@ -37,10 +37,10 @@ describe("PackedGrid v1 cross-language wire", () => {
       contentSha256: "1826ea8b575cc59c24433ab610197f5a1d5a8d91f20c61cf698ec1d6ff697b76",
       width: 1750,
       height: 875,
-      firstLatitudeDegrees: 54.995,
-      firstLongitudeDegrees: -129.995,
-      lastLatitudeDegrees: 20.035,
-      lastLongitudeDegrees: -60.035,
+      firstLatitudeDegrees: 54.98,
+      firstLongitudeDegrees: -129.98,
+      lastLatitudeDegrees: 20.02,
+      lastLongitudeDegrees: -60.02,
       latitudeStepDegrees: 0.04,
       longitudeStepDegrees: 0.04,
       presentationFactor: 4,
@@ -80,6 +80,14 @@ describe("PackedGrid v1 cross-language wire", () => {
     timestampView.setBigInt64(24, timestampView.getBigInt64(24, false) + 1_000n, false);
     expect(() => parsePackedGridManifest(timestamp)).toThrowError(
       expect.objectContaining({ code: "invalid_source" }),
+    );
+
+    const uncenteredOverview = fixture(MANIFEST_PATH);
+    const uncenteredView = new DataView(uncenteredOverview.buffer);
+    uncenteredView.setInt32(40, 54_995_000, false);
+    uncenteredView.setInt32(44, -129_995_000, false);
+    expect(() => parsePackedGridManifest(uncenteredOverview)).toThrowError(
+      expect.objectContaining({ code: "invalid_grid" }),
     );
 
     const payload = fixture(CHUNK_PATH);

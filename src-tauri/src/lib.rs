@@ -47,8 +47,11 @@ pub fn run() {
             phase2_ipc::request_phase5_live_sweep,
             phase2_ipc::benchmark_phase2_encoder,
             national_phase2::prepare_national_phase2_diagnostic,
+            national_phase2::prepare_national_phase3_frame,
             national_phase2::request_national_packed_grid_manifest,
             national_phase2::request_national_packed_grid_chunk,
+            national_phase2::lookup_national_grid_point,
+            national_phase2::find_national_peak_point,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Mistr");

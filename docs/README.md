@@ -1,6 +1,6 @@
 # Mistr
 
-**Status:** Mistr is the product. The selected-site Windows Alpha is implemented and packaged-validated. National Phase 1 is merged; Phase 2 adds diagnostic-only MRMS acquisition, decoding, levels, and wire transfer on its review branch. National radar is not yet a visible or usable product.
+**Status:** Mistr is the product. The selected-site Windows Alpha is implemented and packaged-validated. National Phases 1 and 2 are merged. Phase 3 implements and packaged-validates one static, interrogable CONUS observation with an explicit National/Site control on its review branch; it is not shipped from `main`, and National history/playback remain Phase 4 work.
 
 Mistr is a focused desktop radar instrument for selected-site storm inspection. Its Alpha product contract lives in [PRODUCT.md](../PRODUCT.md), and its implemented interface rules live in [DESIGN.md](../DESIGN.md).
 
@@ -12,13 +12,13 @@ Radar Session Coordinator -> SiteLevel2Session -> AWS radar data -> decode and n
 
 The historical phase documents record how this architecture was selected, bounded, tested, and reviewed. They remain useful to future maintainers, but forward product work is planned directly in Mistr rather than as a GustAVO integration rehearsal.
 
-The active diagnostic-only National data path is:
+The active Phase 3 National path is:
 
 ```text
-fixed NOAA MRMS host -> strict GRIB2/PNG decoder -> exact u16 grid -> value-aware levels -> PackedGrid v1 -> shared two-credit IPC -> TypeScript validation
+fixed NOAA MRMS host -> strict GRIB2/PNG decoder -> exact u16 grid -> value-aware levels -> PackedGrid v1 -> shared two-credit IPC -> National numeric-grid WebGL2 renderer -> coverage-aware GPU receipt
 ```
 
-It stops before GPU rendering and product paint truth.
+It paints only the newest single observation. Bounded 20-observation history, polling, and playback-quality locking do not begin until Phase 4.
 
 ## Alpha direction
 
@@ -29,7 +29,7 @@ It stops before GPU rendering and product paint truth.
 - Keep `Smooth` and `Native` as explicit spatial views of that same observation; inspection always reports native gate/status truth even when the display-only weak-return curve makes a measured low return transparent.
 - Preserve the fixture, packaged-runtime, performance, and recovery gates as part of product engineering.
 - Keep prototype phase labels, benchmark controls, and diagnostic internals out of the normal interface.
-- Keep National Phase 2 diagnostics invisible: no National control appears until the National session, numeric grid renderer, and paint-truth path are complete in a later phase.
+- Expose National only through the complete Phase 3 session/renderer/paint-truth path; never expose partial acquisition, chunk, or staging state as product truth.
 
 ## Documentation map
 
@@ -64,8 +64,10 @@ The numbered documents and phase reports below are historical architecture and a
 | [23_ALPHA_UI_AND_SITE_HARDENING.md](23_ALPHA_UI_AND_SITE_HARDENING.md) | Full operational WSR-88D catalog, bounded discovery, startup/status truth, and hands-on UI remediation |
 | [24_VISIBLE_FIRST_STARTUP_AND_RECENT_BACKFILL.md](24_VISIBLE_FIRST_STARTUP_AND_RECENT_BACKFILL.md) | Basemap-independent first paint, lazy archive diagnostics, predecessor backfill, and truthful partial-history states |
 | [25_RADAR_RENDERING_QUALITY.md](25_RADAR_RENDERING_QUALITY.md) | Product reflectivity palette and weak-return visibility, operational map context, `Smooth`/`Native` spatial modes, native interrogation truth, and rendering acceptance gates |
-| [26_NATIONAL_RADAR_IMPLEMENTATION_PLAN.md](26_NATIONAL_RADAR_IMPLEMENTATION_PLAN.md) | Approved explicit-source CONUS MRMS plan with 20 exact retained observations, a level-of-detail GPU working set designed for later 30-frame extension, phased delivery, and acceptance gates; Phase 1 is merged, Phase 2 data/wire diagnostics are active, and no National renderer or UI exists yet |
+| [26_NATIONAL_RADAR_IMPLEMENTATION_PLAN.md](26_NATIONAL_RADAR_IMPLEMENTATION_PLAN.md) | Approved explicit-source CONUS MRMS plan with 20 exact retained observations, a level-of-detail GPU working set designed for later 30-frame extension, phased delivery, and acceptance gates; Phases 1 and 2 are merged and Phase 3 static rendering is active for review |
 | [27_PACKED_GRID_V1.md](27_PACKED_GRID_V1.md) | National Phase 2 big-endian manifest/chunk schema, exact numeric metadata, geometry, integrity, and shared-credit transfer contract |
+| [28_NATIONAL_STATIC_RENDERER_DECISION.md](28_NATIONAL_STATIC_RENDERER_DECISION.md) | National Phase 3 numeric-grid renderer, coverage receipts, exact interrogation, atomic source handoff, and context-recovery contract |
+| [phase-reports/NATIONAL_PHASE_3_STATIC_RENDERER.md](phase-reports/NATIONAL_PHASE_3_STATIC_RENDERER.md) | Phase 3 packaged Windows/WebView2 static National evidence and measured memory/timing ledger |
 | [phase-reports/PHASE_2_PACKED_WIRE_AND_IPC.md](phase-reports/PHASE_2_PACKED_WIRE_AND_IPC.md) | Phase 2 cross-language, packaged IPC, timing, and memory evidence |
 | [phase-reports/PHASE_3_STATIC_GPU_RENDERER.md](phase-reports/PHASE_3_STATIC_GPU_RENDERER.md) | Phase 3 packaged GPU, alignment, palette, coexistence, and performance evidence |
 | [phase-reports/PHASE_4_RESIDENT_PLAYBACK.md](phase-reports/PHASE_4_RESIDENT_PLAYBACK.md) | Phase 4 real 20-observation residency, 4K playback, paint truth, and resource evidence |
