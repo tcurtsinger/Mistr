@@ -10,11 +10,14 @@ describe("National Phase 4 packaged acceptance", () => {
     const report = validReport();
     report.transitions.activityDelta.networkRequests = 1;
     report.activePlayback.renderer.presentationFactor = 1;
+    report.activePlayback.renderer.playbackQualityFactor = 2;
+    report.activePlayback.activityAfter.networkRequests = 1;
     report.activePlayback.inspectionQueue.maxConcurrentCount = 2;
     report.history.renderer.maximumUploadSliceMs = 4.1;
     expect(validateNationalPhase4Acceptance(report)).toEqual(expect.arrayContaining([
       "zero hot-path backend activity",
       "high-zoom playback quality lock",
+      "zero sharp-playback transfer and upload work",
       "latest-only inspection lookup queue",
       "4 ms upload slice budget",
     ]));
@@ -31,6 +34,12 @@ describe("National Phase 4 packaged acceptance", () => {
     expect(validateNationalPhase4Acceptance(report)).toContain(
       "failed Site transition restores active National session",
     );
+  });
+
+  it("permits bounded exact point refresh while sharp playback stays transfer-free", () => {
+    const report = validReport();
+    report.activePlayback.activityAfter.pointLookupDecodes = 8;
+    expect(validateNationalPhase4Acceptance(report)).toEqual([]);
   });
 });
 
@@ -115,8 +124,19 @@ function validReport() {
       },
     },
     activePlayback: {
-      playback: { playing: true, qualityLockFactor: 4 },
-      renderer: { ...renderer, playbackQualityFactor: 4 },
+      playback: { playing: true, qualityLockFactor: 1 },
+      renderer: {
+        ...renderer,
+        presentationFactor: 1,
+        playbackQualityFactor: 1,
+        detailedObservationIds: ids,
+        gpuResourceBytes: 150_000_000,
+        peakGpuResourceBytes: 170_000_000,
+      },
+      activityBefore: { ...activity },
+      activityAfter: { ...activity },
+      rendererBefore: renderer,
+      rendererAfter: renderer,
       inspectionQueue: {
         running: true,
         pending: true,

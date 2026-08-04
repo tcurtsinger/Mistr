@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   clearPriorWebGlErrors,
+  completePlaybackDetailFactor,
   commonResidencyReadyForSelection,
   sameNationalPresentationReceipt,
   type NationalPaintReceipt,
@@ -60,6 +61,34 @@ describe("National WebGL upload error isolation", () => {
       status: "painted",
       paintReceipt: undefined,
     })).toBe(false);
+  });
+
+  it("accepts fine playback only when every observation owns the same viewport chunks", () => {
+    const coverage = {
+      version: 1,
+      kind: "viewport" as const,
+      west: -102,
+      south: 35,
+      east: -94,
+      north: 42,
+      requiredChunkIndices: [10, 11, 38, 39],
+    };
+    const details = ["older", "newer"].map((observationId, index) => ({
+      observationId,
+      presentationFactor: 1,
+      coverage: { ...coverage, version: index + 1 },
+      complete: true,
+    }));
+
+    expect(completePlaybackDetailFactor(["older", "newer"], details)).toBe(1);
+    expect(completePlaybackDetailFactor(["older", "newer"], [
+      details[0],
+      {
+        ...details[1],
+        coverage: { ...details[1].coverage, requiredChunkIndices: [10, 11] },
+      },
+    ])).toBeUndefined();
+    expect(completePlaybackDetailFactor(["older", "newer"], [details[0]])).toBeUndefined();
   });
 });
 

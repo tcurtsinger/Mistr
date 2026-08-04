@@ -27,6 +27,7 @@ describe("NationalHistoryWorkingSetController", () => {
     const result = await controller.stageInitialOverview(fixture.observation, () => {});
 
     expect(result.receipt).toEqual(fixture.receipt);
+    expect(result.projectedGpuBytes).toBe(2);
     expect(events).toEqual([
       "release-manifest",
       "begin",
@@ -34,6 +35,41 @@ describe("NationalHistoryWorkingSetController", () => {
       "release-chunk",
       "paint-provisional",
     ]);
+  });
+
+  it("stages a factor-2 viewport as a bounded playback-quality level", async () => {
+    const fixture = historyFixture();
+    const events: string[] = [];
+    const controller = new NationalHistoryWorkingSetController(fixture.client(events), {
+      beginStaging() { events.push("begin"); },
+      async uploadStagedChunk() { events.push("upload"); },
+      async commitInitialHistoryStaging() { throw new Error("not used"); },
+      async commitHistoryStaging(_timeline, _selected, presentationFactor) {
+        expect(presentationFactor).toBe(2);
+        return {
+          ...fixture.receipt,
+          presentationFactor: 2,
+          coverageKind: "viewport",
+        };
+      },
+      commitPrefetchedStaging() { throw new Error("not used"); },
+      async rollbackHistoryMutation() { throw new Error("not used"); },
+      rollbackStaging() { events.push("rollback-staging"); },
+    });
+
+    const result = await controller.stageSelectedDetail(
+      fixture.observation,
+      { west: -130, south: 54, east: -129, north: 55 },
+      [observationId(fixture.observation)],
+      () => {},
+      undefined,
+      2,
+    );
+
+    expect(result.manifest.presentationFactor).toBe(2);
+    expect(result.coverage.kind).toBe("viewport");
+    expect(result.projectedGpuBytes).toBe(2);
+    expect(events).toContain("upload");
   });
 
   it("rolls a provisional GPU paint back when ownership is superseded after the fence", async () => {
@@ -157,18 +193,25 @@ function historyFixture() {
     receipt,
     client(events: string[]) {
       return {
-        async prepareNationalHistoryPresentation() { throw new Error("not used"); },
-        async requestNationalHistoryManifest() {
+        async prepareNationalHistoryPresentation() { return {} as never; },
+        async requestNationalHistoryManifest(
+          _observation: NationalHistoryObservation,
+          presentationFactor = 4,
+        ) {
           return {
-            packed: manifest,
+            packed: { ...manifest, presentationFactor },
             wireBytes: 1,
             timing: { invokeMs: 0, parseMs: 0, totalMs: 0 },
             async release() { events.push("release-manifest"); },
           };
         },
-        async requestNationalHistoryChunk() {
+        async requestNationalHistoryChunk(
+          _observation: NationalHistoryObservation,
+          _chunkIndex: number,
+          presentationFactor = 4,
+        ) {
           return {
-            packed: chunk,
+            packed: { ...chunk, presentationFactor },
             wireBytes: 2,
             timing: { invokeMs: 0, parseMs: 0, totalMs: 0 },
             async release() { events.push("release-chunk"); },

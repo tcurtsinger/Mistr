@@ -81,6 +81,7 @@ export function RadarChrome({
   siteSelectionReady,
   sites,
 }: RadarChromeProps) {
+  const preparingPlayback = playbackStatus === "PREPARING PLAYBACK";
   const [openPanel, setOpenPanel] = useState<OpenPanel>(null);
   const [toolbarTabStop, setToolbarTabStop] = useState<ToolbarTool>("site");
   const siteTriggerRef = useRef<HTMLButtonElement>(null);
@@ -320,13 +321,15 @@ export function RadarChrome({
         </div>
         <span aria-hidden="true" className="instrument-divider" />
         <button
-          aria-label={playing ? "Pause radar loop" : "Play radar loop"}
+          aria-label={preparingPlayback
+            ? "Cancel radar playback preparation"
+            : playing ? "Pause radar loop" : "Play radar loop"}
           className="playback-toggle"
           disabled={!playbackReady || frameCount < 2}
           onClick={onTogglePlayback}
           type="button"
         >
-          {playing ? <PauseIcon /> : <PlayIcon />}
+          {playing || preparingPlayback ? <PauseIcon /> : <PlayIcon />}
         </button>
         <div className="timeline">
           <input

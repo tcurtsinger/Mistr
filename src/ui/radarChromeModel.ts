@@ -72,6 +72,7 @@ export function playbackPresentation(
   liveHistoryStatus?: LiveHistoryStatus,
 ): string {
   if (playback?.holdReason?.startsWith("GPU_RECOVERY")) return "RECOVERING";
+  if (playback?.holdReason === "PREPARING_PLAYBACK_QUALITY") return "PREPARING PLAYBACK";
   if (playback?.playing) return "PLAYING";
   if (playback?.holdReason === "AWAITING_GPU_PAINT") return "LOADING SCAN";
   if (frameCount === 1 && liveHistoryStatus === "loading") return "LOADING RECENT";

@@ -63,12 +63,22 @@ export function validateNationalPhase4Acceptance(report) {
   ) failures.push("selected and temporal-window detail residency");
 
   const active = report.activePlayback;
+  const activeFactor = active?.playback?.qualityLockFactor;
   if (
     active?.playback?.playing !== true
-    || active?.playback?.qualityLockFactor !== 4
-    || active?.renderer?.playbackQualityFactor !== 4
-    || active?.renderer?.presentationFactor !== 4
+    || ![1, 2].includes(activeFactor)
+    || active?.renderer?.playbackQualityFactor !== activeFactor
+    || active?.renderer?.presentationFactor !== activeFactor
+    || active?.renderer?.detailedObservationIds?.length !== 20
+    || !sameMembers(active?.renderer?.detailedObservationIds ?? [], ids)
+    || !(active?.renderer?.gpuResourceBytes > 0 && active.renderer.gpuResourceBytes < TARGET_BYTES)
+    || !(active?.renderer?.peakGpuResourceBytes < HARD_CEILING_BYTES)
   ) failures.push("high-zoom playback quality lock");
+  if (
+    !sameSharpPlaybackActivity(active?.activityBefore, active?.activityAfter)
+    || active?.rendererBefore?.uploadCount !== active?.rendererAfter?.uploadCount
+    || active?.rendererBefore?.uploadBytes !== active?.rendererAfter?.uploadBytes
+  ) failures.push("zero sharp-playback transfer and upload work");
   if (
     active?.inspectionQueue?.maxConcurrentCount !== 1
     || !(active?.inspectionQueue?.startedCount > 0)
@@ -154,4 +164,17 @@ function sameMembers(left, right) {
 
 function zeroActivity(activity) {
   return activity && Object.values(activity).every((value) => value === 0);
+}
+
+function sameSharpPlaybackActivity(before, after) {
+  const forbiddenHotPathFields = [
+    "networkRequests",
+    "responseBytes",
+    "decoderRuns",
+    "bulkIpcTransfers",
+    "bulkIpcBytes",
+  ];
+  return before
+    && after
+    && forbiddenHotPathFields.every((key) => after[key] === before[key]);
 }

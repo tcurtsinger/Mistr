@@ -99,19 +99,46 @@ try {
   );
   const detailScreenshot = await captureScreenshot();
 
-  await evaluate("window.__MISTR_NATIONAL_PHASE4__.play()", true, 60_000);
+  await evaluate("window.__MISTR_NATIONAL_PHASE4__.play()", true, 300_000);
+  await waitForReport(
+    "report.playback?.playing===true && (report.renderer?.presentationFactor===1 || report.renderer?.presentationFactor===2)",
+    60_000,
+  );
+  const playbackActivityBefore = await evaluate(
+    "window.__MISTR_NATIONAL_PHASE4__.activity()",
+    true,
+    30_000,
+  );
+  const playbackRendererBefore = await evaluate(
+    serialized("window.__MISTR_NATIONAL_PHASE4__.report().renderer"),
+    true,
+  );
   await delay(1_500);
   const activePlaybackDuring = await evaluate(
     serialized("window.__MISTR_NATIONAL_PHASE4__.report()"),
     true,
   );
+  const activePlaybackScreenshot = await captureScreenshot();
+  const playbackActivityAfter = await evaluate(
+    "window.__MISTR_NATIONAL_PHASE4__.activity()",
+    true,
+    30_000,
+  );
+  const playbackRendererAfter = activePlaybackDuring.renderer;
   await evaluate("window.__MISTR_NATIONAL_PHASE4__.pause()");
   const inspectionQueueAfterPlayback = await evaluate(
     serialized("window.__MISTR_NATIONAL_PHASE4__.waitForInspectionIdle()"),
     true,
     60_000,
   );
-  const activePlayback = { ...activePlaybackDuring, inspectionQueueAfterPlayback };
+  const activePlayback = {
+    ...activePlaybackDuring,
+    activityBefore: playbackActivityBefore,
+    activityAfter: playbackActivityAfter,
+    rendererBefore: playbackRendererBefore,
+    rendererAfter: playbackRendererAfter,
+    inspectionQueueAfterPlayback,
+  };
 
   await evaluate("window.__MISTR_NATIONAL_PHASE4__.setCamera(-98.5,39.5,4.5)");
   await delay(1_000);
@@ -158,6 +185,7 @@ try {
   await writeFile(resolve(output, "packaged-report.json"), `${JSON.stringify(report, null, 2)}\n`);
   await writeFile(resolve(output, "national-history-4k.png"), Buffer.from(historyScreenshot, "base64"));
   await writeFile(resolve(output, "national-detail-4k.png"), Buffer.from(detailScreenshot, "base64"));
+  await writeFile(resolve(output, "national-playback-detail-4k.png"), Buffer.from(activePlaybackScreenshot, "base64"));
   console.log(JSON.stringify({
     status: report.status,
     retainedCount: history?.history?.retained?.length,
@@ -165,10 +193,18 @@ try {
       - (history?.history?.retained?.[0]?.observationTimeUnixMs ?? 0)) / 60_000,
     commonResidentCount: history?.renderer?.commonResidentObservationIds?.length,
     detailResidentCount: detail?.renderer?.detailedObservationIds?.length,
+    playbackDetailResidentCount: activePlayback?.renderer?.detailedObservationIds?.length,
+    playbackPresentationFactor: activePlayback?.renderer?.presentationFactor,
     transitions: transitions?.completedTransitions,
     hotPathActivity: transitions?.activityDelta,
-    peakGpuBytes: detail?.renderer?.peakGpuResourceBytes,
-    maxUploadSliceMs: detail?.renderer?.maximumUploadSliceMs,
+    peakGpuBytes: Math.max(
+      detail?.renderer?.peakGpuResourceBytes ?? 0,
+      activePlayback?.renderer?.peakGpuResourceBytes ?? 0,
+    ),
+    maxUploadSliceMs: Math.max(
+      detail?.renderer?.maximumUploadSliceMs ?? 0,
+      activePlayback?.renderer?.maximumUploadSliceMs ?? 0,
+    ),
     contextEpoch: contextReset?.receipt?.contextEpoch,
     restoredSource: restoredSite?.sourceState?.painted?.source,
     failures: report.failures,

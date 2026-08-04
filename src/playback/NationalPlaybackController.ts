@@ -18,7 +18,10 @@ export interface NationalPlaybackSnapshot {
   holdReason?: string;
   qualityLockFactor?: number;
   refining: boolean;
+  preparingQuality: boolean;
 }
+
+export type NationalPlaybackQualityFactor = 1 | 2 | 4;
 
 export interface NationalPlaybackControllerOptions {
   dwellMs?: number;
@@ -29,6 +32,9 @@ export interface NationalPlaybackControllerOptions {
   onPaint?(receipt: NationalPaintReceipt): void;
   onRefinementRequested?(observation: NationalHistoryObservation): void;
   acquireResidentOnlyActivity?(): Promise<() => void>;
+  preparePlaybackQuality?(
+    isCurrent: () => boolean,
+  ): Promise<NationalPlaybackQualityFactor>;
 }
 
 type PlaybackLayer = Pick<
@@ -36,6 +42,7 @@ type PlaybackLayer = Pick<
   | "getSnapshot"
   | "selectResidentAndWait"
   | "setPlaybackQualityLock"
+  | "finestCompletePlaybackFactor"
   | "waitForCommonResidency"
 >;
 
@@ -50,6 +57,10 @@ export class NationalPlaybackController {
   private transitionCount = 0;
   private completedCycles = 0;
   private playRequest = 0;
+  private cameraChangeRequest = 0;
+  private cameraPlaybackRestartPending = false;
+  private preparingQuality = false;
+  private playbackStartOperation: Promise<void> | null = null;
   private playbackActivityRelease: (() => void) | null = null;
   private readonly dwellMs: number;
   private readonly latestDwellMs: number;
@@ -113,33 +124,74 @@ export class NationalPlaybackController {
     this.emit();
   }
 
-  async play(): Promise<void> {
+  play(): Promise<void> {
     this.assertActive();
-    if (this.playing || this.observations.length < 2) return;
+    if (this.playing || this.preparingQuality || this.observations.length < 2) {
+      return Promise.resolve();
+    }
+    const operation = this.startPlayback();
+    this.playbackStartOperation = operation;
+    void operation.then(
+      () => {
+        if (this.playbackStartOperation === operation) this.playbackStartOperation = null;
+      },
+      () => {
+        if (this.playbackStartOperation === operation) this.playbackStartOperation = null;
+      },
+    );
+    return operation;
+  }
+
+  private async startPlayback(): Promise<void> {
     const request = this.playRequest + 1;
     this.playRequest = request;
     this.clearRefinementTimer();
-    const release = await this.acquireResidentOnlyActivity();
-    if (this.disposed || this.playRequest !== request) {
-      release();
-      return;
-    }
-    this.playbackActivityRelease = release;
-    this.playing = true;
-    this.layer.setPlaybackQualityLock(4);
+    this.preparingQuality = true;
     this.emit();
-    void this.ensureCommonSelection().then(
-      () => {
-        if (this.playing && !this.operation) this.scheduleNext(this.dwellForCurrent());
-      },
-      () => {
-        this.stopPlayback();
-      },
-    );
+    let release: (() => void) | null = null;
+    try {
+      release = await this.acquireResidentOnlyActivity();
+      const isCurrent = () => !this.disposed && this.playRequest === request;
+      if (!isCurrent()) {
+        release();
+        return;
+      }
+      let qualityFactor: NationalPlaybackQualityFactor;
+      try {
+        qualityFactor = await this.options.preparePlaybackQuality?.(isCurrent)
+          ?? this.layer.finestCompletePlaybackFactor();
+      } catch (error) {
+        if (!isCurrent()) return;
+        throw error;
+      }
+      if (!isCurrent()) {
+        release();
+        return;
+      }
+      this.layer.setPlaybackQualityLock(qualityFactor);
+      this.playbackActivityRelease = release;
+      release = null;
+      this.playing = true;
+      this.emit();
+      void this.ensureCommonSelection().then(
+        () => {
+          if (this.playing && !this.operation) this.scheduleNext(this.dwellForCurrent());
+        },
+        () => {
+          this.stopPlayback();
+        },
+      );
+    } finally {
+      release?.();
+      this.preparingQuality = false;
+      this.emit();
+    }
   }
 
   pause(): void {
     if (this.disposed) return;
+    this.cameraChangeRequest += 1;
+    this.cameraPlaybackRestartPending = false;
     this.playRequest += 1;
     this.playing = false;
     if (this.timer !== null) globalThis.clearTimeout(this.timer);
@@ -202,15 +254,46 @@ export class NationalPlaybackController {
     }
   }
 
-  notifyCameraChanged(requestRefinementAfterSettle = true): void {
-    if (this.playing) return;
+  async notifyCameraChanged(requestRefinementAfterSettle = true): Promise<void> {
+    const shouldResumePlayback = this.playing
+      || this.preparingQuality
+      || this.cameraPlaybackRestartPending;
+    const pendingStart = this.playbackStartOperation;
+    const pendingPaint = this.operation;
+    if (shouldResumePlayback) {
+      this.pause();
+      this.clearRefinementTimer();
+      this.cameraPlaybackRestartPending = true;
+      const request = this.cameraChangeRequest + 1;
+      this.cameraChangeRequest = request;
+      try {
+        await pendingStart;
+        await pendingPaint;
+      } catch {
+        // A superseded preparation or paint cannot change the new camera request.
+      }
+      if (
+        this.disposed
+        || this.cameraChangeRequest !== request
+        || !this.cameraPlaybackRestartPending
+      ) return;
+      this.cameraPlaybackRestartPending = false;
+      await this.play();
+      return;
+    }
+    const request = this.cameraChangeRequest + 1;
+    this.cameraChangeRequest = request;
     this.clearRefinementTimer();
-    void this.ensureCommonSelection().then(
-      () => {
-        if (requestRefinementAfterSettle) this.scheduleRefinement();
-      },
-      () => {},
-    );
+    try {
+      await this.ensureCommonSelection(requestRefinementAfterSettle ? undefined : 4);
+      if (
+        requestRefinementAfterSettle
+        && !this.disposed
+        && this.cameraChangeRequest === request
+      ) this.scheduleRefinement();
+    } catch {
+      // A newer camera, source, or renderer request owns presentation truth.
+    }
   }
 
   snapshot(): NationalPlaybackSnapshot {
@@ -231,6 +314,8 @@ export class NationalPlaybackController {
       residentReplacementPending: this.replacementPending,
       qualityLockFactor: renderer.playbackQualityFactor,
       refining: this.refinementTimer !== null,
+      preparingQuality: this.preparingQuality,
+      ...(this.preparingQuality ? { holdReason: "PREPARING_PLAYBACK_QUALITY" } : {}),
       ...(this.operation ? { holdReason: "AWAITING_GPU_PAINT" } : {}),
       ...(renderer.status === "recovering" || !commonResidencyComplete
         ? { holdReason: "GPU_RECOVERY_REHYDRATING" }
@@ -244,11 +329,13 @@ export class NationalPlaybackController {
     this.disposed = true;
   }
 
-  private async ensureCommonSelection(): Promise<NationalPaintReceipt> {
+  private async ensureCommonSelection(
+    presentationFactor?: NationalPlaybackQualityFactor,
+  ): Promise<NationalPaintReceipt> {
     await this.layer.waitForCommonResidency();
     const selected = this.layer.getSnapshot().selectedObservationId
       ?? observationId(this.observations.at(-1)!);
-    return this.select(selected, false);
+    return this.select(selected, false, presentationFactor);
   }
 
   private scheduleNext(delayMs: number) {
@@ -279,9 +366,13 @@ export class NationalPlaybackController {
   private async select(
     targetObservationId: string,
     completesCycle: boolean,
+    requestedPresentationFactor?: NationalPlaybackQualityFactor,
   ): Promise<NationalPaintReceipt> {
     if (this.operation) throw new Error("a National frame selection is already awaiting paint");
-    const operation = this.layer.selectResidentAndWait(targetObservationId, 4);
+    const presentationFactor = requestedPresentationFactor
+      ?? this.layer.getSnapshot().playbackQualityFactor
+      ?? this.layer.finestCompletePlaybackFactor();
+    const operation = this.layer.selectResidentAndWait(targetObservationId, presentationFactor);
     this.operation = operation;
     this.emit();
     try {

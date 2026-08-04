@@ -97,6 +97,10 @@ describe("radar chrome model", () => {
       holdReason: "AWAITING_GPU_PAINT",
     }, 4, 20)).toBe("LOADING SCAN");
     expect(playbackPresentation({
+      playing: false,
+      holdReason: "PREPARING_PLAYBACK_QUALITY",
+    }, 4, 20)).toBe("PREPARING PLAYBACK");
+    expect(playbackPresentation({
       playing: true,
       holdReason: "GPU_RECOVERY_VISIBLE_FIRST",
     }, 4, 20)).toBe("RECOVERING");
