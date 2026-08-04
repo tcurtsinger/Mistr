@@ -161,6 +161,8 @@ function validReport() {
       transfer: { generation: 10 },
       backfillStartCountBefore: 1,
       backfillStartCountAfter: 2,
+      playbackBeforeFailure: { playing: true },
+      playbackAfterRestoration: { playing: false },
     },
     restoredSite: {
       sourceState: { painted: { source: { kind: "site", siteIcao: "KTLX" } }, transition: null },

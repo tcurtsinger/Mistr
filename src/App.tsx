@@ -1215,7 +1215,25 @@ export function App() {
           setNationalRequestError("National radar could not restart after the Site request failed");
           return;
         }
-        const restoration = session.start();
+        const restoration = (async () => {
+          const playbackToSettle = nationalPlaybackController;
+          if (playbackToSettle) {
+            await playbackToSettle.pauseAndWait(false).catch(() => {});
+          }
+          await nationalWorkingSet?.waitForIdle();
+          const current = radarSessionCoordinatorRef.current!.snapshot();
+          if (
+            cancelled
+            || transferGeneration !== generation
+            || current.transition
+            || current.painted?.source.kind !== "national"
+          ) {
+            throw new RadarSourceSupersededError(
+              "National restoration was superseded while resident playback settled",
+            );
+          }
+          return session.start();
+        })();
         lastNationalRestorationAfterSiteFailure = restoration;
         void restoration.then(
           () => setNationalRequestError(null),
@@ -2308,13 +2326,18 @@ export function App() {
         startSite: (site = "KTLX") => siteLevel2Session?.start(normalizeRadarSite(site))
           ?? Promise.reject(new Error("Site session is unavailable")),
         async proveFailedSiteRestoresNational(site = "KTLX") {
-          if (!client || !siteLevel2Session || !nationalLayer) {
+          if (!client || !siteLevel2Session || !nationalLayer || !nationalPlaybackController) {
             throw new Error("National failed-Site recovery diagnostic is unavailable");
           }
           const before = radarSessionCoordinatorRef.current!.snapshot();
           const backfillStartCountBefore = nationalBackfillStartCount;
           if (before.transition || before.painted?.source.kind !== "national") {
             throw new Error("National must be the settled painted source before recovery proof");
+          }
+          await nationalPlaybackController.play();
+          const playbackBeforeFailure = nationalPlaybackController.snapshot();
+          if (!playbackBeforeFailure.playing) {
+            throw new Error("National playback did not start before failed-Site recovery proof");
           }
           failNextSiteFromNationalForDiagnostics = true;
           let failureMessage = "";
@@ -2341,6 +2364,8 @@ export function App() {
             transfer: await client.transferSnapshot(),
             backfillStartCountBefore,
             backfillStartCountAfter: nationalBackfillStartCount,
+            playbackBeforeFailure,
+            playbackAfterRestoration: nationalPlaybackController?.snapshot() ?? null,
           };
         },
         async waitForHistory(frameCount = 20, timeoutMs = 300_000) {
@@ -3229,6 +3254,8 @@ export interface NationalPhase4FailedSiteRecoveryReport {
   transfer: import("./packed-sweep/transferClient").TransferSnapshot;
   backfillStartCountBefore: number;
   backfillStartCountAfter: number;
+  playbackBeforeFailure: NationalPlaybackSnapshot;
+  playbackAfterRestoration: NationalPlaybackSnapshot | null;
 }
 
 type Phase4State =

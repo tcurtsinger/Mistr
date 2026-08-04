@@ -119,6 +119,17 @@ impl ReversibleNationalCommit {
     }
 }
 
+fn history_observation_matches(
+    observation: &NationalHistoryObservation,
+    generation: u64,
+    observation_time_unix_ms: i64,
+    content_sha256: &str,
+) -> bool {
+    observation.generation == generation
+        && observation.observation_time_unix_ms == observation_time_unix_ms
+        && observation.content_sha256 == content_sha256
+}
+
 impl DetailedPresentation {
     fn matches(
         &self,
@@ -152,6 +163,7 @@ struct NationalHistoryStore {
     backfill_candidates: VecDeque<MrmsObject>,
     detail: Option<DetailedPresentation>,
     reversible_commit: Option<ReversibleNationalCommit>,
+    last_finalized_commit: Option<NationalHistoryObservation>,
     activity: NationalHistoryActivitySnapshot,
 }
 
@@ -165,6 +177,7 @@ impl Default for NationalHistoryStore {
             backfill_candidates: VecDeque::new(),
             detail: None,
             reversible_commit: None,
+            last_finalized_commit: None,
             activity: NationalHistoryActivitySnapshot::default(),
         }
     }
@@ -178,6 +191,7 @@ impl NationalHistoryStore {
         self.backfill_candidates = backfill_candidates;
         self.detail = None;
         self.reversible_commit = None;
+        self.last_finalized_commit = None;
     }
 
     fn ensure_generation(&self, generation: u64) -> Result<(), TransferError> {
@@ -393,6 +407,7 @@ impl NationalHistoryStore {
             None
         };
         self.reversible_commit = Some(reversible_commit);
+        self.last_finalized_commit = None;
         debug_assert!(self.total_bytes() <= HISTORY_BACKEND_TARGET_BYTES);
         Ok(evicted)
     }
@@ -404,19 +419,39 @@ impl NationalHistoryStore {
         content_sha256: &str,
     ) -> Result<(), TransferError> {
         self.ensure_generation(generation)?;
-        let reversible = self.reversible_commit.as_ref().ok_or_else(|| {
-            TransferError::new(
+        if let Some(reversible) = self.reversible_commit.as_ref() {
+            if !reversible.matches(generation, observation_time_unix_ms, content_sha256) {
+                return Err(TransferError::new(
+                    "national_history_commit_stale",
+                    "finalization identity does not match the reversible National commit",
+                ));
+            }
+        } else if self
+            .last_finalized_commit
+            .as_ref()
+            .is_some_and(|observation| {
+                history_observation_matches(
+                    observation,
+                    generation,
+                    observation_time_unix_ms,
+                    content_sha256,
+                )
+            })
+        {
+            return Ok(());
+        } else {
+            return Err(TransferError::new(
                 "national_history_commit_missing",
                 "no reversible National history commit is awaiting finalization",
-            )
-        })?;
-        if !reversible.matches(generation, observation_time_unix_ms, content_sha256) {
-            return Err(TransferError::new(
-                "national_history_commit_stale",
-                "finalization identity does not match the reversible National commit",
             ));
         }
-        self.reversible_commit = None;
+        let Some(finalized) = self.reversible_commit.take() else {
+            return Err(TransferError::new(
+                "national_history_commit_missing",
+                "matching reversible National history commit disappeared",
+            ));
+        };
+        self.last_finalized_commit = Some(finalized.observation);
         Ok(())
     }
 
@@ -1401,6 +1436,43 @@ mod tests {
             (2..=21).map(|value| value * 1_000).collect::<Vec<_>>()
         );
         assert_eq!(evicted.unwrap().observation_time_unix_ms, 1_000);
+    }
+
+    #[test]
+    fn duplicate_finalization_is_idempotent_for_the_last_committed_identity() {
+        let mut store = test_store(20);
+        store.reset(7, VecDeque::new());
+        let frame = retained_frame(7, 1_000);
+        let identity = frame.identity();
+        store
+            .stage(NationalHistoryMutationKind::Current, frame)
+            .unwrap();
+        store
+            .commit_staged(
+                identity.generation,
+                identity.observation_time_unix_ms,
+                &identity.content_sha256,
+            )
+            .unwrap();
+        store
+            .finalize_commit(
+                identity.generation,
+                identity.observation_time_unix_ms,
+                &identity.content_sha256,
+            )
+            .unwrap();
+        let finalized_times = retained_times(&store);
+
+        store
+            .finalize_commit(
+                identity.generation,
+                identity.observation_time_unix_ms,
+                &identity.content_sha256,
+            )
+            .unwrap();
+
+        assert_eq!(retained_times(&store), finalized_times);
+        assert!(!store.snapshot().mutation_reversible);
     }
 
     #[test]
