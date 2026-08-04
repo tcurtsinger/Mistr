@@ -110,6 +110,10 @@ import {
   observationId as nationalObservationId,
   type NationalHistoryWorkingSetResult,
 } from "./national-radar/NationalHistoryWorkingSetController";
+import {
+  LatestOnlyAsyncQueue,
+  type LatestOnlyAsyncQueueSnapshot,
+} from "./national-radar/LatestOnlyAsyncQueue";
 import { colorForReflectivity } from "./radar-renderer/palette";
 import { RadarChrome } from "./ui/RadarChrome";
 import {
@@ -289,6 +293,10 @@ export function App() {
     let nationalObservations: NationalHistoryObservation[] = [];
     let latestNationalHistory: NationalHistorySnapshot | null = null;
     let latestNationalInspection: NationalPointLookup | null = null;
+    let nationalInspectionLookupQueueForCleanup: LatestOnlyAsyncQueue<
+      NationalInspectionLookupRequest,
+      NationalPointLookup | null
+    > | null = null;
     let nationalHistorySession = 0;
     let nationalBackfillStartCount = 0;
     let nationalMrmsSession: NationalMrmsSession<NationalPhase3Report> | null = null;
@@ -1358,45 +1366,68 @@ export function App() {
         return client;
       };
 
+      const nationalInspectionLookupQueue = new LatestOnlyAsyncQueue<
+        NationalInspectionLookupRequest,
+        NationalPointLookup | null
+      >(async (request) => {
+        if (
+          inspectionRequestRef.current !== request.inspectionId
+          || !inspectionPointRef.current
+        ) return null;
+        try {
+          const lookup = await activeClientForNational().lookupNationalHistoryPoint({
+            generation: request.receipt.generation,
+            observationTimeUnixMs: request.receipt.observationTimeUnixMs,
+            contentSha256: request.receipt.contentSha256,
+            inspectionId: request.inspectionId,
+            longitude: request.longitude,
+            latitude: request.latitude,
+          });
+          const painted = radarSessionCoordinatorRef.current!.snapshot().painted;
+          const currentReceipt = nationalLayer?.getSnapshot().paintReceipt;
+          if (
+            inspectionRequestRef.current !== request.inspectionId
+            || painted?.source.kind !== "national"
+            || painted.generation !== request.receipt.generation
+            || painted.observationId !== request.receipt.observationId
+            || currentReceipt?.generation !== request.receipt.generation
+            || currentReceipt.observationId !== request.receipt.observationId
+            || currentReceipt.observationTimeUnixMs !== request.receipt.observationTimeUnixMs
+            || currentReceipt.contentSha256 !== request.receipt.contentSha256
+          ) return null;
+          latestNationalInspection = lookup;
+          setInterrogation(nationalPointInterrogation(lookup));
+          return lookup;
+        } catch {
+          if (inspectionRequestRef.current === request.inspectionId) setInterrogation(null);
+          return null;
+        }
+      });
+      nationalInspectionLookupQueueForCleanup = nationalInspectionLookupQueue;
+
       const refreshNationalInterrogation = async (
         receipt: NationalPaintReceipt,
       ): Promise<NationalPointLookup | null> => {
         const point = inspectionPointRef.current;
-        if (!point || interrogationObservationRef.current === receipt.observationId) {
-          return latestNationalInspection;
+        if (!point) return null;
+        if (interrogationObservationRef.current === receipt.observationId) {
+          if (latestNationalInspection) return latestNationalInspection;
+          await nationalInspectionLookupQueue.waitForIdle();
+          return interrogationObservationRef.current === receipt.observationId
+            ? latestNationalInspection
+            : null;
         }
         const inspectionId = globalThis.crypto.randomUUID();
         inspectionRequestRef.current = inspectionId;
         interrogationObservationRef.current = receipt.observationId;
         latestNationalInspection = null;
         setInterrogation(null);
-        try {
-          const lookup = await activeClientForNational().lookupNationalHistoryPoint({
-            generation: receipt.generation,
-            observationTimeUnixMs: receipt.observationTimeUnixMs,
-            contentSha256: receipt.contentSha256,
-            inspectionId,
-            ...point,
-          });
-          const painted = radarSessionCoordinatorRef.current!.snapshot().painted;
-          const currentReceipt = nationalLayer?.getSnapshot().paintReceipt;
-          if (
-            inspectionRequestRef.current !== inspectionId
-            || painted?.source.kind !== "national"
-            || painted.generation !== receipt.generation
-            || painted.observationId !== receipt.observationId
-            || currentReceipt?.generation !== receipt.generation
-            || currentReceipt.observationId !== receipt.observationId
-            || currentReceipt.observationTimeUnixMs !== receipt.observationTimeUnixMs
-            || currentReceipt.contentSha256 !== receipt.contentSha256
-          ) return null;
-          latestNationalInspection = lookup;
-          setInterrogation(nationalPointInterrogation(lookup));
-          return lookup;
-        } catch {
-          if (inspectionRequestRef.current === inspectionId) setInterrogation(null);
-          return null;
-        }
+        const result = await nationalInspectionLookupQueue.enqueue({
+          receipt,
+          inspectionId,
+          ...point,
+        });
+        return inspectionRequestRef.current === inspectionId ? result : null;
       };
 
       const finalizeNationalHistoryCommit = async (
@@ -1905,6 +1936,8 @@ export function App() {
           inspectionMarkerRef.current = null;
           inspectionPointRef.current = null;
           interrogationObservationRef.current = null;
+          inspectionRequestRef.current = null;
+          nationalInspectionLookupQueue.cancelPending();
           removeSiteAfterNationalPaint();
           setLiveHistoryStatus(staticNationalDiagnostic ? "partial" : "loading");
           focusNational(instance);
@@ -2342,6 +2375,7 @@ export function App() {
           history: latestNationalHistory,
           renderer: nationalLayer?.getSnapshot() ?? null,
           playback: nationalPlaybackController?.snapshot() ?? null,
+          inspectionQueue: nationalInspectionLookupQueue.snapshot(),
         }),
         startNational: () => nationalMrmsSession?.start()
           ?? Promise.reject(new Error("National session is unavailable")),
@@ -2527,6 +2561,10 @@ export function App() {
             await waitMilliseconds(50);
           }
         },
+        async waitForInspectionIdle() {
+          await nationalInspectionLookupQueue.waitForIdle();
+          return nationalInspectionLookupQueue.snapshot();
+        },
         activity: () => client?.nationalHistoryActivitySnapshot()
           ?? Promise.reject(new Error("National transfer client is unavailable")),
         transferSnapshot: () => client?.transferSnapshot()
@@ -2593,6 +2631,7 @@ export function App() {
         nationalPlaybackControllerRef.current = null;
       }
       nationalWorkingSet?.cancel();
+      nationalInspectionLookupQueueForCleanup?.cancelPending();
       if (nationalLayer && instance.getLayer(nationalLayer.id)) instance.removeLayer(nationalLayer.id);
       nationalLayerRef.current = null;
       nationalWorkingSetRef.current = null;
@@ -3248,6 +3287,14 @@ export interface NationalPhase4Report {
   history: NationalHistorySnapshot | null;
   renderer: NationalGridRendererSnapshot | null;
   playback: NationalPlaybackSnapshot | null;
+  inspectionQueue: LatestOnlyAsyncQueueSnapshot;
+}
+
+interface NationalInspectionLookupRequest {
+  receipt: NationalPaintReceipt;
+  inspectionId: string;
+  longitude: number;
+  latitude: number;
 }
 
 export interface NationalPhase4TransitionReport {
@@ -3588,6 +3635,7 @@ declare global {
     setCamera(longitude: number, latitude: number, zoom: number): void;
     inspect(longitude: number, latitude: number): Promise<NationalPointLookup | null>;
     waitForInspection(observationId: string, timeoutMs?: number): Promise<NationalPointLookup>;
+    waitForInspectionIdle(): Promise<LatestOnlyAsyncQueueSnapshot>;
     activity(): Promise<NationalHistoryActivitySnapshot>;
     transferSnapshot(): Promise<import("./packed-sweep/transferClient").TransferSnapshot>;
     sourceState(): import("./radar-session/RadarSessionCoordinator").RadarSessionSnapshot | null;

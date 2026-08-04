@@ -10,10 +10,12 @@ describe("National Phase 4 packaged acceptance", () => {
     const report = validReport();
     report.transitions.activityDelta.networkRequests = 1;
     report.activePlayback.renderer.presentationFactor = 1;
+    report.activePlayback.inspectionQueue.maxConcurrentCount = 2;
     report.history.renderer.maximumUploadSliceMs = 4.1;
     expect(validateNationalPhase4Acceptance(report)).toEqual(expect.arrayContaining([
       "zero hot-path backend activity",
       "high-zoom playback quality lock",
+      "latest-only inspection lookup queue",
       "4 ms upload slice budget",
     ]));
   });
@@ -115,6 +117,24 @@ function validReport() {
     activePlayback: {
       playback: { playing: true, qualityLockFactor: 4 },
       renderer: { ...renderer, playbackQualityFactor: 4 },
+      inspectionQueue: {
+        running: true,
+        pending: true,
+        startedCount: 4,
+        completedCount: 3,
+        failedCount: 0,
+        replacedPendingCount: 6,
+        maxConcurrentCount: 1,
+      },
+      inspectionQueueAfterPlayback: {
+        running: false,
+        pending: false,
+        startedCount: 5,
+        completedCount: 5,
+        failedCount: 0,
+        replacedPendingCount: 6,
+        maxConcurrentCount: 1,
+      },
     },
     contextReset: {
       before: renderer,

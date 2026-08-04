@@ -69,6 +69,15 @@ export function validateNationalPhase4Acceptance(report) {
     || active?.renderer?.playbackQualityFactor !== 4
     || active?.renderer?.presentationFactor !== 4
   ) failures.push("high-zoom playback quality lock");
+  if (
+    active?.inspectionQueue?.maxConcurrentCount !== 1
+    || !(active?.inspectionQueue?.startedCount > 0)
+    || active?.inspectionQueueAfterPlayback?.running !== false
+    || active?.inspectionQueueAfterPlayback?.pending !== false
+    || active?.inspectionQueueAfterPlayback?.maxConcurrentCount !== 1
+    || active?.inspectionQueueAfterPlayback?.startedCount
+      !== active?.inspectionQueueAfterPlayback?.completedCount
+  ) failures.push("latest-only inspection lookup queue");
 
   const reset = report.contextReset;
   if (

@@ -88,8 +88,17 @@ try {
 
   await evaluate("window.__MISTR_NATIONAL_PHASE4__.play()", true, 60_000);
   await delay(1_500);
-  const activePlayback = await evaluate(serialized("window.__MISTR_NATIONAL_PHASE4__.report()"), true);
+  const activePlaybackDuring = await evaluate(
+    serialized("window.__MISTR_NATIONAL_PHASE4__.report()"),
+    true,
+  );
   await evaluate("window.__MISTR_NATIONAL_PHASE4__.pause()");
+  const inspectionQueueAfterPlayback = await evaluate(
+    serialized("window.__MISTR_NATIONAL_PHASE4__.waitForInspectionIdle()"),
+    true,
+    60_000,
+  );
+  const activePlayback = { ...activePlaybackDuring, inspectionQueueAfterPlayback };
 
   await evaluate("window.__MISTR_NATIONAL_PHASE4__.setCamera(-98.5,39.5,4.5)");
   await delay(1_000);
