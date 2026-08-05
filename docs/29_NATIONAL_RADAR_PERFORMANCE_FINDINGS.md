@@ -39,6 +39,8 @@ The owner's second packaged retest still showed blur-then-sharpen around playbac
 - Supported-device floor: National now requires roughly 1.2 GiB of free GPU memory. A lower-capability fallback (the retired level-of-detail model) is deliberately not maintained; reintroducing one is a future product decision.
 - Startup cost: each observation now transfers ~49 MiB (392 chunks) instead of ~3 MiB, so backfill to 20 frames takes longer; the newest observation still paints first and playback is usable throughout. Backfill download pipelining (the single Rust staged slot) remains the open follow-up.
 
+**Packaged evidence (validation machine, 2026-08-04):** phase-3 and phase-4 packaged runs PASS against live NOAA. Twenty native observations resident (~38-minute span), 1,000 playback transitions at presentation factor 1 with zero hot-path network/decode/IPC/upload/point-lookup activity, peak GPU 1,044,645,112 bytes (~996 MiB, inside the 1,280 MiB target), retained backend ~1.01 GB (inside the 2 GiB target), maximum upload slice 33.1 ms (inside the 50 ms long-task ceiling), real context recovery, and a clean National-to-Site handoff. Interactive point lookups now read the retained native frame in constant time, and playback controls stay live through history commit windows with operator intent owning the final playback state.
+
 ## 1. Reported symptoms
 
 1. **Initial National load takes far too long** before the timeline feels usable.
