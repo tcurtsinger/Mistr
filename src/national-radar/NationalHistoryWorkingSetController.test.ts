@@ -110,7 +110,7 @@ describe("NationalHistoryWorkingSetController", () => {
     expect(events).toContain("upload");
   });
 
-  it("preserves the selected finer presentation through an unrelated overview commit", async () => {
+  it("stages native factor-1 history and commits it to the common slot", async () => {
     const fixture = historyFixture();
     const events: string[] = [];
     const committedFactors: number[] = [];
@@ -129,16 +129,17 @@ describe("NationalHistoryWorkingSetController", () => {
       rollbackStaging() {},
     });
 
-    await controller.stageHistoryOverview(
+    const result = await controller.stageHistoryOverview(
       fixture.observation,
       [observationId(fixture.observation)],
       observationId(fixture.observation),
       () => {},
-      undefined,
-      1,
     );
 
-    expect(committedFactors).toEqual([1]);
+    // The staged manifest is the exact native grid; the commit selector
+    // targets the common slot.
+    expect(result.manifest.presentationFactor).toBe(1);
+    expect(committedFactors).toEqual([4]);
   });
 
   it("waits for paint quiescence before beginning any staging", async () => {
@@ -265,7 +266,7 @@ function historyFixture() {
     observationId: observationId(observation),
     observationTimeUnixMs: observation.observationTimeUnixMs,
     contentSha256: observation.contentSha256,
-    presentationFactor: 4,
+    presentationFactor: 1,
     coverageVersion: 1,
     coverageKind: "complete_domain",
     requiredChunkCount: 1,

@@ -61,6 +61,7 @@ export class NationalPlaybackController {
   private preparingQuality = false;
   private refinementAfterQualityPreparation = false;
   private suppressSettledRefinement = false;
+  private mutationResumeRequest = -1;
   private readonly dwellMs: number;
   private readonly latestDwellMs: number;
   private readonly refinementSettleMs: number;
@@ -212,6 +213,9 @@ export class NationalPlaybackController {
   async pauseAndWait(scheduleRefinement = true): Promise<boolean> {
     const wasPlaying = this.playing;
     this.pause();
+    // resumeAfterMutation may only undo THIS pause. If the operator pauses or
+    // plays while the mutation commits, their intent owns playback state.
+    this.mutationResumeRequest = this.playRequest;
     if (!scheduleRefinement) {
       // Callers settling resident paint for a transition or history mutation
       // must not have refinement armed behind their back when the pending
@@ -228,7 +232,11 @@ export class NationalPlaybackController {
   }
 
   resumeAfterMutation(wasPlaying: boolean): void {
-    if (wasPlaying && !this.disposed) void this.play();
+    if (
+      wasPlaying
+      && !this.disposed
+      && this.playRequest === this.mutationResumeRequest
+    ) void this.play();
   }
 
   async scrub(index: number): Promise<NationalPaintReceipt> {

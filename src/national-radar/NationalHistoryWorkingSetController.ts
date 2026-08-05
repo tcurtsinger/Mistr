@@ -56,6 +56,11 @@ export class NationalHistoryWorkingSetController {
     private readonly layer: HistoryGridLayer,
   ) {}
 
+  /**
+   * History presentations are the native factor-1 grid under the
+   * native-residency decision (2026-08-04): every retained observation is
+   * complete-domain full resolution, so no coarser level ever paints.
+   */
   stageInitialOverview(
     observation: NationalHistoryObservation,
     ownershipCheck: () => void,
@@ -63,7 +68,7 @@ export class NationalHistoryWorkingSetController {
   ): Promise<NationalHistoryWorkingSetResult> {
     return this.run(
       observation,
-      4,
+      1,
       (manifest, version) => completeDomainCoverage(manifest, version),
       ownershipCheck,
       async () => this.layer.commitInitialHistoryStaging(),
@@ -73,29 +78,22 @@ export class NationalHistoryWorkingSetController {
     );
   }
 
-  /**
-   * `selectedPresentationFactor` preserves an already-resident finer selected
-   * presentation across an unrelated observation's overview commit, so
-   * backfill and polling appends never degrade the visible frame to the
-   * coarse overview.
-   */
   stageHistoryOverview(
     observation: NationalHistoryObservation,
     timelineObservationIds: readonly string[],
     selectedObservationId: string,
     ownershipCheck: () => void,
     beforeCommit?: () => void | Promise<void>,
-    selectedPresentationFactor: NationalDetailPresentationFactor | 4 = 4,
   ): Promise<NationalHistoryWorkingSetResult> {
     return this.run(
       observation,
-      4,
+      1,
       (manifest, version) => completeDomainCoverage(manifest, version),
       ownershipCheck,
       async () => this.layer.commitHistoryStaging(
         timelineObservationIds,
         selectedObservationId,
-        selectedPresentationFactor,
+        4,
         true,
       ),
       beforeCommit,
@@ -215,7 +213,9 @@ export class NationalHistoryWorkingSetController {
     deferExternalCommit = false,
   ): Promise<NationalHistoryWorkingSetResult> {
     ownershipCheck();
-    if (presentationFactor !== 4) {
+    // Factor 1 is the retained native presentation and is served directly;
+    // only a coarser derived level needs backend preparation.
+    if (presentationFactor === 2) {
       await this.client.prepareNationalHistoryPresentation(observation, presentationFactor);
       ownershipCheck();
     }
