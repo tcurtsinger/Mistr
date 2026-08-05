@@ -241,6 +241,12 @@ export class NationalHistoryWorkingSetController {
     if (projectedGpuBytes > 256 * 1024 * 1024) {
       throw new Error("National presentation exceeds the 256 MiB hard ceiling");
     }
+    // Motion-first playback keeps painting while mutations stage. beginStaging
+    // rejects during an unfinished paint, so wait the current paint out; the
+    // begin call runs synchronously in this continuation, which no timer-driven
+    // selection can interleave with.
+    await this.layer.waitForPaintQuiescence();
+    ownershipCheck();
     this.layer.beginStaging(manifest, coverage);
     let chunkWireBytes = 0;
     let receipt: NationalPaintReceipt | undefined;

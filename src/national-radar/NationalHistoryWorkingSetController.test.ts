@@ -141,6 +141,26 @@ describe("NationalHistoryWorkingSetController", () => {
     expect(committedFactors).toEqual([1]);
   });
 
+  it("waits for paint quiescence before beginning any staging", async () => {
+    const fixture = historyFixture();
+    const events: string[] = [];
+    const controller = new NationalHistoryWorkingSetController(fixture.client(events), {
+      async waitForPaintQuiescence() { events.push("quiesce"); },
+      beginStaging() { events.push("begin"); },
+      async uploadStagedChunk() { events.push("upload"); },
+      async commitInitialHistoryStaging() { return fixture.receipt; },
+      async commitHistoryStaging() { throw new Error("not used"); },
+      commitPrefetchedStaging() { throw new Error("not used"); },
+      async rollbackHistoryMutation() { throw new Error("not used"); },
+      rollbackStaging() {},
+    });
+
+    await controller.stageInitialOverview(fixture.observation, () => {});
+
+    expect(events.indexOf("quiesce")).toBeGreaterThanOrEqual(0);
+    expect(events.indexOf("quiesce")).toBeLessThan(events.indexOf("begin"));
+  });
+
   it("rolls a provisional GPU paint back when ownership is superseded after the fence", async () => {
     const fixture = historyFixture();
     const events: string[] = [];
@@ -161,7 +181,7 @@ describe("NationalHistoryWorkingSetController", () => {
 
     await expect(controller.stageInitialOverview(fixture.observation, () => {
       checks += 1;
-      if (checks >= 8) throw new Error("superseded");
+      if (checks >= 9) throw new Error("superseded");
     })).rejects.toThrow("superseded");
 
     expect(events).toContain("rollback-provisional");

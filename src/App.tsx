@@ -1709,10 +1709,19 @@ export function App() {
         };
         // Motion may still be painting the selected observation's previous
         // detail right after a camera change; prefetching that observation is
-        // only additive once the common level is the active presentation.
+        // only additive once the common level has actually painted. The active
+        // presentation factor alone flips before the receipt lands, so gate on
+        // the authoritative painted receipt.
         const commonActiveDeadline = Date.now() + 5_000;
-        while (activeLayer.getSnapshot().presentationFactor !== 4) {
+        while (true) {
           ownershipCheck();
+          const snapshot = activeLayer.getSnapshot();
+          if (
+            snapshot.status === "painted"
+            && snapshot.presentationFactor === 4
+            && snapshot.paintReceipt?.presentationFactor === 4
+            && !snapshot.mutationAwaitingCommit
+          ) break;
           if (Date.now() > commonActiveDeadline) return 4;
           await waitMilliseconds(50);
         }
