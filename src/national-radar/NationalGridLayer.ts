@@ -501,10 +501,13 @@ export class NationalGridLayer implements CustomLayerInterface {
     const timeline = alreadyResident
       ? [...this.timelineObservationIds]
       : [identity.observationId];
+    // Staged frames commit into the common slot, so the selection must use
+    // the common-slot selector (4) regardless of the manifest's native
+    // presentation factor.
     return this.commitStagedResidency(
       timeline,
       identity.observationId,
-      staging.manifest.presentationFactor,
+      4,
       !alreadyResident,
       false,
     );
@@ -516,7 +519,7 @@ export class NationalGridLayer implements CustomLayerInterface {
     return this.commitStagedResidency(
       [identity.observationId],
       identity.observationId,
-      staging.manifest.presentationFactor,
+      4,
       true,
       true,
     );
