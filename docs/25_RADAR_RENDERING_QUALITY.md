@@ -84,6 +84,21 @@ The above-radar set is deliberately small. Its lines remain recognizable when so
 - Must not bridge missing radials, transparent/missing regions, or categorical range-folded regions as if valid reflectivity existed there.
 - Must handle the 0/360-degree azimuth seam without inventing a discontinuity.
 
+#### National `Smooth` edge behavior
+
+The National grid renderer weights only the **valid** neighbors of a sample footprint and renormalizes them. A missing or no-coverage cell contributes no value at any weight, so `Smooth` still never bridges an invalid status; but a partially invalid footprint no longer collapses to a hard nearest-cell block, which previously drew every echo boundary as a row of 1 km squares.
+
+The renormalized weight that survives is the fragment's **coverage**, and it scales palette opacity by its square root. A fully surrounded cell is unchanged at coverage 1; the outermost half-cell ring fades rather than terminating in a square; and a lone valid corner still renders at half palette opacity, so a measured cell never becomes invisible. This is display-only, `Smooth`-only, and applied after palette lookup:
+
+- the painted footprint is identical in both modes, because an invalid nearest cell already paints nothing;
+- no coverage is invented beyond the measured cells;
+- `Native` remains exact nearest-cell sampling at full opacity;
+- interrogation continues to report the exact backend value in both modes.
+
+`src/national-radar/sampling.ts` mirrors this contract outside WebGL so it stays unit-tested; the shader in `src/national-radar/NationalGridLayer.ts` must match it.
+
+Neither mode adds resolution. The MRMS CONUS mosaic is a 0.01-degree (roughly 1 km) grid, so beyond about zoom 9 each measured cell covers many screen pixels and remains individually visible. Close-range structural detail is the selected-site Level II product's job, not the national mosaic's.
+
 ### `Native`
 
 - Uses the exact native polar gate selected by nearest sampling.
