@@ -109,14 +109,31 @@ void main() {
   uint c10 = texelFetch(u_raw_codes, ivec2(upper.x, lower.y), 0).r;
   uint c01 = texelFetch(u_raw_codes, ivec2(lower.x, upper.y), 0).r;
   uint c11 = texelFetch(u_raw_codes, upper, 0).r;
-  if (!valid_code(c00) || !valid_code(c10) || !valid_code(c01) || !valid_code(c11)) {
+  vec4 codes = vec4(float(c00), float(c10), float(c01), float(c11));
+  // Weight only the valid neighbors and renormalize. A missing or no-coverage
+  // cell never contributes its value, but it no longer collapses the fragment
+  // to a hard nearest-cell block either, so echo edges stop rendering as
+  // squares. Coverage then fades the outermost half-cell ring; the painted
+  // footprint is unchanged because an invalid nearest cell already discarded.
+  vec2 fraction = clamp(fract(local), 0.0, 1.0);
+  vec4 weights = vec4(
+    (1.0 - fraction.x) * (1.0 - fraction.y),
+    fraction.x * (1.0 - fraction.y),
+    (1.0 - fraction.x) * fraction.y,
+    fraction.x * fraction.y
+  ) * vec4(
+    valid_code(c00) ? 1.0 : 0.0,
+    valid_code(c10) ? 1.0 : 0.0,
+    valid_code(c01) ? 1.0 : 0.0,
+    valid_code(c11) ? 1.0 : 0.0
+  );
+  float coverage = dot(weights, vec4(1.0));
+  if (coverage <= 0.0) {
     frag_color = palette_color(float(nearest_raw));
     return;
   }
-  vec2 fraction = clamp(fract(local), 0.0, 1.0);
-  float top = mix(float(c00), float(c10), fraction.x);
-  float bottom = mix(float(c01), float(c11), fraction.x);
-  frag_color = palette_color(mix(top, bottom, fraction.y));
+  // The palette is premultiplied, so scaling the whole color scales opacity.
+  frag_color = palette_color(dot(weights, codes) / coverage) * sqrt(coverage);
 }`;
 
 export interface NationalPaintReceipt {
