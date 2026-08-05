@@ -1,5 +1,11 @@
-const TARGET_BYTES = 200 * 1024 * 1024;
-const HARD_CEILING_BYTES = 256 * 1024 * 1024;
+// Native-residency contract (owner decision, 2026-08-04): all 20 retained
+// observations are GPU-resident at the exact factor-1 grid; receipts carry
+// the native manifest factor, and no detail/fallback level exists.
+const TARGET_BYTES = 1280 * 1024 * 1024;
+const HARD_CEILING_BYTES = 1536 * 1024 * 1024;
+// Slices adapt to measured throughput; cold-start overshoot of the 4 ms
+// pacing budget is tolerated, long tasks are not.
+const UPLOAD_SLICE_LONG_TASK_CEILING_MS = 50;
 
 export function validateNationalPhase4Acceptance(report) {
   const failures = [];
@@ -38,7 +44,7 @@ export function validateNationalPhase4Acceptance(report) {
     || !sameMembers(renderer?.commonResidentObservationIds ?? [], ids)
   ) failures.push("all-frame common GPU residency");
   if (!(renderer?.gpuResourceBytes > 0 && renderer.gpuResourceBytes < TARGET_BYTES && renderer.peakGpuResourceBytes < HARD_CEILING_BYTES)) failures.push("National GPU memory budget");
-  if (!(renderer?.maximumUploadSliceMs > 0 && renderer.maximumUploadSliceMs <= 4)) failures.push("4 ms upload slice budget");
+  if (!(renderer?.maximumUploadSliceMs > 0 && renderer.maximumUploadSliceMs <= UPLOAD_SLICE_LONG_TASK_CEILING_MS)) failures.push("upload slice long-task ceiling");
   if (playback?.residentCount !== 20 || !ids.includes(playback?.selectedObservationId)) failures.push("20-frame playback timeline");
 
   const transitions = report.transitions;
@@ -50,16 +56,16 @@ export function validateNationalPhase4Acceptance(report) {
   ) failures.push("zero hot-path upload activity");
   if (
     transitions?.receipts?.length !== 1_000
-    || transitions.receipts.some((receipt) => receipt.presentationFactor !== 4 || !ids.includes(receipt.observationId))
-  ) failures.push("common-level transition receipts");
+    || transitions.receipts.some((receipt) => receipt.presentationFactor !== 1 || !ids.includes(receipt.observationId))
+  ) failures.push("native transition receipts");
 
   const oldestScrub = report.scrub?.oldest;
   const newestScrub = report.scrub?.newest;
   if (
     oldestScrub?.receipt?.observationId !== ids[0]
     || newestScrub?.receipt?.observationId !== ids.at(-1)
-    || oldestScrub?.receipt?.presentationFactor !== 4
-    || newestScrub?.receipt?.presentationFactor !== 4
+    || oldestScrub?.receipt?.presentationFactor !== 1
+    || newestScrub?.receipt?.presentationFactor !== 1
     || !zeroActivity(oldestScrub?.activityDelta)
     || !zeroActivity(newestScrub?.activityDelta)
   ) failures.push("direct resident scrub receipts");
@@ -67,25 +73,22 @@ export function validateNationalPhase4Acceptance(report) {
   const detail = report.detail?.renderer;
   if (
     detail?.presentationFactor !== 1
-    || detail?.fallbackPresentationFactor !== 4
-    || detail?.fallbackChunkCount !== 28
+    || detail?.fallbackChunkCount !== 0
     || detail?.commonResidentObservationIds?.length !== 20
-    || !(detail?.detailedObservationIds?.length >= 2 && detail.detailedObservationIds.length <= 3)
+    || detail?.detailedObservationIds?.length !== 0
     || detail?.mutationAwaitingCommit !== false
-  ) failures.push("selected and temporal-window detail residency");
+  ) failures.push("camera-independent native residency");
 
   const active = report.activePlayback;
-  const activeFactor = active?.playback?.qualityLockFactor;
   if (
     active?.playback?.playing !== true
-    || ![1, 2].includes(activeFactor)
-    || active?.renderer?.playbackQualityFactor !== activeFactor
-    || active?.renderer?.presentationFactor !== activeFactor
-    || active?.renderer?.detailedObservationIds?.length !== 20
-    || !sameMembers(active?.renderer?.detailedObservationIds ?? [], ids)
+    || active?.playback?.qualityLockFactor !== 4
+    || active?.renderer?.playbackQualityFactor !== 4
+    || active?.renderer?.presentationFactor !== 1
+    || active?.renderer?.detailedObservationIds?.length !== 0
     || !(active?.renderer?.gpuResourceBytes > 0 && active.renderer.gpuResourceBytes < TARGET_BYTES)
     || !(active?.renderer?.peakGpuResourceBytes < HARD_CEILING_BYTES)
-  ) failures.push("high-zoom playback quality lock");
+  ) failures.push("high-zoom native playback");
   if (
     !sameSharpPlaybackActivity(active?.activityBefore, active?.activityAfter)
     || active?.rendererBefore?.uploadCount !== active?.rendererAfter?.uploadCount

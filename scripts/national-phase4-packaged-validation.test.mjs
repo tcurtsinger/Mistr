@@ -6,21 +6,26 @@ describe("National Phase 4 packaged acceptance", () => {
     expect(validateNationalPhase4Acceptance(validReport())).toEqual([]);
   });
 
-  it("rejects background activity and mixed playback quality", () => {
+  it("rejects background activity, quality drift, and long-task upload slices", () => {
     const report = validReport();
     report.transitions.activityDelta.networkRequests = 1;
-    report.activePlayback.renderer.presentationFactor = 1;
     report.activePlayback.renderer.playbackQualityFactor = 2;
     report.activePlayback.activityAfter.networkRequests = 1;
     report.activePlayback.inspectionQueue.maxConcurrentCount = 2;
-    report.history.renderer.maximumUploadSliceMs = 4.1;
+    report.history.renderer.maximumUploadSliceMs = 50.1;
     expect(validateNationalPhase4Acceptance(report)).toEqual(expect.arrayContaining([
       "zero hot-path backend activity",
-      "high-zoom playback quality lock",
+      "high-zoom native playback",
       "zero sharp-playback transfer and upload work",
       "latest-only inspection lookup queue",
-      "4 ms upload slice budget",
+      "upload slice long-task ceiling",
     ]));
+  });
+
+  it("tolerates cold-start upload pacing overshoot below the long-task ceiling", () => {
+    const report = validReport();
+    report.history.renderer.maximumUploadSliceMs = 12.6;
+    expect(validateNationalPhase4Acceptance(report)).toEqual([]);
   });
 
   it("requires a failed Site transition to restore a new active National generation", () => {
@@ -99,12 +104,12 @@ function validReport() {
     commonResidentObservationIds: ids,
     detailedObservationIds: [],
     selectedObservationId: ids.at(-1),
-    presentationFactor: 4,
-    residentChunkCount: 560,
-    gpuResourceBytes: 64_000_000,
-    peakGpuResourceBytes: 70_000_000,
-    uploadCount: 560,
-    uploadBytes: 64_000_000,
+    presentationFactor: 1,
+    residentChunkCount: 7_840,
+    gpuResourceBytes: 1_029_000_000,
+    peakGpuResourceBytes: 1_080_000_000,
+    uploadCount: 7_840,
+    uploadBytes: 1_029_000_000,
     maximumUploadSliceMs: 1.3,
     contextEpoch: 1,
   };
@@ -116,7 +121,7 @@ function validReport() {
     bulkIpcBytes: 0,
     pointLookupDecodes: 0,
   };
-  const receipt = (id = ids.at(-1), factor = 4) => {
+  const receipt = (id = ids.at(-1), factor = 1) => {
     const [time, hash] = id.split(":");
     return {
       generation: 8,
@@ -185,20 +190,19 @@ function validReport() {
       renderer: {
         ...renderer,
         presentationFactor: 1,
-        fallbackPresentationFactor: 4,
-        fallbackChunkCount: 28,
-        detailedObservationIds: ids.slice(-3),
+        fallbackChunkCount: 0,
+        detailedObservationIds: [],
       },
     },
     activePlayback: {
-      playback: { playing: true, qualityLockFactor: 1 },
+      playback: { playing: true, qualityLockFactor: 4 },
       renderer: {
         ...renderer,
         presentationFactor: 1,
-        playbackQualityFactor: 1,
-        detailedObservationIds: ids,
-        gpuResourceBytes: 150_000_000,
-        peakGpuResourceBytes: 170_000_000,
+        playbackQualityFactor: 4,
+        detailedObservationIds: [],
+        gpuResourceBytes: 1_029_000_000,
+        peakGpuResourceBytes: 1_080_000_000,
       },
       activityBefore: { ...activity },
       activityAfter: { ...activity },
