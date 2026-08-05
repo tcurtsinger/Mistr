@@ -4,9 +4,9 @@
 
 **Merged baseline:** [PR #18 - National Phase 4 bounded rolling history and playback](https://github.com/tcurtsinger/Mistr/pull/18), merge commit `4a4da19`
 
-**Active change:** Focused National playback correction: prepare the finest complete all-frame regional viewport level before playback, preserve uniform quality through camera moves, keep the prior paint visible during bounded preparation, and leave already-usable transport enabled during background history staging
+**Active change:** National native-resolution residency (owner decision, 2026-08-04): every retained observation stays GPU-resident at the exact full-resolution grid, the level-of-detail/refinement machinery is removed from the product path, point lookups read the retained native frame, and playback controls stay live through history commits
 
-**Branch:** `codex/mistr-national-visual-fidelity`
+**Branch:** `claude/national-native-residency` ([PR #22](https://github.com/tcurtsinger/Mistr/pull/22))
 
 This document is the durable starting point for the next Mistr development session. Verify the active branch, worktree, and any future pull-request checks or threads before acting because repository state can change after this checkpoint.
 
