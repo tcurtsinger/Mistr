@@ -566,7 +566,16 @@ export class NationalGridLayer implements CustomLayerInterface {
   commitPrefetchedStaging(timelineObservationIds: readonly string[]): void {
     const staging = this.requireCompleteStaging();
     const identity = nationalObservationIdentity(staging.manifest);
-    if (identity.observationId === this.getSnapshot().selectedObservationId) {
+    // Prefetch is additive residency: it must never retire the presentation
+    // that is currently painting. The selected observation may prefetch new
+    // detail while its complete common level is active (motion-first playback
+    // paints the upgrade later, with a receipt, through frame selection), but
+    // replacing an active detail presentation without a paint is forbidden.
+    if (
+      identity.observationId === this.getSnapshot().selectedObservationId
+      && this.active
+      && this.active.manifest.presentationFactor !== 4
+    ) {
       throw new Error("selected National detail requires an authoritative paint receipt");
     }
     const previous = this.captureResidencyState();
@@ -675,6 +684,25 @@ export class NationalGridLayer implements CustomLayerInterface {
     return commonBytes
       + residentGpuBytes(detail) * this.timelineObservationIds.length
       + sharedBytes;
+  }
+
+  /**
+   * Wait until no frame paint or paint waiter is in flight. Residency
+   * mutations that bypass the paint path (prefetch commits) call this so a
+   * concurrent motion paint's captured rollback state can never be made
+   * stale by a mid-fence residency change.
+   */
+  async waitForPaintQuiescence(timeoutMs = 10_000): Promise<void> {
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 120_000) {
+      throw new RangeError("National paint quiescence wait must be between 100 and 120000 ms");
+    }
+    const started = performance.now();
+    while (this.pendingPaint || this.paintWaiter) {
+      if (performance.now() - started > timeoutMs) {
+        throw new Error("National paint quiescence wait timed out");
+      }
+      await nextAnimationFrame();
+    }
   }
 
   async waitForCommonResidency(timeoutMs = 60_000): Promise<void> {

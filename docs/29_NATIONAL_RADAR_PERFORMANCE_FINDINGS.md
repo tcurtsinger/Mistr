@@ -15,6 +15,17 @@
 
 Memory contract after F1: 20 factor-4 commons (61.3 MiB) + selected whole-domain factor-1 detail (46.7 MiB) + one staged replacement (46.7 MiB) ≈ **154.7 MiB** peak, inside the 200 MiB target; the 256 MiB hard-ceiling checks are unchanged and still enforced at commit time.
 
+## 0.1 Round 2 — owner retest findings and remediation (2026-08-04)
+
+The owner retested the packaged build after PR #20 merged: pan/zoom **while playing** still froze the loop, a `Mistr could not change scans` notice appeared on roughly half of pans, playback blocked backfill from ever finishing, and blur-then-sharpen persisted around playback sessions. Round 1 fixed only the paused path. Verified round-2 root causes, remediated on `claude/national-playback-continuity`:
+
+1. **Playback stopped for every camera change and for quality preparation.** `notifyCameraChanged` paused the loop, re-prepared all 20 viewport-detail frames, and only then restarted; `play()` was also gated behind that preparation. Remediation: **motion-first playback** — motion starts immediately at the always-resident factor-4 commons, sharp preparation runs beside the loop as prefetch-only residency work (`prefetchDetail` for every frame, including the selected one, which the relaxed `commitPrefetchedStaging` guard now permits while the common level is active), and the quality lock upgrades between frames with a normal paint receipt. A camera change drops the lock to the commons — whole-domain, therefore camera-independent — without stopping motion, and re-prepares in the background.
+2. **Supersession surfaced as a user-facing error.** A second pan during an in-flight preparation raised `RadarSourceSupersededError`, which the `moveend`/play/scrub handlers rendered as the playback-area notice. Remediation: supersession is normal control flow and is now filtered everywhere before `setPlaybackError`; the camera notification path no longer produces awaited rejections at all.
+3. **Playback starved acquisition.** The play session held the exclusive resident-only reservation for its entire duration while `runNationalAcquisition` spun on it, so backfill and strictly-newer polling made no progress while playing. Remediation: motion is resident-only by construction and holds no reservation; backfill and polling continue during playback, with each commit briefly pausing/resuming the loop through the existing replacement contract. Sharp preparation defers until retained history settles (`pendingBackfillCount` = 0) and the post-commit resume re-runs it.
+4. **Home-view playback deleted the complete-domain detail.** The below-threshold branch of quality preparation reset to the overview and pruned all detail, forcing a ~1 s re-refinement blur after every home-view play. Remediation: below the sharp threshold, preparation touches no residency at all.
+
+Deferred with reason: pipelining backfill downloads against GPU commits requires a staged-frame queue in Rust (`national_history.rs` holds a single `staged` slot); backfill remains serial per frame. The engineering-contract playback sentence was updated for the motion-first model as an owner decision dated 2026-08-04.
+
 ## 1. Reported symptoms
 
 1. **Initial National load takes far too long** before the timeline feels usable.

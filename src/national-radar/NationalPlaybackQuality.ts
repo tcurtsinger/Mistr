@@ -15,7 +15,7 @@ export const NATIONAL_SHARP_PLAYBACK_MIN_ZOOM = 6;
 
 type PlaybackQualityWorkingSet = Pick<
   NationalHistoryWorkingSetController,
-  "stageSelectedDetail" | "prefetchDetail"
+  "prefetchDetail"
 >;
 
 type PlaybackQualityLayer = Pick<
@@ -23,7 +23,6 @@ type PlaybackQualityLayer = Pick<
   | "finestCompletePlaybackFactor"
   | "projectedUniformDetailGpuBytes"
   | "pruneDetailResidency"
-  | "selectResidentAndWait"
 >;
 
 export interface NationalPlaybackQualityPreparationOptions {
@@ -50,6 +49,16 @@ export function nationalPlaybackDetailCandidates(
   return zoom >= NATIONAL_SHARP_PLAYBACK_MIN_ZOOM ? [1, 2] : [];
 }
 
+/**
+ * Prepare sharp playback detail beside a running loop. Every staging is a
+ * prefetch: nothing here selects, paints, or otherwise changes the visible
+ * observation — the caller applies the returned factor through the playback
+ * quality lock, and the next frame selection paints it with a receipt.
+ *
+ * Below the sharp-zoom threshold no detail is staged and existing residency
+ * is left untouched, so a complete-domain refined presentation survives a
+ * home-view playback session intact.
+ */
 export async function prepareNationalPlaybackQuality(
   options: NationalPlaybackQualityPreparationOptions,
 ): Promise<NationalPlaybackQualityPreparationResult> {
@@ -72,14 +81,8 @@ export async function prepareNationalPlaybackQuality(
   if (!selected || timelineIds.length < 1) {
     throw new Error("National playback quality requires the selected retained observation");
   }
-  const resetToCommon = async () => {
-    await layer.selectResidentAndWait(selectedObservationId, 4);
-    layer.pruneDetailResidency([]);
-  };
   const candidates = nationalPlaybackDetailCandidates(options.zoom);
   if (candidates.length < 1) {
-    ownershipCheck();
-    await resetToCommon();
     ownershipCheck();
     return { factor: 4, projectedGpuBytes: 0, detailedObservationCount: 0 };
   }
@@ -87,12 +90,11 @@ export async function prepareNationalPlaybackQuality(
   try {
     for (const factor of candidates) {
       ownershipCheck();
-      await workingSet.stageSelectedDetail(
+      await workingSet.prefetchDetail(
         selected,
         bounds,
         timelineIds,
         ownershipCheck,
-        undefined,
         factor,
       );
       ownershipCheck();
@@ -102,7 +104,7 @@ export async function prepareNationalPlaybackQuality(
         factor,
       );
       if (projectedGpuBytes > gpuTargetBytes) {
-        await resetToCommon();
+        layer.pruneDetailResidency([]);
         continue;
       }
       for (const observation of observations) {
@@ -130,7 +132,11 @@ export async function prepareNationalPlaybackQuality(
     }
     return { factor: 4, projectedGpuBytes: 0, detailedObservationCount: 0 };
   } catch (error) {
-    await resetToCommon().catch(() => {});
+    try {
+      layer.pruneDetailResidency([]);
+    } catch {
+      // Preserve the preparation error; residency pruning is best-effort here.
+    }
     throw error;
   }
 }
