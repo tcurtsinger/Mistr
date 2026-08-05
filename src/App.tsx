@@ -2913,11 +2913,15 @@ export function App() {
         playbackReady={(nationalActive
           ? Boolean(nationalPlaybackControllerRef.current)
             && (nationalHistory?.retained.length ?? 0) > 1
-            && nationalCommonResidencyReady
+            // A replacement commit must not disable the operator's control:
+            // play/pause during the commit window wait out the mutation
+            // through the controller's own residency gates, and the resumed
+            // commons stay >= 2 throughout. residentCount keeps the button
+            // live while the transient commit flags flip.
+            && (nationalCommonResidencyReady || (playback?.residentCount ?? 0) > 1)
             && !pendingSite
           : Boolean(playbackControllerRef.current) && phase4.kind === "complete")
-          && !rendererError
-          && !playback?.residentReplacementPending}
+          && !rendererError}
         playing={playback?.playing ?? false}
         playbackStatus={radarUnavailableError ? "RADAR UNAVAILABLE" : playbackStatus}
         preparingFailed={preparingFailed}

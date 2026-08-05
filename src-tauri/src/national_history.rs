@@ -9,7 +9,7 @@
 
 use crate::mrms::{
     DownloadedMrmsObject, MrmsCellValue, MrmsClient, MrmsDecodeEvidence, MrmsObject,
-    bounded_poll_delay, decode_mrms_gzip,
+    MrmsValueEncoding, bounded_poll_delay, decode_mrms_gzip,
 };
 use crate::packed_grid::{MrmsNumericPyramid, PackedGridFrame};
 use crate::phase2_ipc::{TransferBroker, TransferError};
@@ -1100,31 +1100,128 @@ pub async fn lookup_national_history_point(
         .map_err(|_| {
             TransferError::new("national_point_unavailable", "point lookup gate closed")
         })?;
-    let download = retained.download.clone();
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        let decoded = decode_mrms_gzip(&download.compressed_bytes, download.object.clone())
-            .map_err(mrms_error)?;
-        lookup_decoded_point(
-            decoded,
-            generation,
-            observation_time_unix_ms,
-            content_sha256,
-            inspection_id,
-            longitude,
-            latitude,
-        )
-    })
-    .await
-    .map_err(|error| TransferError::new("national_backend_task_failed", error.to_string()))??;
-    let mut store = lock_store(&state)?;
+    // Native residency: the retained presentation is the exact factor-1 grid,
+    // so the raw code is read directly from the retained encoded frame in
+    // constant time. No gzip/GRIB/PNG decode runs and no decode is counted.
+    let result = lookup_retained_point(
+        &retained.overview,
+        generation,
+        observation_time_unix_ms,
+        content_sha256,
+        inspection_id,
+        longitude,
+        latitude,
+    )?;
+    let store = lock_store(&state)?;
     store.find(
         generation,
         observation_time_unix_ms,
         &result.content_sha256,
         false,
     )?;
-    store.activity.point_lookup_decodes = store.activity.point_lookup_decodes.saturating_add(1);
     Ok(result)
+}
+
+fn lookup_retained_point(
+    frame: &PackedGridFrame,
+    generation: u64,
+    observation_time_unix_ms: i64,
+    content_sha256: String,
+    inspection_id: String,
+    longitude: f64,
+    latitude: f64,
+) -> Result<NationalHistoryPointLookup, TransferError> {
+    let summary = &frame.summary;
+    if summary.presentation_factor != 1 {
+        return Err(TransferError::new(
+            "national_point_invalid",
+            "retained presentation is not the native grid",
+        ));
+    }
+    let column =
+        ((longitude - summary.first_longitude_degrees) / summary.longitude_step_degrees).round();
+    let row = ((summary.first_latitude_degrees - latitude) / summary.latitude_step_degrees).round();
+    if column < 0.0
+        || row < 0.0
+        || column >= f64::from(summary.width)
+        || row >= f64::from(summary.height)
+    {
+        return Err(TransferError::new(
+            "national_point_outside_coverage",
+            "inspection coordinate is outside the MRMS CONUS grid",
+        ));
+    }
+    let column = column as u32;
+    let row = row as u32;
+    let interior = u32::from(summary.chunk_interior_size);
+    if interior == 0 {
+        return Err(TransferError::new(
+            "national_point_invalid",
+            "retained chunk interior size is invalid",
+        ));
+    }
+    let chunks_across = summary.width.div_ceil(interior);
+    let chunk_index = usize::try_from((row / interior) * chunks_across + (column / interior))
+        .map_err(|_| TransferError::new("national_point_invalid", "chunk index overflowed"))?;
+    let descriptor = summary.chunks.get(chunk_index).ok_or_else(|| {
+        TransferError::new(
+            "national_point_invalid",
+            "inspection cell maps outside the retained chunk set",
+        )
+    })?;
+    if column < descriptor.interior_x
+        || column >= descriptor.interior_x + u32::from(descriptor.interior_width)
+        || row < descriptor.interior_y
+        || row >= descriptor.interior_y + u32::from(descriptor.interior_height)
+    {
+        return Err(TransferError::new(
+            "national_point_invalid",
+            "retained chunk geometry does not contain the inspection cell",
+        ));
+    }
+    let local_x = (column - descriptor.halo_x) as usize;
+    let local_y = (row - descriptor.halo_y) as usize;
+    let offset = crate::packed_grid::PACKED_GRID_HEADER_BYTES
+        + (local_y * usize::from(descriptor.halo_width) + local_x) * 2;
+    let bytes = frame.chunks.get(chunk_index).ok_or_else(|| {
+        TransferError::new("national_point_invalid", "retained chunk payload is absent")
+    })?;
+    let raw_code = bytes
+        .get(offset..offset + 2)
+        .map(|pair| u16::from_be_bytes([pair[0], pair[1]]))
+        .ok_or_else(|| {
+            TransferError::new(
+                "national_point_invalid",
+                "retained chunk payload is shorter than its geometry",
+            )
+        })?;
+    let encoding = MrmsValueEncoding {
+        bit_depth: summary.bit_depth,
+        reference_value_bits: summary.reference_value.to_bits(),
+        binary_scale: summary.binary_scale,
+        decimal_scale: summary.decimal_scale,
+        missing_raw: summary.missing_raw,
+        no_coverage_raw: summary.no_coverage_raw,
+    };
+    let (status, value_dbz) = match encoding.decode_raw(raw_code) {
+        MrmsCellValue::Valid(value) => ("valid", Some(value)),
+        MrmsCellValue::Missing => ("missing", None),
+        MrmsCellValue::NoCoverage => ("no_coverage", None),
+    };
+    Ok(NationalHistoryPointLookup {
+        inspection_id,
+        generation,
+        observation_time_unix_ms,
+        content_sha256,
+        object_key: summary.object_key.clone(),
+        longitude,
+        latitude,
+        row,
+        column,
+        raw_code,
+        status,
+        value_dbz,
+    })
 }
 
 #[tauri::command]
