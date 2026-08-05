@@ -96,8 +96,9 @@ void main() {
   vec2 local = grid - u_halo_origin;
   ivec2 nearest_cell = ivec2(floor(local + 0.5));
   uint nearest_raw = texelFetch(u_raw_codes, nearest_cell, 0).r;
-  if (!valid_code(nearest_raw)) discard;
   if (!u_smooth) {
+    // Native paints exact measured cells only: hard boundaries, full opacity.
+    if (!valid_code(nearest_raw)) discard;
     frag_color = palette_color(float(nearest_raw));
     return;
   }
@@ -110,11 +111,11 @@ void main() {
   uint c01 = texelFetch(u_raw_codes, ivec2(lower.x, upper.y), 0).r;
   uint c11 = texelFetch(u_raw_codes, upper, 0).r;
   vec4 codes = vec4(float(c00), float(c10), float(c01), float(c11));
-  // Weight only the valid neighbors and renormalize. A missing or no-coverage
-  // cell never contributes its value, but it no longer collapses the fragment
-  // to a hard nearest-cell block either, so echo edges stop rendering as
-  // squares. Coverage then fades the outermost half-cell ring; the painted
-  // footprint is unchanged because an invalid nearest cell already discarded.
+  // Weight only the valid neighbors and renormalize: a missing or no-coverage
+  // cell never contributes its value at any weight. The surviving weight is
+  // the fragment's coverage and drives opacity directly, so an echo boundary
+  // ramps from full opacity at the last measured cell center to nothing at
+  // the first unmeasured cell center instead of ending in a hard square.
   vec2 fraction = clamp(fract(local), 0.0, 1.0);
   vec4 weights = vec4(
     (1.0 - fraction.x) * (1.0 - fraction.y),
@@ -128,12 +129,9 @@ void main() {
     valid_code(c11) ? 1.0 : 0.0
   );
   float coverage = dot(weights, vec4(1.0));
-  if (coverage <= 0.0) {
-    frag_color = palette_color(float(nearest_raw));
-    return;
-  }
+  if (coverage < 0.0001) discard;
   // The palette is premultiplied, so scaling the whole color scales opacity.
-  frag_color = palette_color(dot(weights, codes) / coverage) * sqrt(coverage);
+  frag_color = palette_color(dot(weights, codes) / coverage) * coverage;
 }`;
 
 export interface NationalPaintReceipt {
