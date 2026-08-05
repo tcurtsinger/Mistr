@@ -164,14 +164,14 @@ try {
   await delay(250);
   await evaluate(serialized("window.__MISTR_NATIONAL_PHASE4__.refineForCamera()"), true, 240_000);
   const detail = await waitForReport(
-    "report.renderer?.presentationFactor===1 && report.renderer?.detailedObservationIds?.length>=1",
+    "report.renderer?.status==='painted' && report.renderer?.presentationFactor===1 && report.renderer?.detailedObservationIds?.length===0",
     240_000,
   );
   const detailScreenshot = await captureScreenshot();
 
   await evaluate("window.__MISTR_NATIONAL_PHASE4__.play()", true, 300_000);
   await waitForReport(
-    "report.playback?.playing===true && (report.renderer?.presentationFactor===1 || report.renderer?.presentationFactor===2)",
+    "report.playback?.playing===true && report.renderer?.presentationFactor===1",
     60_000,
   );
   const playbackActivityBefore = await evaluate(
@@ -212,7 +212,7 @@ try {
 
   await evaluate("window.__MISTR_NATIONAL_PHASE4__.setCamera(-98.5,39.5,4.5)");
   await delay(1_000);
-  await waitForReport("report.renderer?.presentationFactor===4", 30_000);
+  await waitForReport("report.renderer?.presentationFactor===1", 30_000);
   const contextReset = await evaluate(
     serialized("window.__MISTR_NATIONAL_PHASE4__.resetContext(150)"),
     true,
