@@ -17,8 +17,13 @@ import {
 import { nationalObservationIdentity } from "./model";
 
 const PALETTE_WIDTH = 1_024;
-export const NATIONAL_GPU_TARGET_BYTES = 200 * 1024 * 1024;
-export const NATIONAL_GPU_HARD_CEILING_BYTES = 256 * 1024 * 1024;
+// Native-residency owner decision (2026-08-04): all retained observations
+// stay GPU-resident at the exact full-resolution grid (~49 MiB per frame,
+// ~1 GiB for the 20-frame loop plus one staged replacement). Sized for the
+// supported desktop floor — a discrete GPU with several GiB of memory — not
+// a minimal device.
+export const NATIONAL_GPU_TARGET_BYTES = 1280 * 1024 * 1024;
+export const NATIONAL_GPU_HARD_CEILING_BYTES = 1536 * 1024 * 1024;
 const PALETTE_MIN_DBZ = -25;
 const PALETTE_MAX_DBZ = 70;
 const DEFAULT_UPLOAD_BUDGET_MS = 4;
@@ -584,6 +589,7 @@ export class NationalGridLayer implements CustomLayerInterface {
       staging,
       timelineObservationIds,
       false,
+      "detail",
     );
     this.residents = residents;
     this.timelineObservationIds = [...timelineObservationIds];
@@ -1048,6 +1054,7 @@ export class NationalGridLayer implements CustomLayerInterface {
       staging,
       timelineObservationIds,
       replaceAll,
+      "common",
     );
     this.residents = residents;
     this.timelineObservationIds = [...timelineObservationIds];
@@ -1085,6 +1092,7 @@ export class NationalGridLayer implements CustomLayerInterface {
     staging: PresentationResources,
     timelineObservationIds: readonly string[],
     replaceAll: boolean,
+    slot: "common" | "detail",
   ): { residents: Map<string, ResidentObservation>; retireOnSuccess: PresentationResources[] } {
     const residents = replaceAll
       ? new Map<string, ResidentObservation>()
@@ -1095,7 +1103,7 @@ export class NationalGridLayer implements CustomLayerInterface {
     }
     const identity = nationalObservationIdentity(staging.manifest);
     const prior = residents.get(identity.observationId) ?? { common: null, detail: null };
-    if (staging.manifest.presentationFactor === 4) {
+    if (slot === "common") {
       if (prior.common && prior.common !== staging) retireOnSuccess.push(prior.common);
       if (prior.detail) retireOnSuccess.push(prior.detail);
       residents.set(identity.observationId, { common: staging, detail: null });
@@ -1544,6 +1552,9 @@ function uniquePresentations(
   return presentations.filter((presentation, index) => presentations.indexOf(presentation) === index);
 }
 
+// The numeric selector keeps its historical convention: 4 selects the common
+// slot regardless of the common presentation's native manifest factor (which
+// is 1 under native residency); 1/2 select a matching detail presentation.
 function presentationFromResidents(
   residents: Map<string, ResidentObservation>,
   observationId: string,

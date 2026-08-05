@@ -26,6 +26,19 @@ The owner retested the packaged build after PR #20 merged: pan/zoom **while play
 
 Deferred with reason: pipelining backfill downloads against GPU commits requires a staged-frame queue in Rust (`national_history.rs` holds a single `staged` slot); backfill remains serial per frame. The engineering-contract playback sentence was updated for the motion-first model as an owner decision dated 2026-08-04.
 
+## 0.2 Round 3 — native-resolution residency (owner decision, 2026-08-04)
+
+The owner's second packaged retest still showed blur-then-sharpen around playback and camera changes. Round 2 had made motion continuous, but the two-level model remained: sharp frames were built per viewport on demand, and every build window was visible as blur. The owner's machine is an RTX 4090 (24 GiB VRAM) with 64 GiB of system memory, and the owner directed that quality is never traded for memory on this product.
+
+**Decision:** every retained National observation is GPU-resident at the exact native grid, permanently. There is exactly one version of the data.
+
+- Rust `OVERVIEW_FACTOR` is 1: the retained presentation for every observation is the full 7,000 x 3,500 grid (~49 MiB encoded). `HISTORY_BACKEND_TARGET_BYTES` rises to 2 GiB for the ~1 GiB of retained native encodings.
+- The GPU budget rises to a 1,280 MiB target / 1,536 MiB hard ceiling: 21 native frames (20 retained + 1 staged) ≈ 1,029 MB plus halos and fixed resources. The receipt, generation, credit, and ledger contracts are unchanged.
+- The renderer routes staging to residency slots explicitly instead of inferring the slot from the manifest factor.
+- Deleted from the product path: playback quality preparation, the sharp-zoom gate, selected-frame refinement, camera-key memos, and the moveend playback handler. Blur is impossible by construction — pan, zoom, play, scrub, and source-follow all paint the same native-resolution presentation.
+- Supported-device floor: National now requires roughly 1.2 GiB of free GPU memory. A lower-capability fallback (the retired level-of-detail model) is deliberately not maintained; reintroducing one is a future product decision.
+- Startup cost: each observation now transfers ~49 MiB (392 chunks) instead of ~3 MiB, so backfill to 20 frames takes longer; the newest observation still paints first and playback is usable throughout. Backfill download pipelining (the single Rust staged slot) remains the open follow-up.
+
 ## 1. Reported symptoms
 
 1. **Initial National load takes far too long** before the timeline feels usable.

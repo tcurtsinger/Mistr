@@ -22,8 +22,15 @@ use tauri::ipc::Response;
 use tokio::sync::Semaphore;
 
 const HISTORY_LIMIT: usize = 20;
-const OVERVIEW_FACTOR: u16 = 4;
-const HISTORY_BACKEND_TARGET_BYTES: usize = 180 * 1024 * 1024;
+// Native-residency owner decision (2026-08-04): every retained observation is
+// served at the exact full-resolution grid. The presentation named "overview"
+// throughout this store is therefore factor 1 — there is exactly one version
+// of the data, and no coarser level ever reaches the operator.
+const OVERVIEW_FACTOR: u16 = 1;
+// Twenty retained native-resolution encodings (~49 MB each) plus one staged
+// mutation and the compressed downloads. Sized for the supported desktop
+// floor (tens of GB of system memory), not a minimal device.
+const HISTORY_BACKEND_TARGET_BYTES: usize = 2048 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]

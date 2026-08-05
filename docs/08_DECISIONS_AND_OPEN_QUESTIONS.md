@@ -335,3 +335,4 @@ Additional accepted prototype ADRs:
 - [x] Real-time publication boundary and fallback: [`17_REALTIME_FRESHNESS_AND_FALLBACK_DECISION.md`](17_REALTIME_FRESHNESS_AND_FALLBACK_DECISION.md).
 - [x] Level III N0S and visible-first context recovery: [`18_LEVEL3_N0S_AND_CONTEXT_RECOVERY_DECISION.md`](18_LEVEL3_N0S_AND_CONTEXT_RECOVERY_DECISION.md).
 - [x] National numeric-grid renderer, coverage receipts, and exact interrogation: [`28_NATIONAL_STATIC_RENDERER_DECISION.md`](28_NATIONAL_STATIC_RENDERER_DECISION.md).
+- [x] National native-resolution residency — quality is never traded for memory on the supported desktop floor (owner, 2026-08-04): [`29_NATIONAL_RADAR_PERFORMANCE_FINDINGS.md`](29_NATIONAL_RADAR_PERFORMANCE_FINDINGS.md) §0.2.
