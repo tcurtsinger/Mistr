@@ -10,25 +10,13 @@ export interface NationalDisplaySample {
 
 export interface NationalDisplayFragment extends NationalDisplaySample {
   /**
-   * Fraction of the sample footprint backed by valid measured cells: 1 when
-   * every contributing neighbor is valid (and always 1 in `Native`), lower
-   * near a missing or no-coverage boundary.
+   * Fraction of the sample footprint backed by valid measured cells, and the
+   * display-only opacity scale applied to the palette color. It is 1 wherever
+   * every contributing neighbor is valid, ramps to 0 across an echo boundary,
+   * and is exactly 0 where nothing is painted. `Native` is always 1 on a
+   * measured cell and 0 elsewhere — it never fades.
    */
   coverage: number;
-}
-
-/**
- * Display-only opacity applied to a partially covered `Smooth` fragment. The
- * square root keeps a measured cell clearly visible at its weakest footprint
- * (a lone valid corner renders at half palette opacity) while the outermost
- * half-cell ring fades instead of ending in a hard square. `Native` never
- * applies it, and interrogation is unaffected in either mode.
- */
-export function nationalEdgeAlphaScale(coverage: number): number {
-  if (!Number.isFinite(coverage) || coverage < 0 || coverage > 1) {
-    throw new RangeError("National coverage must be between 0 and 1");
-  }
-  return Math.sqrt(coverage);
 }
 
 export function decodeNationalRaw(
@@ -46,10 +34,16 @@ export function decodeNationalRaw(
 
 /**
  * Mirrors the National fragment shader's sampling contract so it stays
- * testable outside WebGL. `Smooth` weights only the valid neighbors of the
- * footprint and renormalizes: a missing or no-coverage cell never contributes
- * its value, but it no longer collapses the fragment to a hard nearest-cell
- * block either. The returned `coverage` drives the display-only edge fade.
+ * testable outside WebGL.
+ *
+ * `Smooth` weights only the valid neighbors of the footprint and
+ * renormalizes: a missing or no-coverage cell never contributes its value at
+ * any weight. The surviving weight is the fragment's coverage and becomes its
+ * opacity, so an echo boundary ramps from full opacity at the last measured
+ * cell center to nothing at the first unmeasured cell center. That feather
+ * reaches up to half a cell past the measured footprint at low opacity, which
+ * is what replaces the former hard square edge; `Native` keeps the exact
+ * measured footprint at full opacity, and interrogation is exact in both.
  */
 export function sampleNationalGrid(
   rawCodes: Uint16Array,
@@ -76,10 +70,8 @@ export function sampleNationalGrid(
   const nearestY = clamp(Math.floor(y + 0.5), 0, height - 1);
   const nearest = rawCodes[nearestY * width + nearestX];
   const nearestSample = decodeNationalRaw(nearest, missingRaw, noCoverageRaw);
-  // An invalid nearest cell paints nothing at all, so the measured footprint
-  // is identical in both modes; only opacity inside it can soften.
-  if (mode === "native" || nearestSample.status !== "valid") {
-    return { ...nearestSample, coverage: 1 };
+  if (mode === "native") {
+    return { ...nearestSample, coverage: nearestSample.status === "valid" ? 1 : 0 };
   }
   const lowerX = clamp(Math.floor(x), 0, width - 1);
   const lowerY = clamp(Math.floor(y), 0, height - 1);
@@ -100,7 +92,7 @@ export function sampleNationalGrid(
     coverage += corner.weight;
     weighted += corner.weight * corner.raw;
   }
-  if (coverage <= 0) return { ...nearestSample, coverage: 1 };
+  if (coverage <= 0) return { ...nearestSample, coverage: 0 };
   const rawCode = weighted / coverage;
   return {
     status: "valid",

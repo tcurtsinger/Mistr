@@ -88,12 +88,14 @@ The above-radar set is deliberately small. Its lines remain recognizable when so
 
 The National grid renderer weights only the **valid** neighbors of a sample footprint and renormalizes them. A missing or no-coverage cell contributes no value at any weight, so `Smooth` still never bridges an invalid status; but a partially invalid footprint no longer collapses to a hard nearest-cell block, which previously drew every echo boundary as a row of 1 km squares.
 
-The renormalized weight that survives is the fragment's **coverage**, and it scales palette opacity by its square root. A fully surrounded cell is unchanged at coverage 1; the outermost half-cell ring fades rather than terminating in a square; and a lone valid corner still renders at half palette opacity, so a measured cell never becomes invisible. This is display-only, `Smooth`-only, and applied after palette lookup:
+The renormalized weight that survives is the fragment's **coverage**, and it is the fragment's opacity. Coverage is 1 wherever every contributing neighbor is valid, then ramps continuously to 0 across an echo boundary: full opacity at the last measured cell center, nothing at the first unmeasured cell center. A lone measured cell is a soft dot at full opacity on its own center rather than a hard square.
 
-- the painted footprint is identical in both modes, because an invalid nearest cell already paints nothing;
-- no coverage is invented beyond the measured cells;
-- `Native` remains exact nearest-cell sampling at full opacity;
-- interrogation continues to report the exact backend value in both modes.
+This means `Smooth` feathers up to **half a cell (~500 m) past the measured footprint** at low opacity. That translucent margin is the thing that replaces the hard square edge, and it is an accepted display-only cost of the mode:
+
+- no measured value is ever blended with a missing or no-coverage sentinel — only opacity varies there;
+- the feather is `Smooth`-only and applied after palette lookup on a premultiplied palette;
+- `Native` keeps the exact measured footprint: hard cell boundaries, full opacity, no feather;
+- interrogation reports the exact backend value and status in both modes, so a click inside the feathered margin still answers `missing` or `no coverage` truthfully.
 
 `src/national-radar/sampling.ts` mirrors this contract outside WebGL so it stays unit-tested; the shader in `src/national-radar/NationalGridLayer.ts` must match it.
 
