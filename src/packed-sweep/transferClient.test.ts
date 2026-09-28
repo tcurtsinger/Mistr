@@ -559,6 +559,14 @@ describe("PackedSweepTransferClient", () => {
       },
     });
     await previousLease.release();
+    const probeLease = await client.requestPhase5Live("KTLX", true, 60, {
+      volumeIndex: 999,
+      volumeStartedAtUnixMs: 1_800_000_000_000,
+    }, "after", 3);
+    expect(requests[3]).toMatchObject({ timeoutSeconds: 60, waitSeconds: 3 });
+    await probeLease.release();
+    await expect(client.requestPhase5Live("KTLX", true, 60, undefined, "after", 61))
+      .rejects.toThrow("waitSeconds");
     await expect(client.requestPhase5Live("ktlx")).rejects.toThrow("four uppercase");
     await expect(client.requestPhase5Live("KTLX", false, 901)).rejects.toThrow("10 and 900");
     await expect(client.requestPhase5Live("KTLX", false, 120, {

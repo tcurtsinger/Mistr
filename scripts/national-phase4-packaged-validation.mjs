@@ -159,6 +159,7 @@ export function validateNationalPhase4Acceptance(report) {
   failures.push(...validateResidentHandoff(report.residentHandoff));
   failures.push(...validateZoomHandoff(report.zoomHandoff));
   failures.push(...validateTimeCarry(report.timeCarry));
+  failures.push(...validateBackfillFreshness(report.history?.backfillFreshness));
   failures.push(...validateSiteInspection(report.siteInspection));
   const site = report.restoredSite;
   if (
@@ -266,6 +267,19 @@ export function validateTimeCarry(carry) {
     failures.push("National revealed from a playing Site keeps the loop playing");
   }
   return failures;
+}
+
+// Newer observations are checked while history fills. A backfill longer than
+// the 30-second check interval (plus margin) must have checked at least once.
+export function validateBackfillFreshness(freshness) {
+  const durationMs = freshness?.completedAtUnixMs - freshness?.startedAtUnixMs;
+  if (!(freshness?.startedAtUnixMs > 0) || !(freshness?.completedAtUnixMs >= freshness.startedAtUnixMs)) {
+    return ["National history backfill reports its newer-observation checks"];
+  }
+  if (durationMs > 35_000 && !(freshness.checks >= 1)) {
+    return ["National history backfill checks for newer observations while it fills"];
+  }
+  return [];
 }
 
 // A Site opened from National re-inspects the pinned point on every scan it paints.

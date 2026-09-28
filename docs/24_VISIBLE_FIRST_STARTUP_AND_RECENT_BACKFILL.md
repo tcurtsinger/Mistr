@@ -38,7 +38,7 @@ Mistr does not copy Supercell's two-frame product limit or C++ architecture. The
 - Sequentially request the preceding ring slot, including `1 -> 999` wrap, and require a strictly older measured start time.
 - Prepend one accepted older observation per incremental GPU transaction while preserving the visible current/newest scan.
 - Stop safely at 20 frames or when no safe predecessor is available. A partial backfill failure does not mark the already-painted radar unavailable.
-- Start exact-next future polling only after backfill finishes or settles partial.
+- Start continuous exact-next polling after backfill finishes or settles partial. During backfill, a Site probes for a newer scan every 2 minutes (3-second wait; finding none changes nothing) and National checks every 30 seconds, so fresh data never waits behind history (2026-09-28).
 - Preserve generation cancellation, exactly two cross-IPC transfer credits, and the temporary `20 + 1` incremental resource bound.
 - Keep the displayed publication's acquisition evidence, paint receipt, and renderer snapshot as one matching diagnostic record. Report older background acquisitions separately as history updates so they are never mislabeled as the scan that painted.
 

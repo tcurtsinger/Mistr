@@ -8,6 +8,12 @@ export interface NationalBackfillLoopOptions<Candidate> {
   isSuperseded(error: unknown): boolean;
   onFailure(error: unknown, retryAttempt: number): void;
   waitBeforeRetry(retryAttempt: number): Promise<void>;
+  /**
+   * Runs between successful backfill steps, so newer observations are not
+   * held behind the whole history fill. Only supersession stops the backfill;
+   * any other failure is the hook's own to report.
+   */
+  betweenSteps?(): Promise<void>;
   maximumRetryAttempt?: number;
 }
 
@@ -45,7 +51,16 @@ export async function runNationalBackfillLoop<Candidate>(
         if (!options.shouldContinue() || options.isSuperseded(waitError)) return "superseded";
         throw waitError;
       }
+      continue;
     }
+    if (!options.betweenSteps || !options.shouldContinue()) continue;
+    try {
+      await options.betweenSteps();
+    } catch (error) {
+      if (options.isSuperseded(error)) return "superseded";
+    }
+    // A newer observation can fill the history before the predecessors do.
+    if (options.reachedLimit()) return "complete";
   }
   return "superseded";
 }
