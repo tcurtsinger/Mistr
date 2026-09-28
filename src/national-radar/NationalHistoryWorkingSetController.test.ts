@@ -293,6 +293,7 @@ function historyFixture() {
     uploadedBytes: 2,
     framebufferWidth: 3840,
     framebufferHeight: 2160,
+    presented: true,
   };
   return {
     observation,

@@ -26,6 +26,7 @@ class FakeNationalLayer {
       status: "painted",
       displayMode: "smooth",
       presentationEnabled: true,
+      visibility: "visible",
       contextEpoch: 3,
       generation: selected.generation,
       observationId: this.selected,
@@ -91,6 +92,7 @@ class FakeNationalLayer {
       uploadedBytes: 0,
       framebufferWidth: 3840,
       framebufferHeight: 2160,
+      presented: true,
     };
   }
 }
