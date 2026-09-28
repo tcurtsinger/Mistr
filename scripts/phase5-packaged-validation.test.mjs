@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { LIVE_HISTORY_CAPACITY } from "./live-history-capacity.mjs";
 import { validatePhase5Acceptance } from "./phase5-packaged-validation.mjs";
 
 function passingReport() {
@@ -30,7 +31,7 @@ function passingReport() {
     },
     history: {
       residentCount: 2,
-      capacity: 20,
+      capacity: LIVE_HISTORY_CAPACITY,
       partial: true,
       oldestObservationId: "0".repeat(32),
       newestObservationId: "a".repeat(32),

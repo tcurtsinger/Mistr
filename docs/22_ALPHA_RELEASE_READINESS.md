@@ -16,7 +16,7 @@ The packaged WebView2 product session must:
 - paint current KTLX radar first, then acquire safe preceding observations through the product's background backfill loop;
 - retain every observation chronologically with strict older-time predecessor validation;
 - upload exactly one GPU frame per accepted live observation;
-- preserve bounded GPU residency and truthful `LOADING RECENT n/20` / `RECENT n/20` UI;
+- preserve bounded GPU residency and truthful `LOADING RECENT n/60` / `RECENT n/60` UI;
 - directly scrub oldest and newest resident observations; and
 - survive a real WebGL context reset with the same live history and a matching visible paint receipt.
 
