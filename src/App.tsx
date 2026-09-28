@@ -2825,6 +2825,76 @@ export function App() {
             siteLayerRemoved: !instance.getLayer(DIAGNOSTIC_LAYER_IDS.radar),
           };
         },
+        async proveZoomHandoff(site = "KTLX") {
+          const location = radarSiteById(normalizeRadarSite(site));
+          const auto = globalThis.__MISTR_AUTO_SOURCE__;
+          if (!location || !auto || !nationalLayer) {
+            throw new Error("zoom handoff diagnostic is unavailable");
+          }
+          const coordinator = radarSessionCoordinatorRef.current!;
+          if (coordinator.snapshot().painted?.source.kind !== "national") {
+            throw new Error("National must be displayed before the zoom handoff proof");
+          }
+          const waitFor = async (condition: () => boolean, timeoutMs: number, label: string) => {
+            const started = performance.now();
+            while (!condition()) {
+              if (performance.now() - started > timeoutMs) throw new Error(`${label} timed out`);
+              await waitMilliseconds(50);
+            }
+          };
+          const camera = () => {
+            const center = instance.getCenter();
+            return { longitude: center.lng, latitude: center.lat, zoom: instance.getZoom() };
+          };
+          const settled = (kind: "site" | "national") => {
+            const snapshot = coordinator.snapshot();
+            return !snapshot.transition && snapshot.painted?.source.kind === kind;
+          };
+          const nationalGenerationBefore = nationalGeneration;
+          const center: [number, number] = [location.longitude, location.latitude];
+
+          instance.jumpTo({ center, zoom: 8.3, bearing: 0, pitch: 0 });
+          auto.evaluate();
+          await waitFor(() => auto.state().prefetchedSite?.site === location.id, 120_000, "Site preload");
+          const preloaded = auto.state().prefetchedSite;
+
+          instance.jumpTo({ center, zoom: 9.6, bearing: 0, pitch: 0 });
+          const siteCameraSet = camera();
+          const siteStarted = performance.now();
+          auto.evaluate();
+          await waitFor(() => settled("site"), 60_000, "zoom-in switch");
+          const siteSwitchMs = performance.now() - siteStarted;
+          const afterSite = {
+            sourceState: coordinator.snapshot(),
+            camera: camera(),
+            cameraSet: siteCameraSet,
+            siteOpacity: layer?.getOpacity() ?? null,
+            nationalRenderer: nationalLayer?.getSnapshot() ?? null,
+          };
+
+          instance.jumpTo({ center, zoom: 7.5, bearing: 0, pitch: 0 });
+          const nationalCameraSet = camera();
+          const nationalStarted = performance.now();
+          auto.evaluate();
+          await waitFor(() => settled("national"), 60_000, "zoom-out switch");
+          const nationalSwitchMs = performance.now() - nationalStarted;
+          return {
+            site: location.id,
+            fadeMs: sourceFadeMs(),
+            nationalGenerationBefore,
+            preloaded,
+            siteSwitchMs,
+            afterSite,
+            nationalSwitchMs,
+            afterNational: {
+              sourceState: coordinator.snapshot(),
+              camera: camera(),
+              cameraSet: nationalCameraSet,
+              siteLayerPresent: Boolean(instance.getLayer(DIAGNOSTIC_LAYER_IDS.radar)),
+              nationalRenderer: nationalLayer?.getSnapshot() ?? null,
+            },
+          };
+        },
         async waitForHistory(frameCount = MAX_LIVE_HISTORY_FRAMES, timeoutMs = 300_000) {
           if (!Number.isSafeInteger(frameCount) || frameCount < 1 || frameCount > MAX_LIVE_HISTORY_FRAMES) {
             throw new RangeError("National history wait requires 1 to 60 observations");
@@ -4207,6 +4277,7 @@ declare global {
     startSite(site?: string): Promise<Phase5Report>;
     proveFailedSiteKeepsNational(site?: string): Promise<NationalPhase4FailedSiteRecoveryReport>;
     proveResidentHandoff(site?: string): Promise<NationalPhase4ResidentHandoffReport>;
+    proveZoomHandoff(site?: string): Promise<unknown>;
     waitForHistory(frameCount?: number, timeoutMs?: number): Promise<NationalPhase4Report>;
     beginResidentEvidence(): Promise<void>;
     endResidentEvidence(): void;

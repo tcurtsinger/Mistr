@@ -233,6 +233,12 @@ try {
     300_000,
   );
 
+  const zoomHandoff = await evaluate(
+    serialized("window.__MISTR_NATIONAL_PHASE4__.proveZoomHandoff('KTLX')"),
+    true,
+    300_000,
+  );
+
   await evaluate(serialized("window.__MISTR_NATIONAL_PHASE4__.startSite('KTLX')"), true, 300_000);
   await delay(500);
   const restoredSite = {
@@ -258,6 +264,7 @@ try {
     transferSnapshot,
     failedSiteRecovery,
     residentHandoff,
+    zoomHandoff,
     restoredSite,
   };
   report.failures = validateNationalPhase4Acceptance(report);

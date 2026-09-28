@@ -49,3 +49,43 @@ The Site layer gains a 320 MiB GPU ceiling (a 60-frame loop is about 152 MiB, ab
 
 - Unit: broker lane isolation (Rust), client lane isolation, coordinator/session reveal, and a fake-WebGL state-machine suite for hidden commits, reveal, downgrade, a hidden fence finishing after reveal, recovery while hidden, and reveal waiting out a commit.
 - Packaged (`npm run test:national:phase4:packaged`): `proveFailedSiteKeepsNational` (same generation, no backfill restart, playback resumed) and `proveResidentHandoff` (National resident while the Site paints; reveal under the original generation with zero network, decode, and bulk IPC activity within 250 ms; the Site layer removed).
+
+## Phase B — zoom decides the source
+
+**Date:** 2026-09-28. **Status:** Implemented; native packaged validation pending.
+
+### Policy
+
+`decideAutoSource` (`src/radar-session/autoSourcePolicy.ts`) is a pure function of zoom, view center, the displayed source, and the operator's picked Site:
+
+| Condition | Result |
+|---|---|
+| National shown, zoom ≥ 9, a Site within 200 km of the center | Switch to the nearest such Site (or the picked Site while within 230 km) |
+| National shown, zoom ≥ 8 and < 9, same Site condition | Stay on National; preload that Site |
+| Site shown, zoom ≥ 8.5 and center within 230 km of it | Stay on the Site |
+| Site shown, otherwise | Return to National |
+
+Moving between Sites always passes through National, so only one Site layer exists. Site coordinates live in `src/data/radar-sites.json`: 150 from nexrad-model's registry (a Rust test keeps them in sync) and 5 from api.weather.gov.
+
+Only camera moves the operator makes are evaluated (MapLibre events with an `originalEvent`), plus the landing of an explicit picker or recenter flight. Programmatic cameras, including every packaged harness camera, never switch sources.
+
+### Switching
+
+- **Preload:** the likely Site's newest scan is fetched on the Site lane while National is shown. The switch reuses that generation (`SiteLevel2Session.start({ residentGeneration })`) and paints without a network wait. A preload older than 5 minutes is refetched.
+- **Fade in:** the Site's first frame paints at `u_opacity = 0`, then fades to 1 over 300 ms (instant under reduced motion). Only then does the coordinator accept it, so the timeline follows a fully visible frame. National keeps playing underneath until it becomes resident.
+- **Fade out:** National paints underneath first (a reveal, or a fresh acquisition), then the Site fades to 0 and is removed.
+- **Layer order:** National is always inserted, and re-inserted after context loss, below the Site stack, so only the upper layer fades.
+- **Guards:** one automatic switch runs at a time; a Site that just failed is not retried automatically for a minute.
+
+### Camera
+
+Automatic switches never move the camera. The picker flies to a Site at zoom 9.5 (preloading during the flight when National is shown) and makes it preferred; picking National zooms out to the country; recenter uses the same targets. The camera is stored on every move and restored at launch.
+
+### Known limits
+
+- At the end of a fade-in, National disappears everywhere, including outside the Site's range ring, so corners of a wide view briefly lose echo.
+- Playback time is not yet carried across a switch (Phase C); a Site starts at its newest scan.
+
+### Validation
+
+`proveZoomHandoff` in the National packaged gate: at zoom 8.3 over KTLX the Site preloads; at 9.6 the Site fades in under the preloaded generation with National resident and the camera untouched; at 7.5 the same National history returns, the Site layer is removed, and the camera is untouched.

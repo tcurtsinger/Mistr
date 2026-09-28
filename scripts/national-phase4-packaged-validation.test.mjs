@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   validateNationalPhase4Acceptance,
   validateResidentHandoff,
+  validateZoomHandoff,
 } from "./national-phase4-packaged-validation.mjs";
 
 function nationalActivity() {
@@ -88,6 +89,40 @@ describe("National Phase 4 packaged acceptance", () => {
     delete report.residentHandoff;
     expect(validateNationalPhase4Acceptance(report)).toContain(
       "National stays resident while the Site is displayed",
+    );
+  });
+
+  it("requires zoom to fade between the preloaded Site and resident National without moving the camera", () => {
+    expect(validateZoomHandoff(validReport().zoomHandoff)).toEqual([]);
+
+    const unpreloaded = validReport().zoomHandoff;
+    unpreloaded.afterSite.sourceState.painted.generation = 14;
+    expect(validateZoomHandoff(unpreloaded)).toContain(
+      "zooming in fades the preloaded Site in without moving the camera",
+    );
+
+    const moved = validReport().zoomHandoff;
+    moved.afterSite.camera.zoom = 7.5;
+    expect(validateZoomHandoff(moved)).toContain(
+      "zooming in fades the preloaded Site in without moving the camera",
+    );
+
+    const reacquired = validReport().zoomHandoff;
+    reacquired.afterNational.sourceState.painted.generation = 15;
+    expect(validateZoomHandoff(reacquired)).toContain(
+      "zooming out fades back to the resident National without moving the camera",
+    );
+
+    const lingering = validReport().zoomHandoff;
+    lingering.afterNational.siteLayerPresent = true;
+    expect(validateZoomHandoff(lingering)).toContain(
+      "zooming out fades back to the resident National without moving the camera",
+    );
+
+    const report = validReport();
+    delete report.zoomHandoff;
+    expect(validateNationalPhase4Acceptance(report)).toContain(
+      "zooming in fades the preloaded Site in without moving the camera",
     );
   });
 
@@ -357,6 +392,28 @@ function validReport() {
       history: { retained: [{ generation: 8 }, { generation: 8 }] },
       backfillStartCountAfter: 1,
       siteLayerRemoved: true,
+    },
+    zoomHandoff: {
+      site: "KTLX",
+      fadeMs: 300,
+      nationalGenerationBefore: 8,
+      preloaded: { site: "KTLX", generation: 13, fetchedAtUnixMs: 1 },
+      siteSwitchMs: 420,
+      afterSite: {
+        sourceState: { painted: { source: { kind: "site", siteIcao: "KTLX" }, generation: 13 } },
+        camera: { longitude: -97.2778, latitude: 35.3331, zoom: 9.6 },
+        cameraSet: { longitude: -97.2778, latitude: 35.3331, zoom: 9.6 },
+        siteOpacity: 1,
+        nationalRenderer: { visibility: "resident" },
+      },
+      nationalSwitchMs: 340,
+      afterNational: {
+        sourceState: { painted: { source: { kind: "national", domain: "conus" }, generation: 8 } },
+        camera: { longitude: -97.2778, latitude: 35.3331, zoom: 7.5 },
+        cameraSet: { longitude: -97.2778, latitude: 35.3331, zoom: 7.5 },
+        siteLayerPresent: false,
+        nationalRenderer: { visibility: "visible" },
+      },
     },
     restoredSite: {
       sourceState: { painted: { source: { kind: "site", siteIcao: "KTLX" } }, transition: null },
