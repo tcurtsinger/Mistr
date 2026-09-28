@@ -347,6 +347,12 @@ export function App() {
     > | null = null;
     let nationalHistorySession = 0;
     let nationalBackfillStartCount = 0;
+    // Recent National load steps, kept so a stalled load can be diagnosed.
+    const nationalLoadTrace: { atUnixMs: number; step: string; detail?: string }[] = [];
+    const traceNationalLoad = (step: string, detail?: string) => {
+      nationalLoadTrace.push({ atUnixMs: Date.now(), step, ...(detail ? { detail } : {}) });
+      if (nationalLoadTrace.length > 200) nationalLoadTrace.splice(0, nationalLoadTrace.length - 200);
+    };
     let activeNationalBackfillSession: number | null = null;
     // National lane generation of the retained history. National can stay
     // resident (hidden, still acquiring) while a Site is displayed.
@@ -1935,8 +1941,10 @@ export function App() {
         let backendFinalized = false;
         let rendererFinalized = false;
         try {
+          traceNationalLoad("commit:wait-idle", preparation.kind);
           await activeWorkingSet.waitForIdle();
           nationalHistoryOwnershipCheck(generation, historySession);
+          traceNationalLoad("commit:stage");
           workingSet = await activeWorkingSet.stageHistoryOverview(
             preparation.observation,
             proposed.map(nationalObservationId),
@@ -1944,15 +1952,19 @@ export function App() {
             () => nationalHistoryOwnershipCheck(generation, historySession),
             async () => {
               activePlayback.markReplacementPending(true);
+              traceNationalLoad("commit:pause-playback");
               // Even an operator-paused loop may still have a paint in flight.
               resumePlayback = await activePlayback.pauseAndWait(false);
+              traceNationalLoad("commit:playback-paused");
               nationalHistoryOwnershipCheck(generation, historySession);
             },
           );
+          traceNationalLoad("commit:staged");
           if (!workingSet.receipt) {
             throw new Error("National history mutation completed without a paint receipt");
           }
           nationalHistoryOwnershipCheck(generation, historySession);
+          traceNationalLoad("commit:backend");
           await activeClient.commitNationalHistoryFrame(preparation.observation);
           nationalHistoryOwnershipCheck(generation, historySession);
           activeLayer.finalizeHistoryMutation(workingSet.receipt);
@@ -1962,15 +1974,18 @@ export function App() {
             preparation.observation,
           );
           backendFinalized = true;
+          traceNationalLoad("commit:wait-paint");
           const authoritativeReceipt = await activeLayer.waitForAuthoritativeReceipt(
             workingSet.receipt,
           );
           nationalHistoryOwnershipCheck(generation, historySession);
           const finalizedWorkingSet = { ...workingSet, receipt: authoritativeReceipt };
           publishNationalHistory(finalizedHistory, authoritativeReceipt, resumePlayback);
+          traceNationalLoad("commit:published", String(finalizedHistory.retained.length));
           reportNationalRequestError(null);
           return finalizedWorkingSet;
         } catch (error) {
+          traceNationalLoad("commit:failed", error instanceof Error ? error.message : String(error));
           activePlayback.markReplacementPending(false);
           if (workingSet?.receipt && !rendererFinalized) {
             try {
@@ -2030,12 +2045,16 @@ export function App() {
         nationalHistorySession = historySession;
         activeNationalBackfillSession = historySession;
         setVisibleNationalHistoryStatus("loading");
+        traceNationalLoad("backfill:start", String(generation));
         try {
           const result = await runNationalBackfillLoop({
             shouldContinue: () => !cancelled && historySession === nationalHistorySession,
             prepare: () => runNationalAcquisition(async () => {
               nationalHistoryOwnershipCheck(generation, historySession);
-              return activeClientForNational().prepareNationalHistoryPredecessor();
+              traceNationalLoad("backfill:prepare");
+              const preparation = await activeClientForNational().prepareNationalHistoryPredecessor();
+              traceNationalLoad("backfill:prepared");
+              return preparation;
             }),
             commit: async (preparation) => {
               await runNationalAcquisition(
@@ -2045,6 +2064,7 @@ export function App() {
             reachedLimit: () => nationalObservations.length >= MAX_LIVE_HISTORY_FRAMES,
             isSuperseded: isRadarSourceSuperseded,
             onFailure(error) {
+              traceNationalLoad("backfill:failure", error instanceof Error ? error.message : String(error));
               setVisibleNationalHistoryStatus(nationalObservations.length >= MAX_LIVE_HISTORY_FRAMES ? "full" : "loading");
               reportNationalRequestError(error instanceof Error ? error.message : String(error));
             },
@@ -2054,6 +2074,7 @@ export function App() {
                   attempt,
                   Date.now() % Number.MAX_SAFE_INTEGER,
                 );
+                traceNationalLoad("backfill:retry-wait", String(delay.totalMs));
                 await waitMilliseconds(delay.totalMs);
               } catch (error) {
                 nationalHistoryOwnershipCheck(generation, historySession);
@@ -2065,11 +2086,13 @@ export function App() {
           }).finally(() => {
             if (activeNationalBackfillSession === historySession) activeNationalBackfillSession = null;
           });
+          traceNationalLoad("backfill:end", result);
           if (result === "superseded") return;
           nationalHistoryOwnershipCheck(generation, historySession);
           setVisibleNationalHistoryStatus(nationalObservations.length >= MAX_LIVE_HISTORY_FRAMES ? "full" : "partial");
           await runNationalPolling(generation, historySession);
         } catch (error) {
+          traceNationalLoad("backfill:error", error instanceof Error ? error.message : String(error));
           if (isRadarSourceSuperseded(error)) return;
           setVisibleNationalHistoryStatus(nationalObservations.length >= MAX_LIVE_HISTORY_FRAMES ? "full" : "partial");
           reportNationalRequestError(error instanceof Error ? error.message : String(error));
@@ -2761,6 +2784,7 @@ export function App() {
         },
       };
       globalThis.__MISTR_NATIONAL_PHASE4__ = {
+        loadTrace: () => [...nationalLoadTrace],
         report: () => ({
           history: latestNationalHistory,
           renderer: nationalLayer?.getSnapshot() ?? null,
@@ -4364,6 +4388,7 @@ declare global {
     proveFailedSiteKeepsNational(site?: string): Promise<NationalPhase4FailedSiteRecoveryReport>;
     proveResidentHandoff(site?: string): Promise<NationalPhase4ResidentHandoffReport>;
     proveZoomHandoff(site?: string, nextSite?: string): Promise<unknown>;
+    loadTrace(): { atUnixMs: number; step: string; detail?: string }[];
     waitForHistory(frameCount?: number, timeoutMs?: number): Promise<NationalPhase4Report>;
     beginResidentEvidence(): Promise<void>;
     endResidentEvidence(): void;
