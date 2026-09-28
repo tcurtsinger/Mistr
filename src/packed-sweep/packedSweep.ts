@@ -1,6 +1,19 @@
 export const PACKED_SWEEP_HEADER_BYTES = 320;
 export const PACKED_SWEEP_MAX_BYTES = 32 * 1024 * 1024;
 export const PACKED_SWEEP_VERSION = 1;
+/**
+ * Accepted beam elevation. WSR-88D antennas point as low as -1 degree and
+ * mountaintop sites scan below the horizon; the margin covers measured-angle
+ * jitter. Matches `ELEVATION_RANGE_DEGREES` in the Rust radar module.
+ */
+export const MIN_BEAM_ELEVATION_DEGREES = -2;
+export const MAX_BEAM_ELEVATION_DEGREES = 90;
+
+export function isBeamElevation(degrees: number): boolean {
+  return Number.isFinite(degrees)
+    && degrees >= MIN_BEAM_ELEVATION_DEGREES
+    && degrees <= MAX_BEAM_ELEVATION_DEGREES;
+}
 
 const MAGIC = new TextEncoder().encode("MSTRSWP1");
 const ENDIAN_MARKER = 0x01020304;
@@ -232,7 +245,7 @@ export async function parsePackedSweep(
   if (!Number.isFinite(radarLongitudeDegrees) || radarLongitudeDegrees < -180 || radarLongitudeDegrees > 180) {
     throw new PackedSweepError("invalid_metadata", "radar longitude");
   }
-  if (!Number.isFinite(elevationDegrees) || elevationDegrees < 0 || elevationDegrees > 90) {
+  if (!isBeamElevation(elevationDegrees)) {
     throw new PackedSweepError("invalid_metadata", "sweep elevation");
   }
   if (!Number.isFinite(scale) || !Number.isFinite(offset)) {
@@ -427,7 +440,7 @@ function validateRadial(view: DataView, offset: number, index: number) {
   if (!Number.isFinite(radial.beamWidthDegrees) || radial.beamWidthDegrees <= 0 || radial.beamWidthDegrees > 360) {
     throw new PackedSweepError("invalid_radial", `${index}: beam width`);
   }
-  if (!Number.isFinite(radial.elevationDegrees) || radial.elevationDegrees < 0 || radial.elevationDegrees > 90) {
+  if (!isBeamElevation(radial.elevationDegrees)) {
     throw new PackedSweepError("invalid_radial", `${index}: elevation`);
   }
 }

@@ -3,8 +3,8 @@
 //! The byte-level contract is documented in `docs/14_PACKED_SWEEP_V1.md`.
 
 use crate::radar::{
-    GateStatus, NORMALIZED_SWEEP_SCHEMA_VERSION, NormalizedSweep, RadarProduct, RadarSite,
-    RadialMetadata,
+    ELEVATION_RANGE_DEGREES, GateStatus, NORMALIZED_SWEEP_SCHEMA_VERSION, NormalizedSweep,
+    RadarProduct, RadarSite, RadialMetadata,
 };
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -360,7 +360,7 @@ pub fn validate_packed_sweep(bytes: &[u8]) -> Result<PackedSweepSummary, PackedS
     if !longitude.is_finite() || !(-180.0..=180.0).contains(&longitude) {
         return Err(PackedSweepError::InvalidMetadata("radar longitude"));
     }
-    if !elevation.is_finite() || !(0.0..=90.0).contains(&elevation) {
+    if !elevation.is_finite() || !ELEVATION_RANGE_DEGREES.contains(&elevation) {
         return Err(PackedSweepError::InvalidMetadata("sweep elevation"));
     }
     if !scale.is_finite() || !offset.is_finite() {
@@ -440,7 +440,7 @@ pub fn validate_packed_sweep(bytes: &[u8]) -> Result<PackedSweepSummary, PackedS
                 reason: "beam width",
             });
         }
-        if !radial_elevation.is_finite() || !(0.0..=90.0).contains(&radial_elevation) {
+        if !radial_elevation.is_finite() || !ELEVATION_RANGE_DEGREES.contains(&radial_elevation) {
             return Err(PackedSweepError::InvalidRadial {
                 index,
                 reason: "elevation",
@@ -592,7 +592,7 @@ fn validate_normalized_sweep(sweep: &NormalizedSweep) -> Result<(), PackedSweepE
         || !sweep.site.longitude_degrees.is_finite()
         || !(-180.0..=180.0).contains(&sweep.site.longitude_degrees)
         || !sweep.elevation_degrees.is_finite()
-        || !(0.0..=90.0).contains(&sweep.elevation_degrees)
+        || !ELEVATION_RANGE_DEGREES.contains(&sweep.elevation_degrees)
         || !sweep.scale.is_finite()
         || !sweep.offset.is_finite()
     {
@@ -610,7 +610,7 @@ fn validate_normalized_sweep(sweep: &NormalizedSweep) -> Result<(), PackedSweepE
             && radial.beam_width_degrees > 0.0
             && radial.beam_width_degrees <= 360.0
             && radial.elevation_degrees.is_finite()
-            && (0.0..=90.0).contains(&radial.elevation_degrees))
+            && ELEVATION_RANGE_DEGREES.contains(&radial.elevation_degrees))
         {
             return Err(PackedSweepError::InvalidRadial {
                 index,

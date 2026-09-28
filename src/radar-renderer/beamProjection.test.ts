@@ -58,6 +58,7 @@ describe("standard-atmosphere beam projection", () => {
 
   it("rejects invalid beam coordinates", () => {
     expect(() => groundRangeForSlantRange(-1, 0.5)).toThrow("nonnegative");
-    expect(() => slantRangeForGroundRange(1_000, 91)).toThrow("between 0 and 90");
+    expect(() => slantRangeForGroundRange(1_000, 91)).toThrow("between -2 and 90");
+    expect(() => slantRangeForGroundRange(1_000, -2.5)).toThrow("between -2 and 90");
   });
 });

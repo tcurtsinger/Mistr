@@ -250,6 +250,12 @@ try {
     300_000,
   );
 
+  const timeCarry = await evaluate(
+    serialized("window.__MISTR_NATIONAL_PHASE4__.proveTimeCarry('KTLX')"),
+    true,
+    600_000,
+  );
+
   await evaluate(serialized("window.__MISTR_NATIONAL_PHASE4__.startSite('KTLX')"), true, 300_000);
   await delay(500);
   const restoredSite = {
@@ -276,6 +282,7 @@ try {
     failedSiteRecovery,
     residentHandoff,
     zoomHandoff,
+    timeCarry,
     restoredSite,
   };
   report.failures = validateNationalPhase4Acceptance(report);

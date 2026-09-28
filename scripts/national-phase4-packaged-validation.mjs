@@ -158,6 +158,7 @@ export function validateNationalPhase4Acceptance(report) {
   ) failures.push("failed Site transition keeps the active National session");
   failures.push(...validateResidentHandoff(report.residentHandoff));
   failures.push(...validateZoomHandoff(report.zoomHandoff));
+  failures.push(...validateTimeCarry(report.timeCarry));
   const site = report.restoredSite;
   if (
     site?.sourceState?.painted?.source?.kind !== "site"
@@ -225,6 +226,47 @@ function sameCamera(left, right) {
 // Zooming in past the threshold fades the preloaded Site in over resident
 // National; zooming out fades back to that same National history. Neither
 // switch moves the camera.
+const MINUTE_MS = 60_000;
+
+// Largest gap between adjacent frame times, the tolerance for "nearest".
+function largestGapMs(times) {
+  let gap = 0;
+  for (let index = 1; index < times.length; index += 1) gap = Math.max(gap, times[index] - times[index - 1]);
+  return gap;
+}
+
+// A switch keeps playback time: each side lands on its frame nearest the
+// other's time (paused) or keeps the loop running (playing).
+export function validateTimeCarry(carry) {
+  const failures = [];
+  const site = carry?.paused?.site;
+  const siteTimes = site?.times ?? [];
+  const covered = siteTimes.length > 0 && siteTimes[0] <= site?.targetUnixMs;
+  if (
+    !(siteTimes.length > 0)
+    || site?.playing !== false
+    || site?.selectedIndex < 0
+    || site?.selectedIndex !== site?.expectedIndex
+    || (covered && !(Math.abs(site.playheadUnixMs - site.targetUnixMs) <= Math.max(largestGapMs(siteTimes), 11 * MINUTE_MS)))
+  ) failures.push("a Site opened from paused National lands on its scan nearest the paused time");
+  const national = carry?.paused?.national;
+  const nationalTarget = national?.ids?.[national?.expectedIndex];
+  if (
+    national?.playing !== false
+    || !(national?.expectedIndex >= 0)
+    || national?.selectedIndex !== national?.expectedIndex
+    || national?.revealReceiptObservationId !== nationalTarget
+    || !(Math.abs(national.playheadUnixMs - national.targetUnixMs) <= 1.5 * MINUTE_MS)
+  ) failures.push("National revealed from a paused Site reappears on its frame nearest the Site's time");
+  if (carry?.playing?.site?.playing !== true || !(carry?.playing?.site?.frames >= 2)) {
+    failures.push("a Site opened from playing National keeps the loop playing");
+  }
+  if (carry?.playing?.national?.playing !== true) {
+    failures.push("National revealed from a playing Site keeps the loop playing");
+  }
+  return failures;
+}
+
 export function validateZoomHandoff(handoff) {
   const failures = [];
   const site = handoff?.site;

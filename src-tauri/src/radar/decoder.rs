@@ -1,6 +1,6 @@
 use super::{
-    DecodeEvidence, DecodeOutput, GateStatus, NORMALIZED_SWEEP_SCHEMA_VERSION, NormalizedSweep,
-    RadarProduct, RadarSite, RadialMetadata,
+    DecodeEvidence, DecodeOutput, ELEVATION_RANGE_DEGREES, GateStatus,
+    NORMALIZED_SWEEP_SCHEMA_VERSION, NormalizedSweep, RadarProduct, RadarSite, RadialMetadata,
 };
 use bzip2::read::BzDecoder;
 use chrono::{DateTime, Utc};
@@ -671,9 +671,9 @@ fn validate_finite_radial(
             "radial {radial_index} beam width is outside (0, 2] degrees"
         )));
     }
-    if !(0.0..=90.0).contains(&radial.elevation_angle_degrees()) {
+    if !ELEVATION_RANGE_DEGREES.contains(&radial.elevation_angle_degrees()) {
         return Err(DecodeError::InvalidMetadata(format!(
-            "radial {radial_index} elevation is outside [0, 90] degrees"
+            "radial {radial_index} elevation is outside [-2, 90] degrees"
         )));
     }
     Ok(())
@@ -891,14 +891,18 @@ mod tests {
         assert!(matches!(
             validate_finite_radial(7, &radial),
             Err(DecodeError::InvalidMetadata(message))
-                if message == "radial 7 elevation is outside [0, 90] degrees"
+                if message == "radial 7 elevation is outside [-2, 90] degrees"
         ));
+        assert!(validate_finite_radial(0, &radial_at_elevation(-2.5)).is_err());
     }
 
     #[test]
     fn physical_elevation_boundaries_are_accepted() {
         assert!(validate_finite_radial(0, &radial_at_elevation(0.0)).is_ok());
         assert!(validate_finite_radial(0, &radial_at_elevation(90.0)).is_ok());
+        // Mountaintop sites such as KMTX and KICX scan below the horizon.
+        assert!(validate_finite_radial(0, &radial_at_elevation(-0.5)).is_ok());
+        assert!(validate_finite_radial(0, &radial_at_elevation(-2.0)).is_ok());
     }
 
     #[test]

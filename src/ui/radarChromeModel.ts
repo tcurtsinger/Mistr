@@ -229,7 +229,14 @@ export function liveFailureLabel(site: string, retrying: boolean): string {
 }
 
 export function userFacingRadarError(
-  area: "initialization" | "map" | "renderer" | "playback" | "live_unavailable" | "live_retrying",
+  area:
+    | "initialization"
+    | "map"
+    | "renderer"
+    | "playback"
+    | "live_unavailable"
+    | "live_retrying"
+    | "auto_unavailable",
   site?: string,
 ): string {
   if (area === "initialization") return "Mistr could not prepare radar. Restart Mistr to try again.";
@@ -241,6 +248,9 @@ export function userFacingRadarError(
   }
   if (area === "live_retrying") {
     return `${site} update failed. The last completed scan remains displayed while Mistr retries.`;
+  }
+  if (area === "auto_unavailable") {
+    return `${site} radar is unavailable, so National radar stays displayed.`;
   }
   return `${site} radar is unavailable. The last completed scan remains displayed; choose the site again to retry.`;
 }

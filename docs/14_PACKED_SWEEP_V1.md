@@ -66,7 +66,7 @@ The buffer carries a caller generation and stable observation ID. Rust owns enco
 | 92 | 4 | radar longitude | finite `f32`, `[-180, 180]` |
 | 96 | 2 | site altitude metres | signed source value |
 | 98 | 2 | tower height metres | unsigned source value |
-| 100 | 4 | sweep elevation degrees | finite `f32`, `[0, 90]` |
+| 100 | 4 | sweep elevation degrees | finite `f32`, `[-2, 90]` |
 | 104 | 4 | scale | finite source scale |
 | 108 | 4 | offset | finite source offset |
 | 112 | 8 | volume start Unix ms | signed `i64` |
@@ -101,7 +101,7 @@ Each radial record is 24 bytes:
 | 12 | 4 | elevation degrees (`f32`) |
 | 16 | 8 | collection time Unix ms (`i64`) |
 
-Angles must be finite. Azimuth is in `[0, 360)`, beam width is in `(0, 360]`, and elevation is in `[0, 90]`.
+Angles must be finite. Azimuth is in `[0, 360)`, beam width is in `(0, 360]`, and elevation is in `[-2, 90]`: WSR-88D antennas point as low as -1 degree, mountaintop sites scan below the horizon, and the margin covers measured-angle jitter.
 
 ## Gate sections
 

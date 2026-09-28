@@ -43,6 +43,7 @@ import {
   NationalPlaybackController,
   type NationalPlaybackSnapshot,
 } from "./playback/NationalPlaybackController";
+import { nearestFrameIndex, planPlayheadCarry, type CarriedPlayhead } from "./playback/playheadCarry";
 import {
   FramePerformanceMonitor,
   summarizeDurations,
@@ -226,6 +227,10 @@ export function App() {
   const inspectionRequestRef = useRef<string | null>(null);
   const queuedScrubRef = useRef<number | null>(null);
   const scrubRunningRef = useRef(false);
+  // The outgoing source's playback, waiting for the incoming source to adopt it.
+  const playheadCarryRef = useRef<{ target: "site" | "national"; playhead: CarriedPlayhead } | null>(null);
+  // Bumped by every operator play, pause, or scrub; their intent outranks a carry.
+  const operatorPlaybackIntentRef = useRef(0);
   const [runtime, setRuntime] = useState<RuntimeSnapshot>({
     shell: "browser",
     appVersion: "development",
@@ -255,6 +260,8 @@ export function App() {
   const [selectedSite, setSelectedSite] = useState(restoreLastSite());
   const [requestedSite, setRequestedSite] = useState<string | null>(null);
   const [siteRequestError, setSiteRequestError] = useState<string | null>(null);
+  // Site an automatic switch could not load; National stays displayed.
+  const [autoSiteError, setAutoSiteError] = useState<string | null>(null);
   const [nationalRequestError, setNationalRequestError] = useState<string | null>(null);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
   const [siteSelectionReady, setSiteSelectionReady] = useState(false);
@@ -345,6 +352,12 @@ export function App() {
     > | null = null;
     let nationalHistorySession = 0;
     let nationalBackfillStartCount = 0;
+    // Recent National load steps, kept so a stalled load can be diagnosed.
+    const nationalLoadTrace: { atUnixMs: number; step: string; detail?: string }[] = [];
+    const traceNationalLoad = (step: string, detail?: string) => {
+      nationalLoadTrace.push({ atUnixMs: Date.now(), step, ...(detail ? { detail } : {}) });
+      if (nationalLoadTrace.length > 200) nationalLoadTrace.splice(0, nationalLoadTrace.length - 200);
+    };
     let activeNationalBackfillSession: number | null = null;
     // National lane generation of the retained history. National can stay
     // resident (hidden, still acquiring) while a Site is displayed.
@@ -947,6 +960,7 @@ export function App() {
           radarModelRef.current = paintedModel;
           setPaintedSourceKind(paintedModel.sourceKind);
           setTimelineFrames(nextHistory.map(timelineFrame));
+          if (appendingHistory || prependingHistory) applySitePlayheadCarry();
           if (!appendingHistory && !prependingHistory) {
             inspectionMarkerRef.current?.remove();
             inspectionMarkerRef.current = null;
@@ -1074,6 +1088,7 @@ export function App() {
             // loaded, then continue waiting for future scans.
             if (!cancelled && pollingSession === livePollingSession) {
               setLiveHistoryStatus("partial");
+              applySitePlayheadCarry(true);
             }
             return false;
           }
@@ -1082,6 +1097,7 @@ export function App() {
         const reachedHistoryLimit = !cancelled
           && pollingSession === livePollingSession
           && residentCount >= historyLimit;
+        if (!cancelled && pollingSession === livePollingSession) applySitePlayheadCarry(true);
         if (reachedHistoryLimit) {
           setLiveHistoryStatus(
             residentCount >= MAX_LIVE_HISTORY_FRAMES ? "full" : "partial",
@@ -1281,6 +1297,13 @@ export function App() {
       let prefetchInFlight: { site: string; promise: Promise<void> } | null = null;
       let prefetchSession = 0;
       const autoSiteFailures = new Map<string, number>();
+      let autoErrorSite: string | undefined;
+      let lastAutoFailure: { site: string; message: string; atUnixMs: number } | null = null;
+      const clearAutoSiteError = () => {
+        if (autoErrorSite === undefined) return;
+        autoErrorSite = undefined;
+        setAutoSiteError(null);
+      };
       let lastAutoDecision: { target: AutoSource; preload?: string; atUnixMs: number } | null = null;
 
       const prefetchIsUsable = (sweep: PrefetchedSiteSweep | null, site: string) => Boolean(
@@ -1370,6 +1393,10 @@ export function App() {
         }, RADAR_SITES);
         lastAutoDecision = { ...decision, atUnixMs: Date.now() };
         if (decision.preferenceSpent) preferredSite = undefined;
+        // The notice only applies while the view still calls for that Site.
+        if (decision.target.kind !== "site" || decision.target.siteIcao !== autoErrorSite) {
+          clearAutoSiteError();
+        }
         if (sameAutoSource(decision.target, visible)) {
           if (decision.preload) void prefetchSite(decision.preload);
           return;
@@ -1388,10 +1415,19 @@ export function App() {
         const failedAt = autoSiteFailures.get(target);
         if (failedAt !== undefined && Date.now() - failedAt < AUTO_SITE_RETRY_MS) return;
         autoSwitchInFlight = true;
-        void startSiteSession(target).then(() => settleAutoSwitch(true), (error: unknown) => {
+        void startSiteSession(target).then(() => {
+          clearAutoSiteError();
+          settleAutoSwitch(true);
+        }, (error: unknown) => {
           if (!isRadarSourceSuperseded(error)) {
             autoSiteFailures.set(target, Date.now());
-            setSiteRequestError(error instanceof Error ? error.message : String(error));
+            lastAutoFailure = {
+              site: target,
+              message: error instanceof Error ? error.message : String(error),
+              atUnixMs: Date.now(),
+            };
+            autoErrorSite = target;
+            setAutoSiteError(target);
           }
           settleAutoSwitch(false);
         });
@@ -1437,6 +1473,7 @@ export function App() {
             : null,
           prefetchInFlight: prefetchInFlight?.site ?? null,
           siteOpacity: layer?.getOpacity() ?? null,
+          lastFailure: lastAutoFailure,
         }),
         prefetch: (site) => prefetchSite(normalizeRadarSite(site)),
       };
@@ -1472,11 +1509,13 @@ export function App() {
         inspectionPointRef.current = null;
         interrogationObservationRef.current = null;
         updateDiagnosticSources(instance, model, createAlignmentReport(model));
+        carryPlayheadInto("site");
         if (!hideNationalBehindSite()) teardownNational();
         continueLiveBackfillAndPolling(model.siteIcao, pollingSession);
         radarSessionCoordinatorRef.current!.synchronizePaint(
           radarPaintIdentity(model, receipt),
         );
+        applySitePlayheadCarry();
       };
 
       const restoreNationalAfterSiteFailure = () => {
@@ -1631,6 +1670,113 @@ export function App() {
         && client.laneGeneration("national") === nationalGeneration
         && !["error", "removed"].includes(nationalLayer.getSnapshot().status),
       );
+
+      // --- Playback time across a source switch ---------------------------------
+      const captureNationalPlayhead = (): CarriedPlayhead | null => {
+        const snapshot = nationalPlaybackController?.snapshot();
+        const newest = nationalObservations.at(-1);
+        if (!snapshot || snapshot.playheadObservedAtUnixMs === undefined || !newest) return null;
+        return {
+          observedAtUnixMs: snapshot.playheadObservedAtUnixMs,
+          playing: snapshot.playing || snapshot.resumingAfterReplacement,
+          atNewest: snapshot.selectedObservationId === nationalObservationId(newest),
+        };
+      };
+
+      const captureSitePlayhead = (): CarriedPlayhead | null => {
+        const snapshot = controller?.snapshot();
+        const newest = residentLiveHistory?.at(-1);
+        // Only a live Site carries its time; the startup archive scan does not.
+        if (
+          !snapshot
+          || !newest
+          || newest.sourceKind !== "nexrad_level2_chunks"
+          || snapshot.playheadObservedAtUnixMs === undefined
+        ) return null;
+        return {
+          observedAtUnixMs: snapshot.playheadObservedAtUnixMs,
+          playing: snapshot.playing,
+          atNewest: snapshot.selectedObservationId === newest.observationId,
+        };
+      };
+
+      const carryPlayheadInto = (target: "site" | "national"): CarriedPlayhead | null => {
+        const pending = playheadCarryRef.current;
+        // A carry the outgoing source never got to apply passes through as is.
+        const playhead = pending && pending.target !== target
+          ? pending.playhead
+          : target === "site" ? captureNationalPlayhead() : captureSitePlayhead();
+        playheadCarryRef.current = playhead ? { target, playhead } : null;
+        return playhead;
+      };
+
+      const applySitePlayheadCarry = (historyComplete = false) => {
+        const carry = playheadCarryRef.current;
+        const activeController = controller;
+        const history = residentLiveHistory;
+        if (carry?.target !== "site" || !activeController || !history) return;
+        if (activeController.snapshot().residentReplacementPending) return;
+        const step = planPlayheadCarry(
+          carry.playhead,
+          history.map((frame) => frame.observedAtUnixMs),
+          historyComplete,
+        );
+        if (step.kind === "wait") return;
+        playheadCarryRef.current = null;
+        if (step.kind === "done") return;
+        const intent = operatorPlaybackIntentRef.current;
+        void (async () => {
+          if (activeController.snapshot().selectedObservationId !== history[step.index].observationId) {
+            await activeController.scrub(step.index);
+          }
+          if (
+            step.play
+            && !cancelled
+            && controller === activeController
+            && operatorPlaybackIntentRef.current === intent
+          ) activeController.play();
+        })().catch(() => {
+          // A history update landed mid-scrub; retry on the next one unless
+          // the operator or another switch has taken over since.
+          if (playheadCarryRef.current === null && operatorPlaybackIntentRef.current === intent) {
+            playheadCarryRef.current = carry;
+          }
+        });
+      };
+
+      const applyNationalPlayheadCarry = (historyComplete = false) => {
+        const carry = playheadCarryRef.current;
+        const activeController = nationalPlaybackController;
+        if (carry?.target !== "national" || !activeController || !nationalIsVisible()) return;
+        const observations = nationalObservations;
+        const step = planPlayheadCarry(
+          carry.playhead,
+          observations.map((observation) => observation.observationTimeUnixMs),
+          historyComplete,
+        );
+        if (step.kind === "wait") return;
+        playheadCarryRef.current = null;
+        if (step.kind === "done") return;
+        const intent = operatorPlaybackIntentRef.current;
+        void (async () => {
+          const target = nationalObservationId(observations[step.index]);
+          if (activeController.snapshot().selectedObservationId !== target) {
+            await activeController.scrub(step.index);
+          }
+          if (
+            step.play
+            && !cancelled
+            && nationalPlaybackController === activeController
+            && operatorPlaybackIntentRef.current === intent
+          ) await activeController.play();
+        })().catch(() => {
+          // A history commit landed mid-scrub; retry on the next one unless
+          // the operator or another switch has taken over since.
+          if (playheadCarryRef.current === null && operatorPlaybackIntentRef.current === intent) {
+            playheadCarryRef.current = carry;
+          }
+        });
+      };
 
       const hideNationalBehindSite = (): boolean => {
         const activeLayer = nationalLayer;
@@ -1860,6 +2006,7 @@ export function App() {
         ));
         nationalPlaybackController?.acceptHistory(nationalObservations, receipt);
         nationalPlaybackController?.resumeAfterMutation(resumePlayback);
+        applyNationalPlayheadCarry();
       };
 
       const nationalHistoryOwnershipCheck = (generation: number, historySession: number) => {
@@ -1912,8 +2059,10 @@ export function App() {
         let backendFinalized = false;
         let rendererFinalized = false;
         try {
+          traceNationalLoad("commit:wait-idle", preparation.kind);
           await activeWorkingSet.waitForIdle();
           nationalHistoryOwnershipCheck(generation, historySession);
+          traceNationalLoad("commit:stage");
           workingSet = await activeWorkingSet.stageHistoryOverview(
             preparation.observation,
             proposed.map(nationalObservationId),
@@ -1921,15 +2070,19 @@ export function App() {
             () => nationalHistoryOwnershipCheck(generation, historySession),
             async () => {
               activePlayback.markReplacementPending(true);
+              traceNationalLoad("commit:pause-playback");
               // Even an operator-paused loop may still have a paint in flight.
               resumePlayback = await activePlayback.pauseAndWait(false);
+              traceNationalLoad("commit:playback-paused");
               nationalHistoryOwnershipCheck(generation, historySession);
             },
           );
+          traceNationalLoad("commit:staged");
           if (!workingSet.receipt) {
             throw new Error("National history mutation completed without a paint receipt");
           }
           nationalHistoryOwnershipCheck(generation, historySession);
+          traceNationalLoad("commit:backend");
           await activeClient.commitNationalHistoryFrame(preparation.observation);
           nationalHistoryOwnershipCheck(generation, historySession);
           activeLayer.finalizeHistoryMutation(workingSet.receipt);
@@ -1939,15 +2092,18 @@ export function App() {
             preparation.observation,
           );
           backendFinalized = true;
+          traceNationalLoad("commit:wait-paint");
           const authoritativeReceipt = await activeLayer.waitForAuthoritativeReceipt(
             workingSet.receipt,
           );
           nationalHistoryOwnershipCheck(generation, historySession);
           const finalizedWorkingSet = { ...workingSet, receipt: authoritativeReceipt };
           publishNationalHistory(finalizedHistory, authoritativeReceipt, resumePlayback);
+          traceNationalLoad("commit:published", String(finalizedHistory.retained.length));
           reportNationalRequestError(null);
           return finalizedWorkingSet;
         } catch (error) {
+          traceNationalLoad("commit:failed", error instanceof Error ? error.message : String(error));
           activePlayback.markReplacementPending(false);
           if (workingSet?.receipt && !rendererFinalized) {
             try {
@@ -2007,12 +2163,16 @@ export function App() {
         nationalHistorySession = historySession;
         activeNationalBackfillSession = historySession;
         setVisibleNationalHistoryStatus("loading");
+        traceNationalLoad("backfill:start", String(generation));
         try {
           const result = await runNationalBackfillLoop({
             shouldContinue: () => !cancelled && historySession === nationalHistorySession,
             prepare: () => runNationalAcquisition(async () => {
               nationalHistoryOwnershipCheck(generation, historySession);
-              return activeClientForNational().prepareNationalHistoryPredecessor();
+              traceNationalLoad("backfill:prepare");
+              const preparation = await activeClientForNational().prepareNationalHistoryPredecessor();
+              traceNationalLoad("backfill:prepared");
+              return preparation;
             }),
             commit: async (preparation) => {
               await runNationalAcquisition(
@@ -2022,6 +2182,7 @@ export function App() {
             reachedLimit: () => nationalObservations.length >= MAX_LIVE_HISTORY_FRAMES,
             isSuperseded: isRadarSourceSuperseded,
             onFailure(error) {
+              traceNationalLoad("backfill:failure", error instanceof Error ? error.message : String(error));
               setVisibleNationalHistoryStatus(nationalObservations.length >= MAX_LIVE_HISTORY_FRAMES ? "full" : "loading");
               reportNationalRequestError(error instanceof Error ? error.message : String(error));
             },
@@ -2031,6 +2192,7 @@ export function App() {
                   attempt,
                   Date.now() % Number.MAX_SAFE_INTEGER,
                 );
+                traceNationalLoad("backfill:retry-wait", String(delay.totalMs));
                 await waitMilliseconds(delay.totalMs);
               } catch (error) {
                 nationalHistoryOwnershipCheck(generation, historySession);
@@ -2042,11 +2204,14 @@ export function App() {
           }).finally(() => {
             if (activeNationalBackfillSession === historySession) activeNationalBackfillSession = null;
           });
+          traceNationalLoad("backfill:end", result);
           if (result === "superseded") return;
           nationalHistoryOwnershipCheck(generation, historySession);
           setVisibleNationalHistoryStatus(nationalObservations.length >= MAX_LIVE_HISTORY_FRAMES ? "full" : "partial");
+          applyNationalPlayheadCarry(true);
           await runNationalPolling(generation, historySession);
         } catch (error) {
+          traceNationalLoad("backfill:error", error instanceof Error ? error.message : String(error));
           if (isRadarSourceSuperseded(error)) return;
           setVisibleNationalHistoryStatus(nationalObservations.length >= MAX_LIVE_HISTORY_FRAMES ? "full" : "partial");
           reportNationalRequestError(error instanceof Error ? error.message : String(error));
@@ -2063,7 +2228,18 @@ export function App() {
         }
         let receipt: NationalPaintReceipt;
         try {
-          receipt = await activeLayer.revealAndWait();
+          const carried = carryPlayheadInto("national");
+          const step = carried
+            ? planPlayheadCarry(
+              carried,
+              nationalObservations.map((observation) => observation.observationTimeUnixMs),
+              activeNationalBackfillSession === null,
+            )
+            : undefined;
+          receipt = await activeLayer.revealAndWait(
+            undefined,
+            step?.kind === "apply" ? nationalObservationId(nationalObservations[step.index]) : undefined,
+          );
           const transition = radarSessionCoordinatorRef.current!.snapshot().transition;
           if (transition?.generation !== generation || transition.requestedSource.kind !== "national") {
             throw new RadarSourceSupersededError("National reveal was superseded");
@@ -2127,6 +2303,7 @@ export function App() {
         inspectionRequestRef.current = null;
         nationalInspectionLookupQueue.cancelPending();
         nationalPlaybackController?.acceptHistory(nationalObservations, report.workingSet.receipt);
+        applyNationalPlayheadCarry(activeNationalBackfillSession === null);
       };
 
       nationalMrmsSession = new NationalMrmsSession({
@@ -2259,6 +2436,7 @@ export function App() {
           if (!currentObservation) {
             throw new Error("National source painted without a retained current observation");
           }
+          carryPlayheadInto("national");
           nationalPlaybackController?.dispose();
           nationalPlaybackController = new NationalPlaybackController(
             nationalLayer!,
@@ -2738,6 +2916,7 @@ export function App() {
         },
       };
       globalThis.__MISTR_NATIONAL_PHASE4__ = {
+        loadTrace: () => [...nationalLoadTrace],
         report: () => ({
           history: latestNationalHistory,
           renderer: nationalLayer?.getSnapshot() ?? null,
@@ -2839,6 +3018,104 @@ export function App() {
             history: latestNationalHistory,
             backfillStartCountAfter: nationalBackfillStartCount,
             siteLayerRemoved: !instance.getLayer(DIAGNOSTIC_LAYER_IDS.radar),
+          };
+        },
+        async proveTimeCarry(site = "KTLX") {
+          const coordinator = radarSessionCoordinatorRef.current!;
+          const before = coordinator.snapshot();
+          if (
+            !siteLevel2Session
+            || !nationalMrmsSession
+            || !nationalPlaybackController
+            || before.transition
+            || before.painted?.source.kind !== "national"
+            || nationalObservations.length < 20
+          ) {
+            throw new Error("time-carry proof needs a settled National history of at least 20 frames");
+          }
+          const waitFor = async (condition: () => boolean, timeoutMs: number, label: string) => {
+            const started = performance.now();
+            while (!condition()) {
+              if (performance.now() - started > timeoutMs) throw new Error(`${label} timed out`);
+              await waitMilliseconds(100);
+            }
+          };
+          const siteState = () => {
+            const snapshot = controller?.snapshot();
+            const times = (residentLiveHistory ?? []).map((frame) => frame.observedAtUnixMs);
+            return {
+              playing: snapshot?.playing ?? null,
+              playheadUnixMs: snapshot?.playheadObservedAtUnixMs ?? null,
+              selectedIndex: (residentLiveHistory ?? []).findIndex(
+                (frame) => frame.observationId === snapshot?.selectedObservationId,
+              ),
+              times,
+            };
+          };
+          const nationalState = () => {
+            const snapshot = nationalPlaybackController?.snapshot();
+            return {
+              playing: snapshot?.playing ?? null,
+              playheadUnixMs: snapshot?.playheadObservedAtUnixMs ?? null,
+              selectedIndex: nationalObservations.findIndex(
+                (observation) => nationalObservationId(observation) === snapshot?.selectedObservationId,
+              ),
+              revealReceiptObservationId: nationalLayer?.getSnapshot().paintReceipt?.observationId ?? null,
+              times: nationalObservations.map((observation) => observation.observationTimeUnixMs),
+              ids: nationalObservations.map(nationalObservationId),
+            };
+          };
+          const carrySettled = () => playheadCarryRef.current === null;
+          const siteSettled = () => {
+            const snapshot = coordinator.snapshot();
+            return !snapshot.transition && snapshot.painted?.source.kind === "site";
+          };
+          const nationalSettled = () => {
+            const snapshot = coordinator.snapshot();
+            return !snapshot.transition && snapshot.painted?.source.kind === "national";
+          };
+
+          // Paused on an older frame: each side lands on its frame nearest the other.
+          nationalPlaybackController.pause();
+          const pausedIndex = nationalObservations.length - 16;
+          await nationalPlaybackController.scrub(pausedIndex);
+          const pausedAtUnixMs = nationalObservations[pausedIndex].observationTimeUnixMs;
+          await siteLevel2Session.start(normalizeRadarSite(site), { persistOnPaint: false });
+          await waitFor(() => siteSettled() && carrySettled(), 180_000, "Site adopting a paused National time");
+          const pausedSite = { targetUnixMs: pausedAtUnixMs, ...siteState() };
+          await nationalMrmsSession.start();
+          await waitFor(() => nationalSettled() && carrySettled(), 60_000, "National adopting a paused Site time");
+          const pausedNational = {
+            targetUnixMs: pausedSite.playheadUnixMs,
+            expectedIndex: pausedSite.playheadUnixMs === null
+              ? -1
+              : nearestFrameIndex(nationalState().times, pausedSite.playheadUnixMs),
+            ...nationalState(),
+          };
+
+          // Playing: each side keeps the loop running.
+          await nationalPlaybackController.play();
+          await siteLevel2Session.start(normalizeRadarSite(site), { persistOnPaint: false });
+          await waitFor(() => siteSettled() && siteState().playing === true, 180_000, "Site continuing a playing loop");
+          const playingSite = siteState();
+          await nationalMrmsSession.start();
+          await waitFor(
+            () => nationalSettled() && nationalPlaybackController?.snapshot().playing === true,
+            60_000,
+            "National continuing a playing loop",
+          );
+          const playingNational = nationalState();
+          nationalPlaybackController?.pause();
+          return {
+            site: normalizeRadarSite(site),
+            paused: {
+              site: { ...pausedSite, expectedIndex: nearestFrameIndex(pausedSite.times, pausedAtUnixMs) },
+              national: pausedNational,
+            },
+            playing: {
+              site: { playing: playingSite.playing, frames: playingSite.times.length },
+              national: { playing: playingNational.playing },
+            },
           };
         },
         async proveZoomHandoff(site = "KTLX", nextSite = "KFWS") {
@@ -3237,7 +3514,9 @@ export function App() {
             ? siteRequestError === RADAR_ENGINE_PREPARING_ERROR
               ? userFacingRadarError("initialization")
               : userFacingRadarError("live_unavailable", selectedSite)
-            : null;
+            : autoSiteError
+              ? userFacingRadarError("auto_unavailable", autoSiteError)
+              : null;
   const preparingFailed = displayedAtUnixMs === undefined && Boolean(radarUnavailableError);
   const preparingLabel = displayedAtUnixMs === undefined
     ? preparingFailed
@@ -3295,6 +3574,8 @@ export function App() {
           : undefined);
 
   const togglePlayback = () => {
+    playheadCarryRef.current = null;
+    operatorPlaybackIntentRef.current += 1;
     if (nationalActive) {
       const controller = nationalPlaybackControllerRef.current;
       if (!controller) return;
@@ -3317,6 +3598,8 @@ export function App() {
   };
 
   const queueScrub = (index: number) => {
+    playheadCarryRef.current = null;
+    operatorPlaybackIntentRef.current += 1;
     queuedScrubRef.current = index;
     if (scrubRunningRef.current) return;
     scrubRunningRef.current = true;
@@ -4339,6 +4622,8 @@ declare global {
     proveFailedSiteKeepsNational(site?: string): Promise<NationalPhase4FailedSiteRecoveryReport>;
     proveResidentHandoff(site?: string): Promise<NationalPhase4ResidentHandoffReport>;
     proveZoomHandoff(site?: string, nextSite?: string): Promise<unknown>;
+    proveTimeCarry(site?: string): Promise<unknown>;
+    loadTrace(): { atUnixMs: number; step: string; detail?: string }[];
     waitForHistory(frameCount?: number, timeoutMs?: number): Promise<NationalPhase4Report>;
     beginResidentEvidence(): Promise<void>;
     endResidentEvidence(): void;

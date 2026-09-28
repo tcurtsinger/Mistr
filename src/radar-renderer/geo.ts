@@ -1,4 +1,4 @@
-import type { PackedRadial } from "../packed-sweep/packedSweep";
+import { isBeamElevation, type PackedRadial } from "../packed-sweep/packedSweep";
 
 export const EARTH_MEAN_RADIUS_M = 6_371_008.8;
 // Py-ART/Doviak-Zrnic standard-atmosphere beam model uses 4/3 of 6371 km.
@@ -264,12 +264,8 @@ function assertBeamCoordinates(rangeM: number, elevationDegrees: number) {
   if (!Number.isFinite(rangeM) || rangeM < 0) {
     throw new RangeError("beam range must be finite and nonnegative");
   }
-  if (
-    !Number.isFinite(elevationDegrees)
-    || elevationDegrees < 0
-    || elevationDegrees > 90
-  ) {
-    throw new RangeError("beam elevation must be finite and between 0 and 90 degrees");
+  if (!isBeamElevation(elevationDegrees)) {
+    throw new RangeError("beam elevation must be finite and between -2 and 90 degrees");
   }
 }
 
