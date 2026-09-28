@@ -11,7 +11,7 @@ use crate::packed_grid::{
     MrmsNumericPyramid, PACKED_GRID_VERSION, PackedGridFrame, PackedGridManifestSummary,
     validate_packed_grid_chunk, validate_packed_grid_manifest,
 };
-use crate::phase2_ipc::{TransferBroker, TransferError};
+use crate::phase2_ipc::{TransferBroker, TransferError, TransferLane};
 use chrono::Utc;
 use serde::Serialize;
 use std::collections::{BTreeMap, VecDeque};
@@ -276,7 +276,7 @@ pub async fn prepare_national_phase2_diagnostic(
     generation: u64,
 ) -> Result<NationalPhase2PrepareReport, TransferError> {
     let broker = broker.inner().clone();
-    let token = broker.live_generation_token(session, generation)?;
+    let token = broker.live_generation_token(session, TransferLane::National, generation)?;
     let client =
         MrmsClient::new().map_err(|error| TransferError::new(error.code(), error.to_string()))?;
 
@@ -398,7 +398,7 @@ pub async fn prepare_national_phase3_frame(
     generation: u64,
 ) -> Result<NationalPhase3PrepareReport, TransferError> {
     let broker = broker.inner().clone();
-    let token = broker.live_generation_token(session, generation)?;
+    let token = broker.live_generation_token(session, TransferLane::National, generation)?;
     let client =
         MrmsClient::new().map_err(|error| TransferError::new(error.code(), error.to_string()))?;
 
@@ -543,7 +543,7 @@ pub async fn request_national_packed_grid_manifest(
     presentation_factor: Option<u16>,
 ) -> Result<Response, TransferError> {
     let broker = broker.inner().clone();
-    broker.acquire(session, generation)?;
+    broker.acquire(session, TransferLane::National, generation)?;
     let factor = presentation_factor.unwrap_or(OVERVIEW_FACTOR);
     let result = prepared_bytes(&state, generation, |prepared| {
         prepared.frame(factor).map(|frame| frame.manifest.clone())
@@ -562,7 +562,7 @@ pub async fn request_national_packed_grid_chunk(
     presentation_factor: Option<u16>,
 ) -> Result<Response, TransferError> {
     let broker = broker.inner().clone();
-    broker.acquire(session, generation)?;
+    broker.acquire(session, TransferLane::National, generation)?;
     let factor = presentation_factor.unwrap_or(OVERVIEW_FACTOR);
     let result = prepared_bytes(&state, generation, |prepared| {
         prepared
@@ -786,11 +786,11 @@ fn publish_bytes(
     let bytes = match bytes {
         Ok(bytes) => bytes,
         Err(error) => {
-            broker.finish_without_publish(session);
+            broker.finish_without_publish(session, TransferLane::National);
             return Err(error);
         }
     };
-    broker.complete_for_publish(session, generation)?;
+    broker.complete_for_publish(session, TransferLane::National, generation)?;
     Ok(Response::new(bytes))
 }
 

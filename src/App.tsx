@@ -33,6 +33,7 @@ import {
   type NationalHistorySnapshot,
   type NationalPointLookup,
   type LiveSweepCursor,
+  type TransferLane,
   type TransferTiming,
 } from "./packed-sweep/transferClient";
 import {
@@ -166,6 +167,18 @@ const RADAR_SOURCE_STORAGE_KEY = "mistr.radarSource";
 const RADAR_DISPLAY_MODE_STORAGE_KEY = "mistr.radarDisplayMode";
 const RADAR_ENGINE_PREPARING_ERROR = "Radar engine is still preparing the resident loop";
 const LIVE_POLL_RETRY_MS = 15_000;
+
+// Only one source is resident today, so starting one lane still cancels the
+// other, exactly as the former single global generation did.
+async function beginExclusiveLane(
+  activeClient: PackedSweepTransferClient,
+  lane: TransferLane,
+  generation: number,
+) {
+  const other: TransferLane = lane === "site" ? "national" : "site";
+  if (activeClient.isActive(other)) await activeClient.cancel(other);
+  await activeClient.begin(lane, generation);
+}
 
 configureMapLibreWorker();
 
@@ -550,7 +563,7 @@ export function App() {
       const invoke = await tauriInvokeFunction();
       client = new PackedSweepTransferClient(invoke);
       await client.open();
-      await client.begin(1);
+      await beginExclusiveLane(client, "site", 1);
       const fixtureIds = fixtureManifest.fixtureSets.phase4KtlxReflectivityLoop;
       const fixturesById = new Map(
         fixtureManifest.fixtures.map((fixture) => [fixture.id, fixture]),
@@ -812,7 +825,7 @@ export function App() {
         let stagedObservationId: string | undefined;
         let priorStagedModel: RadarSweepCpuModel | undefined;
         try {
-          await activeClient.begin(generation);
+          await beginExclusiveLane(activeClient, "site", generation);
           lease = await activeClient.requestPhase5Live(
             site,
             freshOnly,
@@ -1119,7 +1132,7 @@ export function App() {
         nationalHistorySession += 1;
         nationalWorkingSet?.cancel();
         const pollingSession = livePollingSession;
-        await activeClient.begin(generation);
+        await beginExclusiveLane(activeClient, "site", generation);
         if (failNextSiteFromNationalForDiagnostics) {
           failNextSiteFromNationalForDiagnostics = false;
           throw new Error("diagnostic Site transition failure after National cancellation");
@@ -1792,7 +1805,7 @@ export function App() {
           transferGeneration = generation;
           livePollingSession += 1;
           nationalHistorySession += 1;
-          await activeClient.begin(generation);
+          await beginExclusiveLane(activeClient, "national", generation);
           const historyPreparation = await activeClient.prepareNationalHistoryCurrent();
           if (
             historyPreparation.observation.generation !== generation
@@ -1977,7 +1990,7 @@ export function App() {
           );
           transferGeneration = generation;
           radarSessionCoordinatorRef.current!.cancelPending(generation);
-          await client.begin(generation);
+          await beginExclusiveLane(client, "site", generation);
           if (residentLiveHistory) {
             setLiveHistoryStatus(
               residentLiveHistory.length >= MAX_LIVE_HISTORY_FRAMES ? "full" : "partial",
@@ -2063,7 +2076,7 @@ export function App() {
           layer.getSnapshot().generation + 1,
         );
         transferGeneration = generation;
-        await client.begin(generation);
+        await beginExclusiveLane(client, "site", generation);
         const lease = await client.requestPhase6N0sFixture(fixtureId);
         try {
           const model = createRadarSweepCpuModel(lease.packed);
@@ -2135,7 +2148,7 @@ export function App() {
         const generation = transition.generation;
         transferGeneration = generation;
         try {
-          await client.begin(generation);
+          await beginExclusiveLane(client, "site", generation);
           await startupAcquisition?.catch(() => {});
 
           const hydratedArchive = await hydrateArchiveLoop();
@@ -2205,7 +2218,7 @@ export function App() {
           let transferredChunkBytes = 0;
           let manifestBytes = 0;
           try {
-            await client.begin(generation);
+            await beginExclusiveLane(client, "national", generation);
             await startupAcquisition?.catch(() => {});
             const preparation = await client.prepareNationalPhase2();
             const manifestLease = await client.requestNationalManifest();

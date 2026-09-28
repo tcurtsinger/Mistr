@@ -7,14 +7,35 @@ import {
   type PackedGridManifest,
 } from "../packed-grid/packedGrid";
 
-export interface TransferSnapshot {
-  session: number;
+export type TransferLane = "site" | "national";
+
+const TRANSFER_LANES: readonly TransferLane[] = ["site", "national"];
+
+export interface LaneTransferSnapshot {
   generation: number;
   active: boolean;
   availableCredits: number;
   heldCredits: number;
   inFlightCredits: number;
+}
+
+export interface TransferSnapshot {
+  session: number;
+  /** Totals across both lanes. */
+  heldCredits: number;
+  inFlightCredits: number;
+  /** Per-lane credit limit. */
   creditLimit: number;
+  lanes: Record<TransferLane, LaneTransferSnapshot>;
+}
+
+interface LaneState {
+  generation: number;
+  active: boolean;
+}
+
+function assertLane(lane: TransferLane) {
+  if (!TRANSFER_LANES.includes(lane)) throw new TypeError("lane must be site or national");
 }
 
 export interface Phase4ActivitySnapshot {
@@ -308,8 +329,12 @@ export type InvokeFunction = <T>(
 export class PackedSweepTransferClient {
   private readonly invoke: InvokeFunction;
   private session = 0;
-  private generation = 0;
-  private active = false;
+  // Generations are unique across lanes; each lane invalidates only its own work.
+  private maxGeneration = 0;
+  private readonly lanes: Record<TransferLane, LaneState> = {
+    site: { generation: 0, active: false },
+    national: { generation: 0, active: false },
+  };
   private readonly pendingReleaseAcks = new Map<string, ReleaseAck>();
 
   constructor(invoke: InvokeFunction) {
@@ -322,8 +347,10 @@ export class PackedSweepTransferClient {
       if (
         !Number.isSafeInteger(snapshot.session)
         || snapshot.session <= 0
-        || snapshot.generation !== 0
-        || snapshot.active
+        || TRANSFER_LANES.some((lane) => {
+          const laneSnapshot = snapshot.lanes?.[lane];
+          return !laneSnapshot || laneSnapshot.generation !== 0 || laneSnapshot.active;
+        })
       ) {
         throw new TransferClientError(
           "invoke_failed",
@@ -331,8 +358,8 @@ export class PackedSweepTransferClient {
         );
       }
       this.session = snapshot.session;
-      this.generation = 0;
-      this.active = false;
+      this.maxGeneration = 0;
+      for (const lane of TRANSFER_LANES) this.lanes[lane] = { generation: 0, active: false };
       this.pendingReleaseAcks.clear();
       return snapshot;
     } catch (error) {
@@ -340,61 +367,70 @@ export class PackedSweepTransferClient {
     }
   }
 
-  async begin(generation: number): Promise<TransferSnapshot> {
+  isActive(lane: TransferLane): boolean {
+    return this.lanes[lane].active;
+  }
+
+  async begin(lane: TransferLane, generation: number): Promise<TransferSnapshot> {
     this.assertSessionOpen();
+    assertLane(lane);
     await this.flushPendingReleaseAcks();
     const session = this.session;
     assertGeneration(generation);
-    if (generation <= this.generation) {
+    if (generation <= this.maxGeneration) {
       throw new TransferClientError(
         "invalid_generation",
-        `generation ${generation} is not newer than ${this.generation}`,
+        `generation ${generation} is not newer than ${this.maxGeneration}`,
       );
     }
-    // Invalidate local pending responses before waiting for the backend control call.
-    this.generation = generation;
-    this.active = false;
+    // Invalidate this lane's pending responses before waiting for the backend control call.
+    this.maxGeneration = generation;
+    this.lanes[lane] = { generation, active: false };
     try {
       const snapshot = await this.invoke<TransferSnapshot>("begin_phase2_generation", {
         session,
+        lane,
         generation,
       });
-      if (this.session !== session || this.generation !== generation) {
+      if (this.session !== session || this.lanes[lane].generation !== generation) {
         throw new TransferClientError(
           "stale_response",
           `generation ${generation} begin completed after it was superseded`,
         );
       }
+      const laneSnapshot = snapshot.lanes?.[lane];
       if (
         snapshot.session !== session
-        || snapshot.generation !== generation
-        || !snapshot.active
+        || laneSnapshot?.generation !== generation
+        || !laneSnapshot.active
       ) {
         throw new TransferClientError(
           "invoke_failed",
           "backend returned an inconsistent generation snapshot",
         );
       }
-      this.active = true;
+      this.lanes[lane].active = true;
       return snapshot;
     } catch (error) {
-      if (this.session === session && this.generation === generation) {
-        this.active = false;
+      if (this.session === session && this.lanes[lane].generation === generation) {
+        this.lanes[lane].active = false;
       }
       throw normalizeInvokeError(error);
     }
   }
 
-  async cancel(): Promise<TransferSnapshot> {
+  async cancel(lane: TransferLane): Promise<TransferSnapshot> {
     this.assertSessionOpen();
-    const generation = this.generation;
-    if (!this.active || generation === 0) {
-      throw new TransferClientError("generation_not_active", "no generation is active");
+    assertLane(lane);
+    const { generation, active } = this.lanes[lane];
+    if (!active || generation === 0) {
+      throw new TransferClientError("generation_not_active", `no ${lane} generation is active`);
     }
-    this.active = false;
+    this.lanes[lane].active = false;
     try {
       return await this.invoke<TransferSnapshot>("cancel_phase2_generation", {
         session: this.session,
+        lane,
         generation,
       });
     } catch (error) {
@@ -479,7 +515,7 @@ export class PackedSweepTransferClient {
 
   async phase5LiveEvidence(observationId: string): Promise<Phase5LiveTransferEvidence> {
     this.assertSessionOpen();
-    if (!this.active || this.generation === 0) {
+    if (!this.lanes.site.active || this.lanes.site.generation === 0) {
       throw new TransferClientError("generation_not_active", "no generation is active");
     }
     if (!/^[a-f0-9]{32}$/.test(observationId)) {
@@ -487,7 +523,7 @@ export class PackedSweepTransferClient {
     }
     return this.invoke<Phase5LiveTransferEvidence>("phase5_live_evidence", {
       session: this.session,
-      generation: this.generation,
+      generation: this.lanes.site.generation,
       observationId,
     });
   }
@@ -504,8 +540,8 @@ export class PackedSweepTransferClient {
     this.assertSessionOpen();
     await this.flushPendingReleaseAcks();
     const session = this.session;
-    const generation = this.generation;
-    if (!this.active || generation === 0) {
+    const generation = this.lanes.national.generation;
+    if (!this.lanes.national.active || generation === 0) {
       throw new TransferClientError("generation_not_active", "no generation is active");
     }
     try {
@@ -514,9 +550,9 @@ export class PackedSweepTransferClient {
         { session, generation },
       );
       if (
-        !this.active
+        !this.lanes.national.active
         || this.session !== session
-        || this.generation !== generation
+        || this.lanes.national.generation !== generation
         || report.generation !== generation
         || !report.diagnosticOnly
       ) {
@@ -535,8 +571,8 @@ export class PackedSweepTransferClient {
     this.assertSessionOpen();
     await this.flushPendingReleaseAcks();
     const session = this.session;
-    const generation = this.generation;
-    if (!this.active || generation === 0) {
+    const generation = this.lanes.national.generation;
+    if (!this.lanes.national.active || generation === 0) {
       throw new TransferClientError("generation_not_active", "no generation is active");
     }
     try {
@@ -545,9 +581,9 @@ export class PackedSweepTransferClient {
         { session, generation },
       );
       if (
-        !this.active
+        !this.lanes.national.active
         || this.session !== session
-        || this.generation !== generation
+        || this.lanes.national.generation !== generation
         || report.generation !== generation
         || report.presentationFactors.join(",") !== "1,2,4"
       ) {
@@ -722,11 +758,11 @@ export class PackedSweepTransferClient {
 
   async nationalHistorySnapshot(): Promise<NationalHistorySnapshot> {
     this.assertSessionOpen();
-    if (!this.active || this.generation === 0) {
+    if (!this.lanes.national.active || this.lanes.national.generation === 0) {
       throw new TransferClientError("generation_not_active", "no generation is active");
     }
     const result = await this.invoke<NationalHistorySnapshot>("national_history_snapshot");
-    assertNationalHistorySnapshot(result, this.generation);
+    assertNationalHistorySnapshot(result, this.lanes.national.generation);
     return result;
   }
 
@@ -820,7 +856,7 @@ export class PackedSweepTransferClient {
   }): Promise<NationalPointLookup> {
     this.assertSessionOpen();
     const session = this.session;
-    if (!this.active || this.generation === 0) {
+    if (!this.lanes.national.active || this.lanes.national.generation === 0) {
       throw new TransferClientError("generation_not_active", "no generation is active");
     }
     assertGeneration(request.generation);
@@ -842,7 +878,7 @@ export class PackedSweepTransferClient {
     });
     assertNationalPointLookup(result);
     if (
-      !this.active
+      !this.lanes.national.active
       || this.session !== session
       || result.generation !== request.generation
       || result.observationTimeUnixMs !== request.observationTimeUnixMs
@@ -864,7 +900,7 @@ export class PackedSweepTransferClient {
   }): Promise<NationalPointLookup> {
     this.assertSessionOpen();
     const session = this.session;
-    if (!this.active || this.generation !== request.generation) {
+    if (!this.lanes.national.active || this.lanes.national.generation !== request.generation) {
       throw new TransferClientError("generation_not_active", "National history generation is not active");
     }
     assertGeneration(request.generation);
@@ -883,9 +919,9 @@ export class PackedSweepTransferClient {
     const result = await this.invoke<NationalPointLookup>("lookup_national_history_point", request);
     assertNationalPointLookup(result);
     if (
-      !this.active
+      !this.lanes.national.active
       || this.session !== session
-      || this.generation !== request.generation
+      || this.lanes.national.generation !== request.generation
       || result.generation !== request.generation
       || result.observationTimeUnixMs !== request.observationTimeUnixMs
       || result.contentSha256 !== request.contentSha256
@@ -904,7 +940,7 @@ export class PackedSweepTransferClient {
   }): Promise<NationalPointLookup> {
     this.assertSessionOpen();
     const session = this.session;
-    if (!this.active || this.generation !== request.generation) {
+    if (!this.lanes.national.active || this.lanes.national.generation !== request.generation) {
       throw new TransferClientError("generation_not_active", "National history generation is not active");
     }
     assertGeneration(request.generation);
@@ -920,9 +956,9 @@ export class PackedSweepTransferClient {
     const result = await this.invoke<NationalPointLookup>("find_national_history_peak_point", request);
     assertNationalPointLookup(result);
     if (
-      !this.active
+      !this.lanes.national.active
       || this.session !== session
-      || this.generation !== request.generation
+      || this.lanes.national.generation !== request.generation
       || result.generation !== request.generation
       || result.observationTimeUnixMs !== request.observationTimeUnixMs
       || result.contentSha256 !== request.contentSha256
@@ -943,7 +979,7 @@ export class PackedSweepTransferClient {
   }): Promise<NationalPointLookup> {
     this.assertSessionOpen();
     const session = this.session;
-    if (!this.active || this.generation === 0) {
+    if (!this.lanes.national.active || this.lanes.national.generation === 0) {
       throw new TransferClientError("generation_not_active", "no generation is active");
     }
     assertGeneration(request.generation);
@@ -962,7 +998,7 @@ export class PackedSweepTransferClient {
     });
     assertNationalPointLookup(result);
     if (
-      !this.active
+      !this.lanes.national.active
       || this.session !== session
       || result.generation !== request.generation
       || result.observationTimeUnixMs !== request.observationTimeUnixMs
@@ -985,8 +1021,8 @@ export class PackedSweepTransferClient {
   ): Promise<NationalHistoryPrepareReport | null> {
     this.assertSessionOpen();
     const session = this.session;
-    const generation = this.generation;
-    if (!this.active || generation === 0) {
+    const generation = this.lanes.national.generation;
+    if (!this.lanes.national.active || generation === 0) {
       throw new TransferClientError("generation_not_active", "no generation is active");
     }
     try {
@@ -999,9 +1035,9 @@ export class PackedSweepTransferClient {
         throw new TransferClientError("invoke_failed", "National history preparation returned no frame");
       }
       if (
-        !this.active
+        !this.lanes.national.active
         || this.session !== session
-        || this.generation !== generation
+        || this.lanes.national.generation !== generation
         || report.observation.generation !== generation
       ) {
         throw new TransferClientError("stale_response", "National history preparation was superseded");
@@ -1050,7 +1086,7 @@ export class PackedSweepTransferClient {
 
   private assertNationalHistoryIdentity(observation: NationalHistoryObservation) {
     this.assertSessionOpen();
-    if (!this.active || this.generation !== observation.generation) {
+    if (!this.lanes.national.active || this.lanes.national.generation !== observation.generation) {
       throw new TransferClientError("generation_not_active", "National history identity is not active");
     }
     assertNationalHistoryObservation(observation, observation.generation);
@@ -1069,8 +1105,8 @@ export class PackedSweepTransferClient {
     this.assertSessionOpen();
     await this.flushPendingReleaseAcks();
     const session = this.session;
-    const generation = this.generation;
-    if (!this.active || generation === 0) {
+    const generation = this.lanes.national.generation;
+    if (!this.lanes.national.active || generation === 0) {
       throw new TransferClientError("generation_not_active", "no generation is active");
     }
     const totalStarted = performance.now();
@@ -1082,7 +1118,7 @@ export class PackedSweepTransferClient {
         ...extraArguments,
       });
       const invokeMs = performance.now() - invokeStarted;
-      if (!this.active || this.session !== session || this.generation !== generation) {
+      if (!this.lanes.national.active || this.session !== session || this.lanes.national.generation !== generation) {
         await this.releaseAfterFailure(session, generation);
         throw new TransferClientError("stale_response", "National payload was superseded");
       }
@@ -1100,9 +1136,9 @@ export class PackedSweepTransferClient {
       }
       const parseMs = performance.now() - parseStarted;
       if (
-        !this.active
+        !this.lanes.national.active
         || this.session !== session
-        || this.generation !== generation
+        || this.lanes.national.generation !== generation
         || packed.generation !== BigInt(generation)
       ) {
         await this.releaseAfterFailure(session, generation);
@@ -1152,8 +1188,8 @@ export class PackedSweepTransferClient {
     this.assertSessionOpen();
     await this.flushPendingReleaseAcks();
     const session = this.session;
-    const generation = this.generation;
-    if (!this.active || generation === 0) {
+    const generation = this.lanes.site.generation;
+    if (!this.lanes.site.active || generation === 0) {
       throw new TransferClientError("generation_not_active", "no generation is active");
     }
     if (!Number.isInteger(holdMs) || holdMs < 0 || holdMs > 2_000) {
@@ -1177,7 +1213,7 @@ export class PackedSweepTransferClient {
       }
       response = await this.invoke<ArrayBuffer>(command, arguments_);
       const invokeMs = performance.now() - invokeStarted;
-      if (!this.active || this.session !== session || this.generation !== generation) {
+      if (!this.lanes.site.active || this.session !== session || this.lanes.site.generation !== generation) {
         await this.releaseAfterFailure(session, generation);
         throw new TransferClientError(
           "stale_response",
@@ -1201,7 +1237,7 @@ export class PackedSweepTransferClient {
         throw error;
       }
       const parseMs = performance.now() - parseStarted;
-      if (!this.active || this.session !== session || this.generation !== generation) {
+      if (!this.lanes.site.active || this.session !== session || this.lanes.site.generation !== generation) {
         await this.releaseAfterFailure(session, generation);
         throw new TransferClientError(
           "stale_response",
@@ -1358,7 +1394,7 @@ export async function runPackagedPhase2Benchmark(
   });
   const client = new PackedSweepTransferClient(invoke);
   await client.open();
-  await client.begin(1);
+  await client.begin("site", 1);
 
   const timings: TransferTiming[] = [];
   let payloadBytes = 0;
@@ -1369,7 +1405,7 @@ export async function runPackagedPhase2Benchmark(
     await lease.release();
   }
 
-  await client.begin(2);
+  await client.begin("site", 2);
   const concurrent = await Promise.allSettled([
     client.request(),
     client.request(),
@@ -1383,10 +1419,10 @@ export async function runPackagedPhase2Benchmark(
     .map((result) => errorCode(result.reason));
   await Promise.all(successfulLeases.map((lease) => lease.release()));
 
-  await client.begin(3);
+  await client.begin("site", 3);
   const staleRequest = client.request(250);
   await delay(25);
-  await client.begin(4);
+  await client.begin("site", 4);
   let cancellationCode = "none";
   let staleRequestRejected = false;
   try {
@@ -1413,7 +1449,7 @@ export async function runPackagedPhase2Benchmark(
       && rejectedCodes.length === 1
       && rejectedCodes[0] === "credit_exhausted"
       && finalTransferState.creditLimit === 2
-      && finalTransferState.availableCredits === 2
+      && finalTransferState.lanes.site.availableCredits === 2
       && finalTransferState.heldCredits === 0
       && finalTransferState.inFlightCredits === 0,
     cancellationPassed:
