@@ -16,6 +16,10 @@ use sha2::{Digest, Sha256};
 use std::str::FromStr;
 
 pub const NORMALIZED_SWEEP_SCHEMA_VERSION: u16 = 1;
+/// Accepted beam elevation. WSR-88D antennas point as low as -1 degree and
+/// mountaintop sites scan below the horizon; the margin covers measured-angle
+/// jitter.
+pub const ELEVATION_RANGE_DEGREES: std::ops::RangeInclusive<f32> = -2.0..=90.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

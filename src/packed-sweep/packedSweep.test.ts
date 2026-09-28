@@ -106,6 +106,22 @@ describe("parsePackedSweep", () => {
     await expectCode(parsePackedSweep(flags), "invalid_encoding");
   });
 
+  it("accepts the below-horizon elevations mountaintop sites scan", async () => {
+    const bytes = golden();
+    const view = new DataView(bytes.buffer);
+    const radials = view.getUint32(240, true);
+    view.setFloat32(100, -0.5, true);
+    view.setFloat32(radials + 12, -0.5, true);
+    view.setFloat32(radials + 24 + 12, -0.5, true);
+    await rewriteHash(bytes);
+    const packed = await parsePackedSweep(bytes);
+    expect(packed.radial(1).elevationDegrees).toBe(-0.5);
+
+    view.setFloat32(radials + 12, -2.5, true);
+    await rewriteHash(bytes);
+    await expectCode(parsePackedSweep(bytes), "invalid_radial");
+  });
+
   it("recognizes the Phase 5 real-time chunk source code", async () => {
     const bytes = golden();
     new DataView(bytes.buffer).setUint16(26, 3, true);

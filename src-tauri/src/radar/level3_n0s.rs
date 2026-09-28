@@ -1,6 +1,6 @@
 use super::{
-    DecodeEvidence, DecodeOutput, GateStatus, NORMALIZED_SWEEP_SCHEMA_VERSION, NormalizedSweep,
-    RadarProduct, RadarSite, RadialMetadata,
+    DecodeEvidence, DecodeOutput, ELEVATION_RANGE_DEGREES, GateStatus,
+    NORMALIZED_SWEEP_SCHEMA_VERSION, NormalizedSweep, RadarProduct, RadarSite, RadialMetadata,
 };
 use chrono::{DateTime, Utc};
 use sha2::{Digest, Sha256};
@@ -130,7 +130,7 @@ pub fn decode_level3_n0s(
     let elevation_number = u8::try_from(be_u16(input, description + 38)?)
         .map_err(|_| Level3N0sError::InvalidMetadata("elevation number"))?;
     let elevation_degrees = be_i16(input, description + 40)? as f32 / 10.0;
-    if !(0.0..=90.0).contains(&elevation_degrees) {
+    if !ELEVATION_RANGE_DEGREES.contains(&elevation_degrees) {
         return Err(Level3N0sError::InvalidMetadata("elevation angle"));
     }
 
