@@ -1129,10 +1129,13 @@ export function App() {
         queuedScrubRef.current = null;
         // National keeps acquiring on its own lane and becomes resident once
         // the Site paints; only its playback settles here.
+        // A superseding Site request finds playback already paused, so keep
+        // the first request's intent until a Site paints or the last fails.
         const playbackToSettle = nationalPlaybackController;
-        resumeNationalPlaybackAfterSiteFailure = playbackToSettle
+        const pausedPlaying = playbackToSettle
           ? await playbackToSettle.pauseAndWait(false)
           : false;
+        resumeNationalPlaybackAfterSiteFailure ||= pausedPlaying;
         assertSiteTransitionStillCurrent();
         transferGeneration = generation;
         livePollingSession += 1;
@@ -2018,6 +2021,8 @@ export function App() {
             acceptRevealedNational(report);
             return;
           }
+          // A fresh National session replaces the controller that intent was for.
+          resumeNationalPlaybackAfterSiteFailure = false;
           latestNationalPhase3 = report;
           setNationalPhase3(report);
           const currentObservation = nationalObservations[0];
