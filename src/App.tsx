@@ -118,7 +118,7 @@ import {
   type LatestOnlyAsyncQueueSnapshot,
 } from "./national-radar/LatestOnlyAsyncQueue";
 import { retryBackfillStep } from "./live/backfillRetry";
-import { runNationalBackfillLoop } from "./national-radar/NationalBackfillLoop";
+import { runNationalBackfillLoop, waitRunningDueChecks } from "./national-radar/NationalBackfillLoop";
 import { finalizeNationalHistoryUntilSettled } from "./national-radar/NationalFinalizeLoop";
 import {
   nationalPollingFallbackDelayMs,
@@ -2267,18 +2267,29 @@ export function App() {
               reportNationalRequestError(error instanceof Error ? error.message : String(error));
             },
             async waitBeforeRetry(attempt) {
+              let delayMs: number;
               try {
                 const delay = await activeClientForNational().nationalHistoryPollDelay(
                   attempt,
                   Date.now() % Number.MAX_SAFE_INTEGER,
                 );
-                traceNationalLoad("backfill:retry-wait", String(delay.totalMs));
-                await waitMilliseconds(delay.totalMs);
+                delayMs = delay.totalMs;
               } catch (error) {
                 nationalHistoryOwnershipCheck(generation, historySession);
                 reportNationalRequestError(error instanceof Error ? error.message : String(error));
-                await waitMilliseconds(nationalPollingFallbackDelayMs(attempt));
+                delayMs = nationalPollingFallbackDelayMs(attempt);
               }
+              traceNationalLoad("backfill:retry-wait", String(delayMs));
+              // A predecessor waiting to retry must not hold newer observations
+              // back: freshness checks keep their own cadence through the wait.
+              await waitRunningDueChecks(delayMs, {
+                nextCheckAt: () => nextFreshnessCheckAt,
+                check: async () => {
+                  nationalHistoryOwnershipCheck(generation, historySession);
+                  await checkFreshnessDuringBackfill();
+                },
+                wait: waitMilliseconds,
+              });
               nationalHistoryOwnershipCheck(generation, historySession);
             },
           }).finally(() => {

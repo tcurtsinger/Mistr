@@ -1019,7 +1019,7 @@ pub async fn request_phase5_live_sweep(
         }
         .map_err(|error| TransferError::new("live_start_failed", error.to_string()))?;
         let safe = live
-            .wait_for_safe_sweep(wait)
+            .wait_for_safe_sweep_discovered_within(wait, timeout)
             .await
             .map_err(|error| TransferError::new("live_sweep_failed", error.to_string()))?;
         let safe_evidence = safe.evidence;
@@ -1066,9 +1066,9 @@ pub async fn request_phase5_live_sweep(
     Ok(Response::new(charged.bytes))
 }
 
-/// How long to wait for the safe sweep to appear. A short wait probes for a
-/// newer scan without holding up other work; the complete timeout still
-/// bounds the download and decode once the sweep exists.
+/// How long to wait for the target volume to be discovered. A short wait
+/// probes for a newer scan without holding up other work; once its chunks
+/// are listed, the complete timeout bounds assembly, download, and decode.
 fn live_sweep_wait(
     timeout_seconds: u64,
     wait_seconds: Option<u64>,

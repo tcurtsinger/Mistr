@@ -1,5 +1,37 @@
 import { describe, expect, it, vi } from "vitest";
-import { runNationalBackfillLoop } from "./NationalBackfillLoop";
+import { runNationalBackfillLoop, waitRunningDueChecks } from "./NationalBackfillLoop";
+
+describe("waitRunningDueChecks", () => {
+  it("keeps a 30-second check cadence through a longer retry wait", async () => {
+    let time = 0;
+    let nextCheckAt = 30_000;
+    const checkedAt: number[] = [];
+    await waitRunningDueChecks(75_000, {
+      now: () => time,
+      nextCheckAt: () => nextCheckAt,
+      async check() {
+        if (time < nextCheckAt) return;
+        checkedAt.push(time);
+        nextCheckAt = time + 30_000;
+      },
+      async wait(delayMs) { time += delayMs; },
+    });
+    expect(time).toBe(75_000);
+    expect(checkedAt).toEqual([30_000, 60_000]);
+  });
+
+  it("stops the wait when a check throws", async () => {
+    let time = 0;
+    const stopped = new Error("superseded");
+    await expect(waitRunningDueChecks(60_000, {
+      now: () => time,
+      nextCheckAt: () => 10_000,
+      async check() { throw stopped; },
+      async wait(delayMs) { time += delayMs; },
+    })).rejects.toBe(stopped);
+    expect(time).toBe(10_000);
+  });
+});
 
 describe("runNationalBackfillLoop", () => {
   it("returns partial after repeated failure so the caller can start live polling", async () => {
