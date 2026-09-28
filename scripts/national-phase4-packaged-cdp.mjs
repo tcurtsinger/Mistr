@@ -170,6 +170,15 @@ try {
   );
   const detailScreenshot = await captureScreenshot();
 
+  // Hold background acquisition off for the measurement, as the scrub
+  // evidence does: a newer MRMS frame arriving is product behavior, not
+  // work done by sharp playback.
+  await evaluate(
+    "window.__MISTR_NATIONAL_PHASE4__.beginResidentEvidence()",
+    true,
+    300_000,
+  );
+  residentEvidenceHeld = true;
   await evaluate("window.__MISTR_NATIONAL_PHASE4__.play()", true, 300_000);
   await waitForReport(
     "report.playback?.playing===true && report.renderer?.presentationFactor===1",
@@ -202,6 +211,8 @@ try {
     true,
     60_000,
   );
+  await evaluate("window.__MISTR_NATIONAL_PHASE4__.endResidentEvidence()");
+  residentEvidenceHeld = false;
   const activePlayback = {
     ...activePlaybackDuring,
     activityBefore: playbackActivityBefore,
