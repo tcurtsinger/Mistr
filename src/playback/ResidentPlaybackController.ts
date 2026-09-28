@@ -3,6 +3,7 @@ import type {
   RadarPaintReceipt,
 } from "../radar-renderer/RadarCustomLayer";
 import type { RadarSweepCpuModel } from "../radar-renderer/cpuModel";
+import { nearestFrameIndex } from "./playheadCarry";
 
 export interface PlaybackStateSnapshot {
   generation: number;
@@ -33,6 +34,9 @@ export class ResidentPlaybackController {
   private operation: Promise<RadarPaintReceipt> | null = null;
   private replacementTail: Promise<void> = Promise.resolve();
   private residentReplacementCount = 0;
+  // Bumped by every operator play, pause, or scrub. A history update resumes
+  // the loop only if the operator did nothing while it ran.
+  private intentRevision = 0;
   private readonly dwellMs: number;
   private readonly latestDwellMs: number;
 
@@ -139,11 +143,12 @@ export class ResidentPlaybackController {
   ): Promise<RadarPaintReceipt> {
     this.assertActive();
     const resumePlayback = this.playing;
+    const revision = this.intentRevision;
     const previousFrames = this.frames;
     const previousSelected = this.layer.getSnapshot().selectedObservationId;
     const wasPausedAtNewest = !resumePlayback
       && previousSelected === previousFrames[previousFrames.length - 1].observationId;
-    await this.pauseAndWait();
+    await this.holdPlayback();
     if (this.layer.getSnapshot().recovery.phase !== "ready") {
       await this.layer.waitForRecovery();
     }
@@ -180,11 +185,11 @@ export class ResidentPlaybackController {
       } finally {
         this.operation = null;
         this.emit();
-        if (resumePlayback && !this.disposed) this.play();
+        if (resumePlayback && !this.disposed && this.intentRevision === revision) this.startPlaying();
       }
       throw error;
     }
-    if (resumePlayback && !this.disposed) this.play();
+    if (resumePlayback && !this.disposed && this.intentRevision === revision) this.startPlaying();
     return receipt;
   }
 
@@ -193,7 +198,7 @@ export class ResidentPlaybackController {
     beforeCommit?: () => void,
   ): Promise<RadarPaintReceipt> {
     this.assertActive();
-    await this.pauseAndWait();
+    await this.holdPlayback();
     if (this.layer.getSnapshot().recovery.phase !== "ready") {
       await this.layer.waitForRecovery();
     }
@@ -249,7 +254,12 @@ export class ResidentPlaybackController {
 
   play(): void {
     this.assertActive();
-    if (this.playing) return;
+    this.intentRevision += 1;
+    this.startPlaying();
+  }
+
+  private startPlaying(): void {
+    if (this.playing || this.disposed) return;
     this.playing = true;
     this.emit();
     const pending = this.operation;
@@ -271,6 +281,11 @@ export class ResidentPlaybackController {
   }
 
   pause(): void {
+    this.intentRevision += 1;
+    this.stopPlaying();
+  }
+
+  private stopPlaying(): void {
     if (this.disposed) return;
     this.playing = false;
     if (this.timer !== null) globalThis.clearTimeout(this.timer);
@@ -283,6 +298,18 @@ export class ResidentPlaybackController {
     if (this.operation) await this.operation;
   }
 
+  /** Stops the loop for an internal mutation without recording operator intent. */
+  private async holdPlayback(): Promise<void> {
+    this.stopPlaying();
+    if (this.operation) await this.operation;
+  }
+
+  private async settleReplacements(): Promise<void> {
+    while (this.residentReplacementCount > 0) {
+      await this.replacementTail.catch(() => {});
+    }
+  }
+
   async step(): Promise<RadarPaintReceipt> {
     this.assertActive();
     this.assertResidentInteractionReady();
@@ -291,15 +318,30 @@ export class ResidentPlaybackController {
     return this.advanceOnce();
   }
 
+  /**
+   * Selects a frame by its index in the history the operator is looking at. A
+   * scrub that lands during a history update waits for it, then selects the
+   * same scan (or the nearest one in time if that scan is no longer resident).
+   */
   async scrub(index: number): Promise<RadarPaintReceipt> {
     this.assertActive();
-    this.assertResidentInteractionReady();
-    await this.pauseAndWait();
-    this.assertResidentInteractionReady();
     if (!Number.isInteger(index) || index < 0 || index >= this.frames.length) {
       throw new RangeError(`frame index ${index} is not resident`);
     }
-    return this.select(this.frames[index].observationId);
+    const target = this.frames[index];
+    this.intentRevision += 1;
+    this.stopPlaying();
+    // Wait only when there is something to wait for, so an idle scrub selects at once.
+    if (this.residentReplacementCount > 0) await this.settleReplacements();
+    if (this.operation) await this.operation.catch(() => {});
+    if (this.residentReplacementCount > 0) await this.settleReplacements();
+    this.assertActive();
+    const resident = this.frames.find((frame) => frame.observationId === target.observationId)
+      ?? this.frames[nearestFrameIndex(
+        this.frames.map((frame) => frame.observedAtUnixMs),
+        target.observedAtUnixMs,
+      )];
+    return this.select(resident.observationId);
   }
 
   async runTransitions(

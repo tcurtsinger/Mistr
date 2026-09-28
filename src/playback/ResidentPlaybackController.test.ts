@@ -340,7 +340,7 @@ describe("resident playback truth", () => {
     });
   });
 
-  it("holds direct resident interaction throughout an atomic replacement", async () => {
+  it("queues a scrub behind an atomic replacement and lands on the nearest resident scan", async () => {
     const layer = new FakeLayer();
     const controller = new ResidentPlaybackController(layer, frames());
     await controller.establishInitialPaint();
@@ -350,7 +350,8 @@ describe("resident playback truth", () => {
       frame("replacement-b", 500),
     ]);
     expect(controller.snapshot().residentReplacementPending).toBe(true);
-    await expect(controller.scrub(1)).rejects.toThrow("history is being replaced");
+    // frame-c (300) is gone after the swap; replacement-a (400) is nearest.
+    const queued = controller.scrub(2);
 
     await vi.waitFor(() => {
       expect(controller.snapshot()).toMatchObject({
@@ -360,12 +361,54 @@ describe("resident playback truth", () => {
     });
     layer.completePaint();
     await replacement;
+    await expect(queued).resolves.toMatchObject({ observationId: "replacement-a" });
 
     expect(controller.snapshot().residentReplacementPending).toBe(false);
     const scrub = controller.scrub(1);
-    await Promise.resolve();
+    await vi.waitFor(() => expect(layer.getSnapshot().selectedObservationId).toBe("replacement-b"));
     layer.completePaint();
     await expect(scrub).resolves.toMatchObject({ observationId: "replacement-b" });
+  });
+
+  it("keeps an operator Pause issued while a history update is in flight", async () => {
+    const layer = new FakeLayer();
+    const controller = new ResidentPlaybackController(layer, frames(), {
+      dwellMs: 60_000,
+      latestDwellMs: 60_000,
+    });
+    await controller.establishInitialPaint();
+    const paint = controller.step();
+    await Promise.resolve();
+    controller.play();
+    const update = controller.updateResidentHistory([...frames(), frame("frame-d", 400)]);
+    await vi.waitFor(() => expect(controller.snapshot().residentReplacementPending).toBe(true));
+
+    controller.pause();
+    layer.completePaint();
+    await paint;
+    await update;
+
+    expect(controller.snapshot()).toMatchObject({ playing: false, residentCount: 4 });
+  });
+
+  it("queues a scrub behind a history update and keeps the scan the operator picked", async () => {
+    const layer = new FakeLayer();
+    const controller = new ResidentPlaybackController(layer, frames());
+    await controller.establishInitialPaint();
+    const paint = controller.step();
+    await Promise.resolve();
+    // An older scan is prepended, so every index shifts by one.
+    const update = controller.updateResidentHistory([frame("frame-0", 50), ...frames()]);
+    expect(controller.snapshot().residentReplacementPending).toBe(true);
+    const scrub = controller.scrub(2);
+
+    layer.completePaint();
+    await paint;
+    await update;
+    await vi.waitFor(() => expect(layer.getSnapshot().selectedObservationId).toBe("frame-c"));
+    layer.completePaint();
+    await expect(scrub).resolves.toMatchObject({ observationId: "frame-c" });
+    expect(controller.snapshot().playing).toBe(false);
   });
 
   it("appends a live frame and follows it when paused on newest", async () => {
