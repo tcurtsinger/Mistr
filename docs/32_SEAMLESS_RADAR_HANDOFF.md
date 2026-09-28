@@ -1,7 +1,7 @@
-# Seamless radar handoff — Phase A: resident National
+# Seamless radar handoff — resident National, zoom switching, and playback time
 
 **Date:** 2026-09-28
-**Status:** Implemented; native packaged validation pending.
+**Status:** Phases A, B, and C implemented and validated in the native packaged gate.
 **Owner decisions (2026-09-28):** phased delivery (A: resident National; B: cross-fade, zoom-driven switching, Site preload; C: playback time carried across a switch). Zoom decides the source in Phase B, including after a manual Site pick. Panning out of a Site's coverage while zoomed in returns through National; only one Site layer ever exists.
 
 ## Problem
@@ -85,8 +85,27 @@ Automatic switches never move the camera. The picker flies to a Site at zoom 9.5
 ### Known limits
 
 - At the end of a fade-in, National disappears everywhere, including outside the Site's range ring, so corners of a wide view briefly lose echo.
-- Playback time is not yet carried across a switch (Phase C); a Site starts at its newest scan.
 
 ### Validation
 
 `proveZoomHandoff` in the National packaged gate: at zoom 8.3 over KTLX the Site preloads; at 9.6 the Site fades in under the preloaded generation with National resident and the camera untouched; one jump to KFWS at 9.6 goes KTLX, National, KFWS with no further move; at 7.5 the same National history returns, the Site layer is removed, and the camera is untouched.
+
+## Phase C — playback time across a switch
+
+A switch keeps the operator's place in time. Each switch records the outgoing source's playhead (time shown, playing or not, on the newest frame or not), and the incoming source adopts it as its history loads (`src/playback/playheadCarry.ts`):
+
+| Outgoing playback | Incoming source |
+|---|---|
+| Paused on the newest frame | Stays on its newest frame |
+| Playing | Plays from its frame nearest that time once it has two frames |
+| Paused on an older frame | Jumps once to its frame nearest that time when its history reaches back that far (or stops loading) |
+
+- Nearest means the smallest time difference; an exact tie goes to the older frame, and times outside the history clamp to its ends.
+- National returning from a Site is revealed straight onto its nearest frame (`NationalGridLayer.revealAndWait(timeoutMs, observationId)`), so the first visible draw is already the right time.
+- A Site starts on its newest scan (the preload) and adopts the time as older scans load, since its history starts at one frame.
+- Any operator play, pause, or scrub cancels a carry that has not been applied. A carry that was never applied passes through the next switch unchanged, so Site → National → Site keeps the original time.
+- Only live sources carry time; the startup archive scan does not.
+
+### Validation
+
+`proveTimeCarry` in the National packaged gate: National paused 15 frames back, then KTLX must select its scan nearest that time; back on National, the revealed receipt must already be the frame nearest the Site's time (within 1.5 minutes). With National playing, KTLX must be playing once it has two scans, and National must be playing again after the reveal.

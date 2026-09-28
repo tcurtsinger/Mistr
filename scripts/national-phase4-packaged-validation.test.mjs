@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   validateNationalPhase4Acceptance,
   validateResidentHandoff,
+  validateTimeCarry,
   validateZoomHandoff,
 } from "./national-phase4-packaged-validation.mjs";
 
@@ -89,6 +90,37 @@ describe("National Phase 4 packaged acceptance", () => {
     delete report.residentHandoff;
     expect(validateNationalPhase4Acceptance(report)).toContain(
       "National stays resident while the Site is displayed",
+    );
+  });
+
+  it("requires each switch to keep the playback time or keep the loop playing", () => {
+    expect(validateTimeCarry(validReport().timeCarry)).toEqual([]);
+
+    const newestSite = validReport().timeCarry;
+    newestSite.paused.site.selectedIndex = 3;
+    newestSite.paused.site.playheadUnixMs = 41 * 60_000;
+    expect(validateTimeCarry(newestSite)).toContain(
+      "a Site opened from paused National lands on its scan nearest the paused time",
+    );
+
+    const flashedReveal = validReport().timeCarry;
+    flashedReveal.paused.national.revealReceiptObservationId = "n-30";
+    expect(validateTimeCarry(flashedReveal)).toContain(
+      "National revealed from a paused Site reappears on its frame nearest the Site's time",
+    );
+
+    const stoppedLoop = validReport().timeCarry;
+    stoppedLoop.playing.site.playing = false;
+    stoppedLoop.playing.national.playing = false;
+    expect(validateTimeCarry(stoppedLoop)).toEqual([
+      "a Site opened from playing National keeps the loop playing",
+      "National revealed from a playing Site keeps the loop playing",
+    ]);
+
+    const report = validReport();
+    delete report.timeCarry;
+    expect(validateNationalPhase4Acceptance(report)).toContain(
+      "a Site opened from paused National lands on its scan nearest the paused time",
     );
   });
 
@@ -437,6 +469,30 @@ function validReport() {
         siteLayerPresent: false,
         nationalRenderer: { visibility: "visible" },
       },
+    },
+    timeCarry: {
+      site: "KTLX",
+      paused: {
+        site: {
+          targetUnixMs: 30 * 60_000,
+          playing: false,
+          playheadUnixMs: 29 * 60_000,
+          selectedIndex: 1,
+          expectedIndex: 1,
+          times: [24, 29, 35, 41].map((minute) => minute * 60_000),
+        },
+        national: {
+          targetUnixMs: 29 * 60_000,
+          expectedIndex: 2,
+          playing: false,
+          playheadUnixMs: 28 * 60_000,
+          selectedIndex: 2,
+          revealReceiptObservationId: "n-28",
+          times: [24, 26, 28, 30].map((minute) => minute * 60_000),
+          ids: ["n-24", "n-26", "n-28", "n-30"],
+        },
+      },
+      playing: { site: { playing: true, frames: 3 }, national: { playing: true } },
     },
     restoredSite: {
       sourceState: { painted: { source: { kind: "site", siteIcao: "KTLX" } }, transition: null },

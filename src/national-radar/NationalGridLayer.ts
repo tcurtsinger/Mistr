@@ -679,21 +679,30 @@ export class NationalGridLayer implements CustomLayerInterface {
     ) {
       return Promise.resolve(this.paintReceipt!);
     }
+    this.stageSelection(observationId, presentationFactor, selected);
+    this.clearReceipts();
+    this.status = "ready";
+    this.map?.triggerRepaint();
+    return this.waitForCommittedPaint(PAINT_TIMEOUT_MS, "National paint receipt timed out");
+  }
+
+  /** Makes a resident frame active; its paint commits (or rolls back) the change. */
+  private stageSelection(
+    observationId: string,
+    presentationFactor: number,
+    selected: PresentationResources,
+  ) {
     const previous = this.captureResidencyState();
     this.active = selected;
     this.fallback = presentationFactor === 4
       ? null
       : this.presentationFor(observationId, 4);
-    this.clearReceipts();
-    this.status = "ready";
     this.pendingResidencyMutation = {
       previous,
       added: [],
       retireOnSuccess: [],
       deferExternalCommit: false,
     };
-    this.map?.triggerRepaint();
-    return this.waitForCommittedPaint(PAINT_TIMEOUT_MS, "National paint receipt timed out");
   }
 
   setPlaybackQualityLock(presentationFactor: number | undefined): void {
@@ -862,8 +871,13 @@ export class NationalGridLayer implements CustomLayerInterface {
   /**
    * Shows the resident presentation and resolves only after a real draw
    * completes. A hidden history commit already in progress finishes first.
+   * With an observation id, the first visible draw is already that resident
+   * frame, so the reveal never shows the frame that was current when hidden.
    */
-  async revealAndWait(timeoutMs = PAINT_TIMEOUT_MS): Promise<NationalPaintReceipt> {
+  async revealAndWait(
+    timeoutMs = PAINT_TIMEOUT_MS,
+    observationId?: string,
+  ): Promise<NationalPaintReceipt> {
     const started = performance.now();
     while (this.paintWaiter || this.pendingResidencyMutation || this.awaitingExternalCommit) {
       if (this.status === "error" || this.status === "removed") {
@@ -875,6 +889,11 @@ export class NationalGridLayer implements CustomLayerInterface {
       await nextAnimationFrame();
     }
     if (!this.active) throw new Error("National renderer has no resident observation to reveal");
+    if (observationId !== undefined) {
+      const presentationFactor = this.playbackQualityFactor ?? 4;
+      const selected = this.presentationFor(observationId, presentationFactor);
+      if (selected !== this.active) this.stageSelection(observationId, presentationFactor, selected);
+    }
     this.setVisibility("visible");
     return this.waitForCommittedPaint(timeoutMs, "National reveal paint timed out", true);
   }

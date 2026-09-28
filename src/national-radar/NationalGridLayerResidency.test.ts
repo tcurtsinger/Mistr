@@ -190,6 +190,23 @@ describe("National resident visibility", () => {
     await expect(revealed).resolves.toMatchObject({ presented: true, contextEpoch: epochBefore + 1 });
   });
 
+  it("reveals straight onto a requested resident frame", async () => {
+    const { layer, render } = await paintedLayer();
+    const target = layer.getSnapshot().observationId!;
+    layer.setVisibility("resident");
+    const revealed = layer.revealAndWait(1_000, target);
+    render();
+    render();
+    await expect(revealed).resolves.toMatchObject({ presented: true, observationId: target });
+  });
+
+  it("stays hidden when asked to reveal onto a frame that is not resident", async () => {
+    const { layer } = await paintedLayer();
+    layer.setVisibility("resident");
+    await expect(layer.revealAndWait(1_000, "missing-observation")).rejects.toThrow("not complete");
+    expect(layer.getSnapshot().visibility).toBe("resident");
+  });
+
   it("refuses frame selection while hidden", async () => {
     const { layer } = await paintedLayer();
     layer.setVisibility("resident");
