@@ -371,6 +371,10 @@ export class PackedSweepTransferClient {
     return this.lanes[lane].active;
   }
 
+  laneGeneration(lane: TransferLane): number {
+    return this.lanes[lane].generation;
+  }
+
   async begin(lane: TransferLane, generation: number): Promise<TransferSnapshot> {
     this.assertSessionOpen();
     assertLane(lane);

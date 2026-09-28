@@ -135,26 +135,28 @@ export function validateNationalPhase4Acceptance(report) {
   const credits = report.transferSnapshot;
   if (credits?.creditLimit !== 2 || credits?.heldCredits !== 0 || credits?.inFlightCredits !== 0) failures.push("shared two-credit release");
   const failedSite = report.failedSiteRecovery;
-  const restoredGeneration = failedSite?.after?.painted?.generation;
-  const restoredRetained = failedSite?.history?.retained ?? [];
+  const keptGeneration = failedSite?.before?.painted?.generation;
+  const keptRetained = failedSite?.history?.retained ?? [];
   if (
-    failedSite?.failureMessage !== "diagnostic Site transition failure after National cancellation"
+    failedSite?.failureMessage !== "diagnostic Site transition failure after the Site lane began"
     || failedSite?.before?.painted?.source?.kind !== "national"
     || failedSite?.after?.painted?.source?.kind !== "national"
     || failedSite?.after?.transition
-    || !(restoredGeneration > failedSite?.before?.painted?.generation)
-    || restoredRetained.length < 1
-    || restoredRetained.some((observation) => observation.generation !== restoredGeneration)
+    || !(keptGeneration > 0)
+    || failedSite?.after?.painted?.generation !== keptGeneration
+    || keptRetained.length < 1
+    || keptRetained.some((observation) => observation.generation !== keptGeneration)
     || failedSite?.renderer?.status !== "painted"
-    || failedSite?.renderer?.generation !== restoredGeneration
-    || failedSite?.renderer?.paintReceipt?.generation !== restoredGeneration
-    || failedSite?.transfer?.generation !== restoredGeneration
-    || failedSite?.backfillStartCountAfter !== failedSite?.backfillStartCountBefore + 1
+    || failedSite?.renderer?.generation !== keptGeneration
+    || failedSite?.renderer?.paintReceipt?.generation !== keptGeneration
+    || failedSite?.transfer?.lanes?.national?.generation !== keptGeneration
+    || failedSite?.transfer?.lanes?.national?.active !== true
+    || failedSite?.backfillStartCountAfter !== failedSite?.backfillStartCountBefore
     || failedSite?.playbackBeforeFailure?.playing !== true
-    || failedSite?.playbackAfterRestoration?.playing !== false
-    || failedSite?.renderer?.contextEpoch !== failedSite?.rendererBeforeFailure?.contextEpoch + 1
-    || failedSite?.renderer?.paintReceipt?.contextEpoch !== failedSite?.renderer?.contextEpoch
-  ) failures.push("failed Site transition restores active National session");
+    || failedSite?.playbackAfterRestoration?.playing !== true
+    || failedSite?.renderer?.contextEpoch !== failedSite?.rendererBeforeFailure?.contextEpoch
+  ) failures.push("failed Site transition keeps the active National session");
+  failures.push(...validateResidentHandoff(report.residentHandoff));
   const site = report.restoredSite;
   if (
     site?.sourceState?.painted?.source?.kind !== "site"
@@ -162,6 +164,51 @@ export function validateNationalPhase4Acceptance(report) {
     || site?.sourceState?.transition !== null
     || site?.display?.lastComplete?.site !== "KTLX"
   ) failures.push("National to Site atomic handoff");
+  return failures;
+}
+
+// Switching National -> Site -> National keeps the same National history alive
+// and reveals it without any acquisition, decode, or bulk transfer.
+export function validateResidentHandoff(handoff) {
+  const failures = [];
+  const generation = handoff?.nationalGenerationBefore;
+  const whileSite = handoff?.whileSite;
+  if (
+    !(generation > 0)
+    || whileSite?.sourceState?.painted?.source?.kind !== "site"
+    || whileSite?.resident !== true
+    || whileSite?.renderer?.visibility !== "resident"
+    || whileSite?.renderer?.paintReceipt !== undefined
+    || whileSite?.transfer?.lanes?.national?.active !== true
+    || whileSite?.transfer?.lanes?.national?.generation !== generation
+  ) failures.push("National stays resident while the Site is displayed");
+  const retained = handoff?.history?.retained ?? [];
+  if (
+    handoff?.after?.painted?.source?.kind !== "national"
+    || handoff?.after?.painted?.generation !== generation
+    || handoff?.after?.transition
+    || handoff?.renderer?.status !== "painted"
+    || handoff?.renderer?.visibility !== "visible"
+    || handoff?.renderer?.paintReceipt?.presented !== true
+    || handoff?.renderer?.paintReceipt?.generation !== generation
+    || handoff?.backfillStartCountAfter !== handoff?.backfillStartCountBefore
+    || retained.length < handoff?.retainedBefore
+    || retained.some((observation) => observation.generation !== generation)
+    || handoff?.siteLayerRemoved !== true
+  ) failures.push("resident National reveals under its original generation");
+  const before = handoff?.reveal?.activityBefore;
+  const after = handoff?.reveal?.activityAfter;
+  const quiet = before && after && [
+    "networkRequests",
+    "responseBytes",
+    "decoderRuns",
+    "bulkIpcTransfers",
+    "bulkIpcBytes",
+  ].every((field) => Number.isSafeInteger(before[field]) && after[field] === before[field]);
+  if (!quiet) failures.push("National reveal performs no acquisition, decode, or bulk transfer");
+  if (!(handoff?.reveal?.revealMs >= 0 && handoff.reveal.revealMs <= 250)) {
+    failures.push("National reveal completes within 250 ms");
+  }
   return failures;
 }
 

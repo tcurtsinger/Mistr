@@ -221,7 +221,13 @@ try {
   const transferSnapshot = await waitForReleasedTransferCredits();
 
   const failedSiteRecovery = await evaluate(
-    serialized("window.__MISTR_NATIONAL_PHASE4__.proveFailedSiteRestoresNational('KTLX')"),
+    serialized("window.__MISTR_NATIONAL_PHASE4__.proveFailedSiteKeepsNational('KTLX')"),
+    true,
+    300_000,
+  );
+
+  const residentHandoff = await evaluate(
+    serialized("window.__MISTR_NATIONAL_PHASE4__.proveResidentHandoff('KTLX')"),
     true,
     300_000,
   );
@@ -250,6 +256,7 @@ try {
     contextReset,
     transferSnapshot,
     failedSiteRecovery,
+    residentHandoff,
     restoredSite,
   };
   report.failures = validateNationalPhase4Acceptance(report);

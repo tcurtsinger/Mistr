@@ -858,18 +858,22 @@ export class NationalGridLayer implements CustomLayerInterface {
     this.emit();
   }
 
-  /** Shows the resident presentation and resolves only after a real draw completes. */
-  revealAndWait(timeoutMs = PAINT_TIMEOUT_MS): Promise<NationalPaintReceipt> {
-    if (
-      this.paintWaiter
-      || this.pendingResidencyMutation
-      || this.awaitingExternalCommit
-    ) {
-      return Promise.reject(new Error("National renderer cannot reveal during an unfinished mutation"));
+  /**
+   * Shows the resident presentation and resolves only after a real draw
+   * completes. A hidden history commit already in progress finishes first.
+   */
+  async revealAndWait(timeoutMs = PAINT_TIMEOUT_MS): Promise<NationalPaintReceipt> {
+    const started = performance.now();
+    while (this.paintWaiter || this.pendingResidencyMutation || this.awaitingExternalCommit) {
+      if (this.status === "error" || this.status === "removed") {
+        throw new Error(this.runtimeError ?? "National renderer cannot reveal its resident history");
+      }
+      if (performance.now() - started > timeoutMs) {
+        throw new Error("National renderer stayed busy with a history commit; reveal timed out");
+      }
+      await nextAnimationFrame();
     }
-    if (!this.active) {
-      return Promise.reject(new Error("National renderer has no resident observation to reveal"));
-    }
+    if (!this.active) throw new Error("National renderer has no resident observation to reveal");
     this.setVisibility("visible");
     return this.waitForCommittedPaint(timeoutMs, "National reveal paint timed out", true);
   }

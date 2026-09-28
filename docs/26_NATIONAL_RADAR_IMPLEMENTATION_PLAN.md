@@ -278,7 +278,7 @@ The schema must identify:
 
 `PackedGrid v1` consists of one bounded frame manifest plus one or more bounded binary chunk payloads. The full expanded 7,000 by 3,500 grid never needs to exist as one frontend buffer. Every chunk carries the same generation, observation, source, encoding, and level identity plus its own coordinates and integrity bounds. JSON arrays are prohibited.
 
-The existing transfer broker remains the sole global owner of cross-IPC credits across Site sweeps, National manifests, and National chunks. National must not instantiate another independent two-credit pool. A chunk lease is released only after its bytes have been validated and uploaded or the operation has been safely abandoned. At most two National chunk payloads may be owned across IPC at once, regardless of how many observations or levels are retained.
+The existing transfer broker remains the sole global owner of cross-IPC credits across Site sweeps, National manifests, and National chunks. National must not instantiate another independent two-credit pool. A chunk lease is released only after its bytes have been validated and uploaded or the operation has been safely abandoned. At most two National chunk payloads may be owned across IPC at once, regardless of how many observations or levels are retained. *(Superseded 2026-09-28 by [Seamless radar handoff](32_SEAMLESS_RADAR_HANDOFF.md): Site and National each own an independent two-credit lane.)*
 
 ### 6.6 National WebGL layer and GPU working set
 

@@ -190,17 +190,26 @@ describe("National resident visibility", () => {
     await expect(revealed).resolves.toMatchObject({ presented: true, contextEpoch: epochBefore + 1 });
   });
 
-  it("rejects frame selection and reveal at the wrong moments", async () => {
-    const { layer, stage, render } = await paintedLayer();
+  it("refuses frame selection while hidden", async () => {
+    const { layer } = await paintedLayer();
     layer.setVisibility("resident");
     const selected = layer.getSnapshot().selectedObservationId ?? layer.getSnapshot().observationId!;
     await expect(layer.selectResidentAndWait(selected)).rejects.toThrow("hidden");
+  });
 
+  it("lets a hidden commit in progress finish before revealing", async () => {
+    const { layer, stage, render } = await paintedLayer();
+    layer.setVisibility("resident");
     await stage();
     const committed = layer.commitStaging();
-    await expect(layer.revealAndWait(1_000)).rejects.toThrow("unfinished mutation");
+    const revealed = layer.revealAndWait(1_000);
     render();
     render();
-    await committed;
+    await expect(committed).resolves.toMatchObject({ presented: false });
+    for (let frame = 0; frame < 10 && layer.getSnapshot().status !== "painted"; frame += 1) {
+      await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
+      render();
+    }
+    await expect(revealed).resolves.toMatchObject({ presented: true });
   });
 });

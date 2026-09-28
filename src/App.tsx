@@ -100,7 +100,7 @@ import {
   RadarSourceSupersededError,
   SiteLevel2Session,
 } from "./radar-session/SiteLevel2Session";
-import { NationalMrmsSession } from "./radar-session/NationalMrmsSession";
+import { NationalMrmsSession, type NationalMrmsPaintResult } from "./radar-session/NationalMrmsSession";
 import {
   commonResidencyReadyForInteraction,
   NationalGridLayer,
@@ -327,10 +327,16 @@ export function App() {
     let nationalHistorySession = 0;
     let nationalBackfillStartCount = 0;
     let activeNationalBackfillSession: number | null = null;
+    // National lane generation of the retained history. National can stay
+    // resident (hidden, still acquiring) while a Site is displayed.
+    let nationalGeneration = 0;
+    let nationalResident = false;
+    let hiddenNationalRequestError: string | null = null;
+    let resumeNationalPlaybackAfterSiteFailure = false;
+    const revealedNationalReports = new WeakSet<NationalPhase3Report>();
     let nationalMrmsSession: NationalMrmsSession<NationalPhase3Report> | null = null;
     let lastNationalRestorationAfterSiteFailure: Promise<NationalPhase3Report> | null = null;
     let failNextSiteFromNationalForDiagnostics = false;
-    let resetNextNationalAfterRendererFinalizeForDiagnostics = false;
     let nationalAcquisitionOperation: Promise<unknown> | null = null;
     let nationalResidentOnlyReservations = 0;
     let nationalPhase4EvidenceRelease: (() => void) | null = null;
@@ -825,7 +831,7 @@ export function App() {
         let stagedObservationId: string | undefined;
         let priorStagedModel: RadarSweepCpuModel | undefined;
         try {
-          await beginExclusiveLane(activeClient, "site", generation);
+          await beginSiteLane(activeClient, generation);
           lease = await activeClient.requestPhase5Live(
             site,
             freshOnly,
@@ -1119,23 +1125,22 @@ export function App() {
             );
           }
         };
-        const nationalOperation = nationalAcquisitionOperation;
-        if (nationalOperation) await nationalOperation.catch(() => {});
         assertSiteTransitionStillCurrent();
         queuedScrubRef.current = null;
+        // National keeps acquiring on its own lane and becomes resident once
+        // the Site paints; only its playback settles here.
         const playbackToSettle = nationalPlaybackController;
-        if (playbackToSettle) await playbackToSettle.pauseAndWait(false);
-        await nationalWorkingSet?.waitForIdle();
+        resumeNationalPlaybackAfterSiteFailure = playbackToSettle
+          ? await playbackToSettle.pauseAndWait(false)
+          : false;
         assertSiteTransitionStillCurrent();
         transferGeneration = generation;
         livePollingSession += 1;
-        nationalHistorySession += 1;
-        nationalWorkingSet?.cancel();
         const pollingSession = livePollingSession;
-        await beginExclusiveLane(activeClient, "site", generation);
+        await activeClient.begin("site", generation);
         if (failNextSiteFromNationalForDiagnostics) {
           failNextSiteFromNationalForDiagnostics = false;
-          throw new Error("diagnostic Site transition failure after National cancellation");
+          throw new Error("diagnostic Site transition failure after the Site lane began");
         }
         const lease = await activeClient.requestPhase5Live(site, false, 180);
         let createdLayer: RadarCustomLayer | null = null;
@@ -1241,69 +1246,35 @@ export function App() {
         interrogationObservationRef.current = null;
         updateDiagnosticSources(instance, model, createAlignmentReport(model));
         focusRadar(instance, model);
-        if (nationalLayer && instance.getLayer(nationalLayer.id)) instance.removeLayer(nationalLayer.id);
-        nationalLayer = null;
-        nationalWorkingSet = null;
-        nationalPlaybackController?.dispose();
-        nationalPlaybackController = null;
-        nationalPlaybackControllerRef.current = null;
-        nationalObservations = [];
-        latestNationalHistory = null;
-        nationalHistorySession += 1;
-        nationalLayerRef.current = null;
-        nationalWorkingSetRef.current = null;
-        latestNationalPhase3 = null;
-        setNationalPhase3(null);
-        setNationalPlayback(null);
-        setNationalHistory(null);
+        if (!hideNationalBehindSite()) teardownNational();
         continueLiveBackfillAndPolling(model.siteIcao, pollingSession);
         radarSessionCoordinatorRef.current!.synchronizePaint(
           radarPaintIdentity(model, receipt),
         );
       };
 
-      const restoreNationalAfterSiteFailure = (generation: number) => {
+      const restoreNationalAfterSiteFailure = () => {
         const sourceState = radarSessionCoordinatorRef.current!.snapshot();
         if (
           cancelled
-          || transferGeneration !== generation
           || sourceState.transition
           || sourceState.painted?.source.kind !== "national"
         ) return;
-        const session = nationalMrmsSession;
-        if (!session) {
-          setNationalRequestError("National radar could not restart after the Site request failed");
-          return;
-        }
+        // National never stopped acquiring on its lane; only the failed Site
+        // lane and the paused National playback need attention.
+        if (client?.isActive("site")) void client.cancel("site").catch(() => {});
+        const resume = resumeNationalPlaybackAfterSiteFailure;
+        resumeNationalPlaybackAfterSiteFailure = false;
         const restoration = (async () => {
-          const playbackToSettle = nationalPlaybackController;
-          if (playbackToSettle) {
-            await playbackToSettle.pauseAndWait(false).catch(() => {});
-          }
-          await nationalWorkingSet?.waitForIdle();
-          const current = radarSessionCoordinatorRef.current!.snapshot();
-          if (
-            cancelled
-            || transferGeneration !== generation
-            || current.transition
-            || current.painted?.source.kind !== "national"
-          ) {
-            throw new RadarSourceSupersededError(
-              "National restoration was superseded while resident playback settled",
-            );
-          }
-          return session.start();
+          if (resume) await nationalPlaybackController?.play();
+          if (!latestNationalPhase3) throw new Error("National radar is no longer displayed");
+          return latestNationalPhase3;
         })();
         lastNationalRestorationAfterSiteFailure = restoration;
-        void restoration.then(
-          () => setNationalRequestError(null),
-          (error: unknown) => {
-            if (isRadarSourceSuperseded(error)) return;
-            setNationalRequestError(
-              `National radar restart failed: ${error instanceof Error ? error.message : String(error)}`,
-            );
-          },
-        );
+        void restoration.catch((error: unknown) => {
+          if (isRadarSourceSuperseded(error)) return;
+          setPlaybackError(error instanceof Error ? error.message : String(error));
+        });
       };
 
       if (!layer) throw new Error("selected-site renderer is unavailable");
@@ -1334,13 +1305,14 @@ export function App() {
           };
         },
         onPaintAccepted: (report) => acceptSiteBootstrap(report),
-        onTransitionFailed: (_error, generation) => {
-          restoreNationalAfterSiteFailure(generation);
+        onTransitionFailed: () => {
+          restoreNationalAfterSiteFailure();
         },
       });
       siteLevel2SessionRef.current = siteLevel2Session;
       const removeSiteAfterNationalPaint = () => {
         livePollingSession += 1;
+        if (client?.isActive("site")) void client.cancel("site").catch(() => {});
         controller?.dispose();
         if (layer) removeDiagnosticLayers(instance, layer);
         if (playbackControllerRef.current === controller) playbackControllerRef.current = null;
@@ -1410,6 +1382,76 @@ export function App() {
       const activeClientForNational = () => {
         if (!client) throw new Error("National transfer client is unavailable");
         return client;
+      };
+
+      const nationalIsVisible = () => (
+        radarSessionCoordinatorRef.current!.snapshot().painted?.source.kind === "national"
+      );
+
+      // Background National work while hidden must not overwrite the visible
+      // Site's history status or error notice; it is replayed on reveal.
+      const reportNationalRequestError = (message: string | null) => {
+        if (nationalIsVisible()) setNationalRequestError(message);
+        else hiddenNationalRequestError = message;
+      };
+
+      const setVisibleNationalHistoryStatus = (status: LiveHistoryStatus) => {
+        if (nationalIsVisible()) setLiveHistoryStatus(status);
+      };
+
+      const nationalCanReveal = () => Boolean(
+        nationalResident
+        && nationalLayer
+        && latestNationalPhase3
+        && client?.isActive("national")
+        && client.laneGeneration("national") === nationalGeneration
+        && !["error", "removed"].includes(nationalLayer.getSnapshot().status),
+      );
+
+      const hideNationalBehindSite = (): boolean => {
+        const activeLayer = nationalLayer;
+        if (
+          !activeLayer
+          || !latestNationalPhase3
+          || !client?.isActive("national")
+          || client.laneGeneration("national") !== nationalGeneration
+          || ["error", "removed"].includes(activeLayer.getSnapshot().status)
+        ) return false;
+        nationalPlaybackController?.pause();
+        activeLayer.setVisibility("resident");
+        nationalResident = true;
+        resumeNationalPlaybackAfterSiteFailure = false;
+        nationalInspectionLookupQueueForCleanup?.cancelPending();
+        return true;
+      };
+
+      const teardownNational = () => {
+        if (nationalLayer && instance.getLayer(nationalLayer.id)) instance.removeLayer(nationalLayer.id);
+        nationalLayer = null;
+        nationalWorkingSet = null;
+        nationalPlaybackController?.dispose();
+        nationalPlaybackController = null;
+        nationalPlaybackControllerRef.current = null;
+        nationalObservations = [];
+        latestNationalHistory = null;
+        nationalHistorySession += 1;
+        nationalResident = false;
+        hiddenNationalRequestError = null;
+        nationalLayerRef.current = null;
+        nationalWorkingSetRef.current = null;
+        latestNationalPhase3 = null;
+        setNationalPhase3(null);
+        setNationalPlayback(null);
+        setNationalHistory(null);
+        if (client?.isActive("national")) void client.cancel("national").catch(() => {});
+      };
+
+      const beginSiteLane = async (activeClient: PackedSweepTransferClient, generation: number) => {
+        // Cancel National only when nothing displays or keeps it resident.
+        if (activeClient.isActive("national") && !nationalResident && !nationalIsVisible()) {
+          await activeClient.cancel("national");
+        }
+        await activeClient.begin("site", generation);
       };
 
       const nationalInspectionLookupQueue = new LatestOnlyAsyncQueue<
@@ -1502,7 +1544,7 @@ export function App() {
             nationalHistoryErrorCode(error) === "national_history_generation_stale"
           ),
           onFailure(error) {
-            setNationalRequestError(
+            reportNationalRequestError(
               `National history is sealing before acquisition can continue: ${error instanceof Error ? error.message : String(error)}`,
             );
           },
@@ -1532,7 +1574,7 @@ export function App() {
             nationalHistoryErrorCode(error) === "national_history_generation_stale"
           ),
           onFailure(error) {
-            setNationalRequestError(
+            reportNationalRequestError(
               `National history is rolling back before acquisition can continue: ${error instanceof Error ? error.message : String(error)}`,
             );
           },
@@ -1543,14 +1585,6 @@ export function App() {
             "National history rollback was cancelled during application teardown",
           ),
         });
-      };
-
-      const resetNationalAfterRendererFinalizeForDiagnostics = (
-        activeLayer: NationalGridLayer,
-      ) => {
-        if (!resetNextNationalAfterRendererFinalizeForDiagnostics) return;
-        resetNextNationalAfterRendererFinalizeForDiagnostics = false;
-        void activeLayer.simulateContextResetForTest(150).catch(() => {});
       };
 
       const acquireNationalResidentOnlyActivity = async (): Promise<() => void> => {
@@ -1589,11 +1623,13 @@ export function App() {
         nationalObservations = [...history.retained];
         latestNationalHistory = history;
         setNationalHistory(history);
-        setTimelineFrames(nationalObservations.map((observation) => ({
-          observationId: nationalObservationId(observation),
-          observedAtUnixMs: observation.observationTimeUnixMs,
-        })));
-        setLiveHistoryStatus(nationalHistoryStatus(
+        if (nationalIsVisible()) {
+          setTimelineFrames(nationalObservations.map((observation) => ({
+            observationId: nationalObservationId(observation),
+            observedAtUnixMs: observation.observationTimeUnixMs,
+          })));
+        }
+        setVisibleNationalHistoryStatus(nationalHistoryStatus(
           history.retained.length,
           history.historyLimit,
           history.pendingBackfillCount,
@@ -1605,12 +1641,14 @@ export function App() {
 
       const nationalHistoryOwnershipCheck = (generation: number, historySession: number) => {
         const painted = radarSessionCoordinatorRef.current!.snapshot().painted;
+        const displayed = painted?.source.kind === "national" && painted.generation === generation;
         if (
           cancelled
           || historySession !== nationalHistorySession
-          || transferGeneration !== generation
-          || painted?.source.kind !== "national"
-          || painted.generation !== generation
+          || nationalGeneration !== generation
+          || !client?.isActive("national")
+          || client.laneGeneration("national") !== generation
+          || !(displayed || nationalResident)
         ) {
           throw new RadarSourceSupersededError("National history work was superseded");
         }
@@ -1673,7 +1711,6 @@ export function App() {
           nationalHistoryOwnershipCheck(generation, historySession);
           activeLayer.finalizeHistoryMutation(workingSet.receipt);
           rendererFinalized = true;
-          resetNationalAfterRendererFinalizeForDiagnostics(activeLayer);
           const finalizedHistory = await finalizeNationalHistoryCommit(
             activeClient,
             preparation.observation,
@@ -1685,7 +1722,7 @@ export function App() {
           nationalHistoryOwnershipCheck(generation, historySession);
           const finalizedWorkingSet = { ...workingSet, receipt: authoritativeReceipt };
           publishNationalHistory(finalizedHistory, authoritativeReceipt, resumePlayback);
-          setNationalRequestError(null);
+          reportNationalRequestError(null);
           return finalizedWorkingSet;
         } catch (error) {
           activePlayback.markReplacementPending(false);
@@ -1725,10 +1762,10 @@ export function App() {
               : "failure";
           },
           onHealthyPoll() {
-            setNationalRequestError(null);
+            reportNationalRequestError(null);
           },
           onFailure(error) {
-            setNationalRequestError(error instanceof Error ? error.message : String(error));
+            reportNationalRequestError(error instanceof Error ? error.message : String(error));
           },
           async requestDelayMs(attempt) {
             const delay = await activeClientForNational().nationalHistoryPollDelay(
@@ -1746,7 +1783,7 @@ export function App() {
         const historySession = nationalHistorySession + 1;
         nationalHistorySession = historySession;
         activeNationalBackfillSession = historySession;
-        setLiveHistoryStatus("loading");
+        setVisibleNationalHistoryStatus("loading");
         try {
           const result = await runNationalBackfillLoop({
             shouldContinue: () => !cancelled && historySession === nationalHistorySession,
@@ -1762,8 +1799,8 @@ export function App() {
             reachedLimit: () => nationalObservations.length >= MAX_LIVE_HISTORY_FRAMES,
             isSuperseded: isRadarSourceSuperseded,
             onFailure(error) {
-              setLiveHistoryStatus(nationalObservations.length >= MAX_LIVE_HISTORY_FRAMES ? "full" : "loading");
-              setNationalRequestError(error instanceof Error ? error.message : String(error));
+              setVisibleNationalHistoryStatus(nationalObservations.length >= MAX_LIVE_HISTORY_FRAMES ? "full" : "loading");
+              reportNationalRequestError(error instanceof Error ? error.message : String(error));
             },
             async waitBeforeRetry(attempt) {
               try {
@@ -1774,7 +1811,7 @@ export function App() {
                 await waitMilliseconds(delay.totalMs);
               } catch (error) {
                 nationalHistoryOwnershipCheck(generation, historySession);
-                setNationalRequestError(error instanceof Error ? error.message : String(error));
+                reportNationalRequestError(error instanceof Error ? error.message : String(error));
                 await waitMilliseconds(nationalPollingFallbackDelayMs(attempt));
               }
               nationalHistoryOwnershipCheck(generation, historySession);
@@ -1784,13 +1821,84 @@ export function App() {
           });
           if (result === "superseded") return;
           nationalHistoryOwnershipCheck(generation, historySession);
-          setLiveHistoryStatus(nationalObservations.length >= MAX_LIVE_HISTORY_FRAMES ? "full" : "partial");
+          setVisibleNationalHistoryStatus(nationalObservations.length >= MAX_LIVE_HISTORY_FRAMES ? "full" : "partial");
           await runNationalPolling(generation, historySession);
         } catch (error) {
           if (isRadarSourceSuperseded(error)) return;
-          setLiveHistoryStatus(nationalObservations.length >= MAX_LIVE_HISTORY_FRAMES ? "full" : "partial");
-          setNationalRequestError(error instanceof Error ? error.message : String(error));
+          setVisibleNationalHistoryStatus(nationalObservations.length >= MAX_LIVE_HISTORY_FRAMES ? "full" : "partial");
+          reportNationalRequestError(error instanceof Error ? error.message : String(error));
         }
+      };
+
+      const revealResidentNational = async (
+        generation: number,
+      ): Promise<NationalMrmsPaintResult<NationalPhase3Report>> => {
+        const activeLayer = nationalLayer;
+        const priorReport = latestNationalPhase3;
+        if (!activeLayer || !priorReport || !nationalResident || nationalGeneration !== generation) {
+          throw new Error("resident National radar is unavailable");
+        }
+        let receipt: NationalPaintReceipt;
+        try {
+          receipt = await activeLayer.revealAndWait();
+          const transition = radarSessionCoordinatorRef.current!.snapshot().transition;
+          if (transition?.generation !== generation || transition.requestedSource.kind !== "national") {
+            throw new RadarSourceSupersededError("National reveal was superseded");
+          }
+          if (!receipt.presented || receipt.generation !== generation) {
+            throw new Error("National reveal did not paint the resident history");
+          }
+        } catch (error) {
+          if (nationalResident && nationalLayer === activeLayer) activeLayer.setVisibility("resident");
+          throw error;
+        }
+        const report: NationalPhase3Report = {
+          ...priorReport,
+          workingSet: { ...priorReport.workingSet, receipt },
+          renderer: activeLayer.getSnapshot(),
+        };
+        revealedNationalReports.add(report);
+        return {
+          value: report,
+          paint: {
+            source: { kind: "national", domain: "conus" },
+            generation,
+            observationId: receipt.observationId,
+          },
+        };
+      };
+
+      const acceptRevealedNational = (report: NationalPhase3Report) => {
+        latestNationalPhase3 = report;
+        setNationalPhase3(report);
+        nationalResident = false;
+        if (latestNationalHistory) setNationalHistory(latestNationalHistory);
+        setTimelineFrames(nationalObservations.map((observation) => ({
+          observationId: nationalObservationId(observation),
+          observedAtUnixMs: observation.observationTimeUnixMs,
+        })));
+        setLiveHistoryStatus(latestNationalHistory
+          ? nationalHistoryStatus(
+            latestNationalHistory.retained.length,
+            latestNationalHistory.historyLimit,
+            latestNationalHistory.pendingBackfillCount,
+            activeNationalBackfillSession !== null,
+          )
+          : "partial");
+        setNationalRequestError(hiddenNationalRequestError);
+        hiddenNationalRequestError = null;
+        setInterrogation(null);
+        latestNationalInspection = null;
+        setInspectionState("idle");
+        inspectionMarkerRef.current?.remove();
+        inspectionMarkerRef.current = null;
+        inspectionPointRef.current = null;
+        interrogationObservationRef.current = null;
+        inspectionRequestRef.current = null;
+        nationalInspectionLookupQueue.cancelPending();
+        removeSiteAfterNationalPaint();
+        nationalPlaybackController?.acceptHistory(nationalObservations, report.workingSet.receipt);
+        focusNational(instance);
       };
 
       nationalMrmsSession = new NationalMrmsSession({
@@ -1800,9 +1908,14 @@ export function App() {
           (layer?.getSnapshot().generation ?? transferGeneration) + 1,
           (nationalLayer?.getSnapshot().generation ?? transferGeneration) + 1,
         ),
-        acquireAndPaint: async (generation) => {
+        residentGeneration: () => (nationalCanReveal() ? nationalGeneration : undefined),
+        acquireAndPaint: async (generation, mode) => {
+          if (mode === "reveal") return revealResidentNational(generation);
           const activeClient = activeClientForNational();
           transferGeneration = generation;
+          nationalGeneration = generation;
+          nationalResident = false;
+          hiddenNationalRequestError = null;
           livePollingSession += 1;
           nationalHistorySession += 1;
           await beginExclusiveLane(activeClient, "national", generation);
@@ -1816,6 +1929,7 @@ export function App() {
           ensureNationalLayer();
           const activeLayer = nationalLayer!;
           const activeWorkingSet = nationalWorkingSet!;
+          activeLayer.setVisibility("visible");
           activeLayer.setPresentationEnabled(true);
           const ownershipCheck = () => {
             const transition = radarSessionCoordinatorRef.current!.snapshot().transition;
@@ -1844,7 +1958,6 @@ export function App() {
             ownershipCheck();
             activeLayer.finalizeHistoryMutation(historyWorkingSet.receipt);
             rendererFinalized = true;
-            resetNationalAfterRendererFinalizeForDiagnostics(activeLayer);
             const finalizedHistory = await finalizeNationalHistoryCommit(
               activeClient,
               historyPreparation.observation,
@@ -1900,6 +2013,10 @@ export function App() {
           }
         },
         onPaintAccepted: (report) => {
+          if (revealedNationalReports.has(report)) {
+            acceptRevealedNational(report);
+            return;
+          }
           latestNationalPhase3 = report;
           setNationalPhase3(report);
           const currentObservation = nationalObservations[0];
@@ -1915,6 +2032,8 @@ export function App() {
                 setNationalPlayback(snapshot);
               },
               onPaint(receipt) {
+                // A hidden commit completes on a fence; nothing was drawn.
+                if (!receipt.presented) return;
                 void refreshNationalInterrogation(receipt);
                 radarSessionCoordinatorRef.current!.synchronizePaint({
                   source: { kind: "national", domain: "conus" },
@@ -2135,6 +2254,7 @@ export function App() {
         // Packaged gates reuse the normal WebView profile. Supersede and await
         // any persisted-site startup request before restoring the measured
         // archive loop, so live publication cannot overlap gate measurements.
+        if (nationalResident) teardownNational();
         livePollingSession += 1;
         const minimumGeneration = Math.max(
           transferGeneration + 1,
@@ -2202,6 +2322,7 @@ export function App() {
           if (!client || !layer || !prepareArchiveForDiagnostics) {
             throw new Error("National Phase 2 diagnostic is unavailable");
           }
+          if (nationalResident) teardownNational();
           livePollingSession += 1;
           const minimumGeneration = Math.max(
             transferGeneration + 1,
@@ -2392,45 +2513,37 @@ export function App() {
           ?? Promise.reject(new Error("National session is unavailable")),
         startSite: (site = "KTLX") => siteLevel2Session?.start(normalizeRadarSite(site))
           ?? Promise.reject(new Error("Site session is unavailable")),
-        async proveFailedSiteRestoresNational(site = "KTLX") {
+        async proveFailedSiteKeepsNational(site = "KTLX") {
           if (!client || !siteLevel2Session || !nationalLayer || !nationalPlaybackController) {
-            throw new Error("National failed-Site recovery diagnostic is unavailable");
+            throw new Error("National failed-Site diagnostic is unavailable");
           }
           const before = radarSessionCoordinatorRef.current!.snapshot();
           const rendererBeforeFailure = nationalLayer.getSnapshot();
           const backfillStartCountBefore = nationalBackfillStartCount;
           if (before.transition || before.painted?.source.kind !== "national") {
-            throw new Error("National must be the settled painted source before recovery proof");
+            throw new Error("National must be the settled painted source before the failed-Site proof");
           }
           await nationalPlaybackController.play();
           const playbackBeforeFailure = nationalPlaybackController.snapshot();
           if (!playbackBeforeFailure.playing) {
-            throw new Error("National playback did not start before failed-Site recovery proof");
+            throw new Error("National playback did not start before the failed-Site proof");
           }
           failNextSiteFromNationalForDiagnostics = true;
-          resetNextNationalAfterRendererFinalizeForDiagnostics = true;
           let failureMessage = "";
           try {
             await siteLevel2Session.start(normalizeRadarSite(site), { persistOnPaint: false });
             throw new Error("diagnostic Site transition unexpectedly succeeded");
           } catch (error) {
             failureMessage = error instanceof Error ? error.message : String(error);
-            if (failureMessage !== "diagnostic Site transition failure after National cancellation") {
+            if (failureMessage !== "diagnostic Site transition failure after the Site lane began") {
               throw error;
             }
           } finally {
             failNextSiteFromNationalForDiagnostics = false;
           }
           const restoration = lastNationalRestorationAfterSiteFailure;
-          if (!restoration) {
-            resetNextNationalAfterRendererFinalizeForDiagnostics = false;
-            throw new Error("failed Site transition did not restart National");
-          }
-          try {
-            await restoration;
-          } finally {
-            resetNextNationalAfterRendererFinalizeForDiagnostics = false;
-          }
+          if (!restoration) throw new Error("failed Site transition did not settle National");
+          await restoration;
           return {
             failureMessage,
             before,
@@ -2443,6 +2556,53 @@ export function App() {
             playbackBeforeFailure,
             playbackAfterRestoration: nationalPlaybackController?.snapshot() ?? null,
             rendererBeforeFailure,
+          };
+        },
+        async proveResidentHandoff(site = "KTLX") {
+          if (!client || !siteLevel2Session || !nationalMrmsSession || !nationalLayer) {
+            throw new Error("National resident handoff diagnostic is unavailable");
+          }
+          const before = radarSessionCoordinatorRef.current!.snapshot();
+          if (before.transition || before.painted?.source.kind !== "national") {
+            throw new Error("National must be the settled painted source before the handoff proof");
+          }
+          const nationalGenerationBefore = nationalGeneration;
+          const backfillStartCountBefore = nationalBackfillStartCount;
+          const retainedBefore = latestNationalHistory?.retained.length ?? 0;
+          await siteLevel2Session.start(normalizeRadarSite(site), { persistOnPaint: false });
+          const whileSite = {
+            sourceState: radarSessionCoordinatorRef.current!.snapshot(),
+            renderer: nationalLayer?.getSnapshot() ?? null,
+            transfer: await client.transferSnapshot(),
+            resident: nationalResident,
+          };
+          const release = await acquireNationalResidentOnlyActivity();
+          let reveal;
+          try {
+            const activityBefore = await client.nationalHistoryActivitySnapshot();
+            const started = performance.now();
+            await nationalMrmsSession.start();
+            const revealMs = performance.now() - started;
+            reveal = {
+              activityBefore,
+              activityAfter: await client.nationalHistoryActivitySnapshot(),
+              revealMs,
+            };
+          } finally {
+            release();
+          }
+          return {
+            before,
+            nationalGenerationBefore,
+            backfillStartCountBefore,
+            retainedBefore,
+            whileSite,
+            reveal,
+            after: radarSessionCoordinatorRef.current!.snapshot(),
+            renderer: nationalLayer?.getSnapshot() ?? null,
+            history: latestNationalHistory,
+            backfillStartCountAfter: nationalBackfillStartCount,
+            siteLayerRemoved: !instance.getLayer(DIAGNOSTIC_LAYER_IDS.radar),
           };
         },
         async waitForHistory(frameCount = MAX_LIVE_HISTORY_FRAMES, timeoutMs = 300_000) {
@@ -3395,6 +3555,29 @@ export interface NationalPhase4FailedSiteRecoveryReport {
   rendererBeforeFailure: NationalGridRendererSnapshot;
 }
 
+export interface NationalPhase4ResidentHandoffReport {
+  before: RadarSessionSnapshot;
+  nationalGenerationBefore: number;
+  backfillStartCountBefore: number;
+  retainedBefore: number;
+  whileSite: {
+    sourceState: RadarSessionSnapshot;
+    renderer: NationalGridRendererSnapshot | null;
+    transfer: import("./packed-sweep/transferClient").TransferSnapshot;
+    resident: boolean;
+  };
+  reveal: {
+    activityBefore: NationalHistoryActivitySnapshot;
+    activityAfter: NationalHistoryActivitySnapshot;
+    revealMs: number;
+  } | undefined;
+  after: RadarSessionSnapshot;
+  renderer: NationalGridRendererSnapshot | null;
+  history: NationalHistorySnapshot | null;
+  backfillStartCountAfter: number;
+  siteLayerRemoved: boolean;
+}
+
 type Phase4State =
   | { kind: "idle" }
   | { kind: "running"; stage: string }
@@ -3680,7 +3863,8 @@ declare global {
     report(): NationalPhase4Report;
     startNational(): Promise<NationalPhase3Report>;
     startSite(site?: string): Promise<Phase5Report>;
-    proveFailedSiteRestoresNational(site?: string): Promise<NationalPhase4FailedSiteRecoveryReport>;
+    proveFailedSiteKeepsNational(site?: string): Promise<NationalPhase4FailedSiteRecoveryReport>;
+    proveResidentHandoff(site?: string): Promise<NationalPhase4ResidentHandoffReport>;
     waitForHistory(frameCount?: number, timeoutMs?: number): Promise<NationalPhase4Report>;
     beginResidentEvidence(): Promise<void>;
     endResidentEvidence(): void;
