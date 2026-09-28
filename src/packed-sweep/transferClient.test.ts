@@ -30,14 +30,21 @@ function fixtureBuffer(path: URL): ArrayBuffer {
 }
 
 function snapshot(generation: number, heldCredits = 0, session = 1): TransferSnapshot {
-  return {
-    session,
+  // The fake backend reports the same generation on both lanes; the client
+  // only validates the lane it began.
+  const lane = {
     generation,
     active: generation !== 0,
     availableCredits: generation === 0 ? 0 : 2 - heldCredits,
     heldCredits,
     inFlightCredits: 0,
+  };
+  return {
+    session,
+    heldCredits,
+    inFlightCredits: 0,
     creditLimit: 2,
+    lanes: { site: { ...lane }, national: { ...lane } },
   };
 }
 
@@ -68,7 +75,7 @@ describe("PackedSweepTransferClient", () => {
     };
     const client = new PackedSweepTransferClient(invoke);
     await client.open();
-    await client.begin(7);
+    await client.begin("national", 7);
     const observation = {
       generation: 7, objectKey: "CONUS/MergedBaseReflectivityQC_00.50/20260803/MRMS_MergedBaseReflectivityQC_00.50_20260803-162812.grib2.gz",
       observationTimeUnixMs: 1_785_775_692_000, contentSha256: "ab".repeat(32),
@@ -103,6 +110,48 @@ describe("PackedSweepTransferClient", () => {
     expect(released).toEqual([1]);
   });
 
+  it("keeps an in-flight National response current while the Site lane begins", async () => {
+    let resolveManifest: ((buffer: ArrayBuffer) => void) | undefined;
+    const invoke: InvokeFunction = async <T>(command: string, arguments_?: Record<string, unknown>) => {
+      if (command === "open_phase2_transfer_session") return snapshot(0) as T;
+      if (command === "begin_phase2_generation") return snapshot(arguments_?.generation as number) as T;
+      if (command === "release_phase2_transfer_credit") return snapshot(8) as T;
+      if (command === "request_national_packed_grid_manifest") {
+        return new Promise<ArrayBuffer>((resolve) => { resolveManifest = resolve; }) as T;
+      }
+      throw new Error(`unexpected command ${command}`);
+    };
+    const client = new PackedSweepTransferClient(invoke);
+    await client.open();
+    await client.begin("national", 7);
+    const pending = client.requestNationalManifest();
+    await Promise.resolve();
+    await client.begin("site", 8);
+    resolveManifest?.(fixtureBuffer(NATIONAL_MANIFEST_PATH));
+    const manifest = await pending;
+    expect(manifest.packed.generation).toBe(7n);
+    expect(client.isActive("national")).toBe(true);
+    expect(client.isActive("site")).toBe(true);
+    await manifest.release();
+  });
+
+  it("keeps generations unique across lanes", async () => {
+    const invoke: InvokeFunction = async <T>(command: string, arguments_?: Record<string, unknown>) => {
+      if (command === "open_phase2_transfer_session") return snapshot(0) as T;
+      if (command === "begin_phase2_generation") return snapshot(arguments_?.generation as number) as T;
+      if (command === "cancel_phase2_generation") return snapshot(arguments_?.generation as number) as T;
+      throw new Error(`unexpected command ${command}`);
+    };
+    const client = new PackedSweepTransferClient(invoke);
+    await client.open();
+    await client.begin("national", 7);
+    await expect(client.begin("site", 7)).rejects.toMatchObject({ code: "invalid_generation" });
+    await client.begin("site", 8);
+    await expect(client.cancel("site")).resolves.toBeDefined();
+    expect(client.isActive("site")).toBe(false);
+    expect(client.isActive("national")).toBe(true);
+  });
+
   it("uses the existing leased-credit path for National manifests and chunks", async () => {
     const requests: Array<[string, Record<string, unknown> | undefined]> = [];
     let releases = 0;
@@ -125,7 +174,7 @@ describe("PackedSweepTransferClient", () => {
     };
     const client = new PackedSweepTransferClient(invoke);
     await client.open();
-    await client.begin(7);
+    await client.begin("national", 7);
     const manifest = await client.requestNationalManifest();
     expect(manifest.wireBytes).toBe(readFileSync(NATIONAL_MANIFEST_PATH).byteLength);
     expect(releases).toBe(0);
@@ -205,7 +254,7 @@ describe("PackedSweepTransferClient", () => {
     };
     const client = new PackedSweepTransferClient(invoke);
     await client.open();
-    await client.begin(7);
+    await client.begin("national", 7);
 
     await client.commitNationalHistoryFrame(observation);
     await client.finalizeNationalHistoryFrame(observation);
@@ -273,7 +322,7 @@ describe("PackedSweepTransferClient", () => {
     };
     const client = new PackedSweepTransferClient(invoke);
     await client.open();
-    await client.begin(7);
+    await client.begin("national", 7);
 
     await expect(client.prepareNationalHistoryPredecessor()).resolves.toMatchObject({
       reused: true,
@@ -323,7 +372,7 @@ describe("PackedSweepTransferClient", () => {
     };
     const client = new PackedSweepTransferClient(invoke);
     await client.open();
-    await client.begin(7);
+    await client.begin("national", 7);
 
     await expect(client.commitNationalHistoryFrame(observation)).rejects.toMatchObject({
       code: "invoke_failed",
@@ -346,7 +395,7 @@ describe("PackedSweepTransferClient", () => {
     };
     const client = new PackedSweepTransferClient(invoke);
     await client.open();
-    await client.begin(7);
+    await client.begin("national", 7);
     await expect(client.requestNationalChunk(0)).rejects.toMatchObject({ code: "hash_mismatch" });
     expect(releases).toBe(1);
   });
@@ -378,10 +427,10 @@ describe("PackedSweepTransferClient", () => {
     };
     const client = new PackedSweepTransferClient(invoke);
     await client.open();
-    await client.begin(12);
+    await client.begin("national", 12);
     // Simulate a failed Site transition advancing transfer generation while
     // the prior National observation remains the authoritative paint.
-    await client.begin(13);
+    await client.begin("national", 13);
     const lookup = await client.lookupNationalPoint({
       generation: 12,
       observationTimeUnixMs: 1_785_775_692_000,
@@ -441,7 +490,7 @@ describe("PackedSweepTransferClient", () => {
     };
     const client = new PackedSweepTransferClient(invoke);
     await client.open();
-    await client.begin(2);
+    await client.begin("national", 2);
     await expect(client.lookupNationalPoint({
       generation: 2,
       observationTimeUnixMs: 1_785_775_692_000,
@@ -466,7 +515,7 @@ describe("PackedSweepTransferClient", () => {
     };
     const client = new PackedSweepTransferClient(invoke);
     await client.open();
-    await client.begin(7);
+    await client.begin("site", 7);
     const lease = await client.requestPhase5Live("KTLX", true, 120);
     expect(requests).toEqual([{
       session: 1,
@@ -541,7 +590,7 @@ describe("PackedSweepTransferClient", () => {
     };
     const client = new PackedSweepTransferClient(invoke);
     await client.open();
-    await client.begin(7);
+    await client.begin("site", 7);
     const lease = await client.requestPhase3Fixture();
     expect(requests).toEqual([{ session: 1, generation: 7 }]);
     await lease.release();
@@ -561,7 +610,7 @@ describe("PackedSweepTransferClient", () => {
     };
     const client = new PackedSweepTransferClient(invoke);
     await client.open();
-    await client.begin(7);
+    await client.begin("site", 7);
     const lease = await client.requestPhase4Fixture("ktlx-2024-05-20-230512-v06");
     expect(requests).toEqual([{
       session: 1,
@@ -591,11 +640,11 @@ describe("PackedSweepTransferClient", () => {
     };
     const client = new PackedSweepTransferClient(invoke);
     await client.open();
-    await client.begin(7);
+    await client.begin("site", 7);
     const lease = await client.request();
     expect(lease.packed.metadata.generation).toBe(7n);
     expect(calls).not.toContain("release_phase2_transfer_credit");
-    await client.begin(8);
+    await client.begin("site", 8);
     await lease.release();
     await lease.release();
     expect(calls.filter((call) => call === "release_phase2_transfer_credit")).toHaveLength(1);
@@ -622,9 +671,9 @@ describe("PackedSweepTransferClient", () => {
     };
     const client = new PackedSweepTransferClient(invoke);
     await client.open();
-    await client.begin(7);
+    await client.begin("site", 7);
     const pending = client.request();
-    await client.begin(8);
+    await client.begin("site", 8);
     resolveRequest?.(goldenBuffer());
     await expect(pending).rejects.toMatchObject({ code: "stale_response" });
     expect(releasedGenerations).toEqual([7]);
@@ -645,19 +694,23 @@ describe("PackedSweepTransferClient", () => {
         return snapshot(8) as T;
       }
       if (command === "cancel_phase2_generation" && generation === 8) {
-        return { ...snapshot(8), active: false, availableCredits: 0 } as T;
+        const cancelled = snapshot(8);
+        cancelled.lanes.site = { ...cancelled.lanes.site, active: false, availableCredits: 0 };
+        return cancelled as T;
       }
       throw new Error(`unexpected command ${command}`);
     };
 
     const client = new PackedSweepTransferClient(invoke);
     await client.open();
-    const older = client.begin(7);
+    const older = client.begin("site", 7);
     const olderAssertion = expect(older).rejects.toThrow("older begin failed");
-    await client.begin(8);
+    await client.begin("site", 8);
     rejectOlder?.(new Error("older begin failed"));
     await olderAssertion;
-    await expect(client.cancel()).resolves.toMatchObject({ generation: 8 });
+    await expect(client.cancel("site")).resolves.toMatchObject({
+      lanes: { site: { generation: 8, active: false } },
+    });
   });
 
   it("requires a real raw ArrayBuffer response", async () => {
@@ -670,7 +723,7 @@ describe("PackedSweepTransferClient", () => {
     };
     const client = new PackedSweepTransferClient(invoke);
     await client.open();
-    await client.begin(7);
+    await client.begin("site", 7);
     await expect(client.request()).rejects.toMatchObject({ code: "invalid_raw_response" });
   });
 
@@ -682,7 +735,7 @@ describe("PackedSweepTransferClient", () => {
     };
     const client = new PackedSweepTransferClient(invoke);
     await client.open();
-    await client.begin(7);
+    await client.begin("site", 7);
     await expect(client.request()).rejects.toMatchObject({
       code: "credit_exhausted",
       message: "both credits held",
@@ -707,7 +760,7 @@ describe("PackedSweepTransferClient", () => {
     };
     const client = new PackedSweepTransferClient(invoke);
     await client.open();
-    await client.begin(7);
+    await client.begin("site", 7);
     const lease = await client.request();
     await expect(lease.release()).rejects.toThrow("temporary acknowledgement failure");
     await expect(lease.release()).resolves.toBeUndefined();
@@ -734,9 +787,9 @@ describe("PackedSweepTransferClient", () => {
     };
     const client = new PackedSweepTransferClient(invoke);
     await client.open();
-    await client.begin(7);
+    await client.begin("site", 7);
     await expect(client.request()).rejects.toMatchObject({ code: "invalid_raw_response" });
-    await client.begin(8);
+    await client.begin("site", 8);
     expect(releaseAttempts).toBe(4);
   });
 
@@ -745,7 +798,7 @@ describe("PackedSweepTransferClient", () => {
       (command === "open_phase2_transfer_session" ? snapshot(0) : snapshot(7)) as T;
     const client = new PackedSweepTransferClient(invoke);
     await client.open();
-    await client.begin(7);
-    await expect(client.begin(7)).rejects.toBeInstanceOf(TransferClientError);
+    await client.begin("site", 7);
+    await expect(client.begin("site", 7)).rejects.toBeInstanceOf(TransferClientError);
   });
 });

@@ -98,4 +98,61 @@ describe("NationalMrmsSession", () => {
     expect(coordinator.snapshot().painted).toBeUndefined();
     expect(failed).not.toHaveBeenCalled();
   });
+
+  it("reveals a resident National history under its original generation", async () => {
+    const coordinator = new RadarSessionCoordinator();
+    coordinator.establishPaintedSource({
+      source: { kind: "national", domain: "conus" },
+      generation: 3,
+      observationId: "national-newest",
+    });
+    coordinator.establishPaintedSource({
+      source: siteRadarSource("KTLX"),
+      generation: 9,
+      observationId: "site-current",
+    });
+    const modes: string[] = [];
+    const session = new NationalMrmsSession({
+      coordinator,
+      nextGeneration: () => 10,
+      residentGeneration: () => 3,
+      async acquireAndPaint(generation, mode) {
+        modes.push(`${mode}:${generation}`);
+        return {
+          value: "revealed",
+          paint: { source: { kind: "national", domain: "conus" }, generation, observationId: "national-newest" },
+        };
+      },
+    });
+    await expect(session.start()).resolves.toBe("revealed");
+    expect(modes).toEqual(["reveal:3"]);
+    expect(coordinator.snapshot().painted).toMatchObject({ generation: 3, source: { kind: "national" } });
+    // Later playback paints from the same history keep synchronizing.
+    expect(coordinator.synchronizePaint({
+      source: { kind: "national", domain: "conus" },
+      generation: 3,
+      observationId: "national-older",
+    })).toBe(true);
+    // A new Site request still gets a fresh, strictly newer generation.
+    expect(coordinator.beginTransition(siteRadarSource("KTLX"), 1).generation).toBe(10);
+  });
+
+  it("acquires normally when no National history is resident", async () => {
+    const coordinator = new RadarSessionCoordinator();
+    const modes: string[] = [];
+    const session = new NationalMrmsSession({
+      coordinator,
+      nextGeneration: () => 4,
+      residentGeneration: () => undefined,
+      async acquireAndPaint(generation, mode) {
+        modes.push(`${mode}:${generation}`);
+        return {
+          value: "acquired",
+          paint: { source: { kind: "national", domain: "conus" }, generation, observationId: "n" },
+        };
+      },
+    });
+    await session.start();
+    expect(modes).toEqual(["acquire:4"]);
+  });
 });

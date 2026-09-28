@@ -60,7 +60,7 @@ The latter two hosts are comparison observers only; they do not decide whether a
 | One assembled volume | 64 MiB |
 | Objects per volume | 256 |
 | S3/provider inventory body | 2 MiB / 8 MiB |
-| Concurrent packed transfers | 2 global credits |
+| Concurrent packed transfers | 2 credits per source lane ([32](32_SEAMLESS_RADAR_HANDOFF.md)) |
 | Complete packaged live request timeout | 10-900 seconds, including discovery and in-flight polling |
 
 ### State behavior

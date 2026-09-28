@@ -12,7 +12,7 @@ use crate::mrms::{
     MrmsValueEncoding, bounded_poll_delay, decode_mrms_gzip,
 };
 use crate::packed_grid::{MrmsNumericPyramid, PackedGridFrame};
-use crate::phase2_ipc::{TransferBroker, TransferError};
+use crate::phase2_ipc::{TransferBroker, TransferError, TransferLane};
 use chrono::Utc;
 use serde::Serialize;
 use std::collections::VecDeque;
@@ -688,7 +688,7 @@ pub async fn prepare_national_history_current(
     session: u64,
     generation: u64,
 ) -> Result<NationalHistoryPrepareReport, TransferError> {
-    let token = broker.live_generation_token(session, generation)?;
+    let token = broker.live_generation_token(session, TransferLane::National, generation)?;
     let client = MrmsClient::new().map_err(mrms_error)?;
     let discovery_started = Instant::now();
     let retained_limit = lock_store(&state)?.retained_limit;
@@ -728,7 +728,7 @@ pub async fn prepare_national_history_predecessor(
     session: u64,
     generation: u64,
 ) -> Result<Option<NationalHistoryPrepareReport>, TransferError> {
-    let token = broker.live_generation_token(session, generation)?;
+    let token = broker.live_generation_token(session, TransferLane::National, generation)?;
     let candidate = {
         let store = lock_store(&state)?;
         if let Some(frame) = store
@@ -794,7 +794,7 @@ pub async fn prepare_national_history_newer(
     session: u64,
     generation: u64,
 ) -> Result<NationalHistoryPrepareReport, TransferError> {
-    let token = broker.live_generation_token(session, generation)?;
+    let token = broker.live_generation_token(session, TransferLane::National, generation)?;
     let newest_time = {
         let store = lock_store(&state)?;
         if let Some(frame) =
@@ -851,7 +851,7 @@ pub fn commit_national_history_frame(
     content_sha256: String,
 ) -> Result<NationalHistoryCommitReport, TransferError> {
     broker
-        .live_generation_token(session, generation)?
+        .live_generation_token(session, TransferLane::National, generation)?
         .ensure_current()
         .map_err(stale_error)?;
     let mut store = lock_store(&state)?;
@@ -902,7 +902,7 @@ pub async fn prepare_national_history_presentation(
             "fine presentation factor must be 1 or 2",
         ));
     }
-    let token = broker.live_generation_token(session, generation)?;
+    let token = broker.live_generation_token(session, TransferLane::National, generation)?;
     let started = Instant::now();
     let (retained, cached_detail) = {
         let store = lock_store(&state)?;
@@ -1028,7 +1028,7 @@ pub fn request_national_history_manifest(
     content_sha256: String,
     presentation_factor: u16,
 ) -> Result<Response, TransferError> {
-    broker.acquire(session, generation)?;
+    broker.acquire(session, TransferLane::National, generation)?;
     let result = history_frame_bytes(
         &state,
         generation,
@@ -1052,7 +1052,7 @@ pub fn request_national_history_chunk(
     presentation_factor: u16,
     chunk_index: u32,
 ) -> Result<Response, TransferError> {
-    broker.acquire(session, generation)?;
+    broker.acquire(session, TransferLane::National, generation)?;
     let result = history_frame_bytes(
         &state,
         generation,
@@ -1089,7 +1089,7 @@ pub async fn request_national_history_chunk_batch(
     presentation_factor: u16,
     chunk_indices: Vec<u32>,
 ) -> Result<Response, TransferError> {
-    broker.acquire(session, generation)?;
+    broker.acquire(session, TransferLane::National, generation)?;
     let result = history_frame_bytes(
         &state,
         generation,
@@ -1507,11 +1507,11 @@ fn publish_history_bytes(
     let bytes = match bytes {
         Ok(bytes) => bytes,
         Err(error) => {
-            broker.finish_without_publish(session);
+            broker.finish_without_publish(session, TransferLane::National);
             return Err(error);
         }
     };
-    broker.complete_for_publish(session, generation)?;
+    broker.complete_for_publish(session, TransferLane::National, generation)?;
     if let Ok(mut store) = state.inner.lock() {
         store.activity.bulk_ipc_transfers = store.activity.bulk_ipc_transfers.saturating_add(1);
         store.activity.bulk_ipc_bytes = store

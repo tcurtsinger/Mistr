@@ -54,16 +54,30 @@ export class RadarSessionCoordinator {
   beginTransition(
     requestedSource: RadarSourceKey,
     minimumGeneration: number,
-    options: { readonly persistOnPaint?: boolean } = {},
+    options: {
+      readonly persistOnPaint?: boolean;
+      /**
+       * Reveal a source that stayed resident under an earlier generation. Its
+       * later paints carry that generation, so the transition must too.
+       */
+      readonly residentGeneration?: number;
+    } = {},
   ): RadarSourceTransition {
     assertSourceKey(requestedSource);
     assertGeneration(minimumGeneration);
-    this.generation = Math.max(this.generation + 1, minimumGeneration);
+    let generation: number;
+    if (options.residentGeneration === undefined) {
+      this.generation = Math.max(this.generation + 1, minimumGeneration);
+      generation = this.generation;
+    } else {
+      assertGeneration(options.residentGeneration);
+      generation = options.residentGeneration;
+    }
     this.transitionSequence += 1;
     this.transition = {
       id: this.transitionSequence,
       requestedSource: cloneSourceKey(requestedSource),
-      generation: this.generation,
+      generation,
       persistOnPaint: options.persistOnPaint ?? true,
     };
     this.lastFailure = undefined;

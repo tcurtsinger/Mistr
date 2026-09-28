@@ -231,6 +231,7 @@ function receipt(overrides: Partial<NationalPaintReceipt>): NationalPaintReceipt
     uploadedBytes: 3_000_000,
     framebufferWidth: 3840,
     framebufferHeight: 2160,
+    presented: true,
     ...overrides,
   };
 }

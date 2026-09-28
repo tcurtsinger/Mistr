@@ -151,12 +151,28 @@ export interface NationalPaintReceipt {
   uploadedBytes: number;
   framebufferWidth: number;
   framebufferHeight: number;
+  /**
+   * True only when this fence followed a visible draw. A resident (hidden)
+   * layer completes uploads on a fence but never claims a paint.
+   */
+  presented: boolean;
 }
 
+export type NationalLayerVisibility = "visible" | "resident";
+
 export interface NationalGridRendererSnapshot {
-  status: "initializing" | "ready" | "staging" | "painted" | "recovering" | "error" | "removed";
+  status:
+    | "initializing"
+    | "ready"
+    | "staging"
+    | "painted"
+    | "resident"
+    | "recovering"
+    | "error"
+    | "removed";
   displayMode: RadarDisplayMode;
   presentationEnabled: boolean;
+  visibility: NationalLayerVisibility;
   contextEpoch: number;
   generation?: number;
   observationId?: string;
@@ -180,6 +196,8 @@ export interface NationalGridRendererSnapshot {
   uploadBytes: number;
   maximumUploadSliceMs: number;
   paintReceipt?: NationalPaintReceipt;
+  /** Fence receipt for the settled hidden presentation; never a paint claim. */
+  residentReceipt?: NationalPaintReceipt;
   error?: string;
 }
 
@@ -239,12 +257,14 @@ interface PendingPaint {
   resources: PresentationResources;
   mutation: PendingResidencyMutation | null;
   drawSequence: number;
+  presented: boolean;
 }
 
 interface PaintWaiter {
   resolve(receipt: NationalPaintReceipt): void;
   reject(error: Error): void;
   timeout: ReturnType<typeof globalThis.setTimeout>;
+  requirePresented: boolean;
 }
 
 interface Uniforms {
@@ -287,6 +307,7 @@ export class NationalGridLayer implements CustomLayerInterface {
   private paintWaiter: PaintWaiter | null = null;
   private displayMode: RadarDisplayMode;
   private presentationEnabled = true;
+  private visibility: NationalLayerVisibility = "visible";
   private contextEpoch = 1;
   private drawSequence = 0;
   private status: NationalGridRendererSnapshot["status"] = "initializing";
@@ -296,6 +317,7 @@ export class NationalGridLayer implements CustomLayerInterface {
   private uploadBytes = 0;
   private maximumUploadSliceMs = 0;
   private paintReceipt: NationalPaintReceipt | undefined;
+  private residentReceipt: NationalPaintReceipt | undefined;
   private contextListenersAttached = false;
   private styleListenerAttached = false;
   private recovering = false;
@@ -352,6 +374,10 @@ export class NationalGridLayer implements CustomLayerInterface {
         this.map?.triggerRepaint();
         return;
       }
+      if (this.visibility === "resident") {
+        this.fenceResidentPresentation(gl, this.active);
+        return;
+      }
       const state = captureGlState(gl);
       try {
         gl.disable(gl.DEPTH_TEST);
@@ -388,6 +414,7 @@ export class NationalGridLayer implements CustomLayerInterface {
             resources: this.active,
             mutation: this.pendingResidencyMutation,
             drawSequence: this.drawSequence,
+            presented: true,
           };
           gl.flush();
           this.map?.triggerRepaint();
@@ -578,7 +605,7 @@ export class NationalGridLayer implements CustomLayerInterface {
       }
     }
     this.awaitingExternalCommit = null;
-    this.paintReceipt = undefined;
+    this.clearReceipts();
     this.status = "ready";
     this.map?.triggerRepaint();
     this.emit();
@@ -632,6 +659,9 @@ export class NationalGridLayer implements CustomLayerInterface {
     observationId: string,
     presentationFactor = this.playbackQualityFactor ?? 4,
   ): Promise<NationalPaintReceipt> {
+    if (this.visibility === "resident") {
+      return Promise.reject(new Error("National renderer is hidden; reveal it before selecting a frame"));
+    }
     if (
       this.recovering
       || this.paintWaiter
@@ -653,7 +683,7 @@ export class NationalGridLayer implements CustomLayerInterface {
     this.fallback = presentationFactor === 4
       ? null
       : this.presentationFor(observationId, 4);
-    this.paintReceipt = undefined;
+    this.clearReceipts();
     this.status = "ready";
     this.pendingResidencyMutation = {
       previous,
@@ -757,9 +787,9 @@ export class NationalGridLayer implements CustomLayerInterface {
     const started = performance.now();
     while (true) {
       const snapshot = this.getSnapshot();
-      const receipt = snapshot.paintReceipt;
+      const receipt = snapshot.status === "resident" ? snapshot.residentReceipt : snapshot.paintReceipt;
       if (
-        snapshot.status === "painted"
+        (snapshot.status === "painted" || snapshot.status === "resident")
         && !snapshot.mutationAwaitingCommit
         && receipt
         && sameNationalPresentationReceipt(receipt, expected)
@@ -812,6 +842,42 @@ export class NationalGridLayer implements CustomLayerInterface {
     this.emit();
   }
 
+  /**
+   * Resident keeps every frame on the GPU and lets history commits complete
+   * on fences, but draws nothing and never produces a paint receipt.
+   */
+  setVisibility(visibility: NationalLayerVisibility): void {
+    if (visibility !== "visible" && visibility !== "resident") {
+      throw new Error("National visibility must be visible or resident");
+    }
+    if (visibility === this.visibility) return;
+    this.visibility = visibility;
+    this.clearReceipts();
+    if (this.status === "painted" || this.status === "resident") this.status = "ready";
+    this.map?.triggerRepaint();
+    this.emit();
+  }
+
+  /**
+   * Shows the resident presentation and resolves only after a real draw
+   * completes. A hidden history commit already in progress finishes first.
+   */
+  async revealAndWait(timeoutMs = PAINT_TIMEOUT_MS): Promise<NationalPaintReceipt> {
+    const started = performance.now();
+    while (this.paintWaiter || this.pendingResidencyMutation || this.awaitingExternalCommit) {
+      if (this.status === "error" || this.status === "removed") {
+        throw new Error(this.runtimeError ?? "National renderer cannot reveal its resident history");
+      }
+      if (performance.now() - started > timeoutMs) {
+        throw new Error("National renderer stayed busy with a history commit; reveal timed out");
+      }
+      await nextAnimationFrame();
+    }
+    if (!this.active) throw new Error("National renderer has no resident observation to reveal");
+    this.setVisibility("visible");
+    return this.waitForCommittedPaint(timeoutMs, "National reveal paint timed out", true);
+  }
+
   getSnapshot(): NationalGridRendererSnapshot {
     const identity = this.active ? nationalObservationIdentity(this.active.manifest) : undefined;
     const residentObservationIds = this.timelineObservationIds.filter((observationId) => (
@@ -830,6 +896,7 @@ export class NationalGridLayer implements CustomLayerInterface {
       status: this.status,
       displayMode: this.displayMode,
       presentationEnabled: this.presentationEnabled,
+      visibility: this.visibility,
       contextEpoch: this.contextEpoch,
       generation: identity?.generation,
       observationId: identity?.observationId,
@@ -858,6 +925,7 @@ export class NationalGridLayer implements CustomLayerInterface {
       uploadBytes: this.uploadBytes,
       maximumUploadSliceMs: this.maximumUploadSliceMs,
       paintReceipt: this.paintReceipt,
+      residentReceipt: this.residentReceipt,
       error: this.runtimeError,
     };
   }
@@ -879,13 +947,13 @@ export class NationalGridLayer implements CustomLayerInterface {
 
   private waitForNextPaint(): Promise<NationalPaintReceipt> {
     if (this.paintWaiter) throw new Error("a National paint waiter is already active");
-    this.paintReceipt = undefined;
+    this.clearReceipts();
     return new Promise((resolve, reject) => {
       const timeout = globalThis.setTimeout(() => {
         if (this.paintWaiter?.timeout === timeout) this.paintWaiter = null;
         reject(new Error("National recovery paint receipt timed out"));
       }, RECOVERY_PAINT_TIMEOUT_MS);
-      this.paintWaiter = { resolve, reject, timeout };
+      this.paintWaiter = { resolve, reject, timeout, requirePresented: true };
     });
   }
 
@@ -997,9 +1065,21 @@ export class NationalGridLayer implements CustomLayerInterface {
       uploadedBytes: pending.resources.uploadedBytes,
       framebufferWidth: gl.drawingBufferWidth,
       framebufferHeight: gl.drawingBufferHeight,
+      // A draw that completes after a hide no longer describes the screen.
+      presented: pending.presented && this.visibility === "visible",
     };
-    this.paintReceipt = receipt;
-    this.status = "painted";
+    if (receipt.presented) {
+      this.paintReceipt = receipt;
+      this.status = "painted";
+    } else if (this.visibility === "resident") {
+      this.residentReceipt = receipt;
+      this.status = "resident";
+    } else {
+      // A hidden fence finished after reveal: residency is complete, but the
+      // visible draw and its paint receipt still follow on the next frame.
+      this.status = "ready";
+      this.map?.triggerRepaint();
+    }
     this.recovering = false;
     if (pending.mutation) {
       if (pending.mutation.deferExternalCommit) {
@@ -1012,12 +1092,38 @@ export class NationalGridLayer implements CustomLayerInterface {
     }
     this.pendingResidencyMutation = null;
     const waiter = this.paintWaiter;
-    this.paintWaiter = null;
-    if (waiter) {
+    if (waiter && (receipt.presented || !waiter.requirePresented)) {
+      this.paintWaiter = null;
       globalThis.clearTimeout(waiter.timeout);
       waiter.resolve(receipt);
     }
     this.emit();
+  }
+
+  private fenceResidentPresentation(gl: WebGL2RenderingContext, active: PresentationResources) {
+    if (this.fallback && !presentationIsResident(this.fallback)) {
+      this.map?.triggerRepaint();
+      return;
+    }
+    if (this.pendingPaint || receiptMatches(this.residentReceipt, active, this.contextEpoch)) return;
+    // Hidden uploads and residency mutations still complete on a GPU fence,
+    // without drawing anything that could be mistaken for a displayed frame.
+    const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+    if (!sync) throw new Error("National renderer could not allocate a GPU completion fence");
+    this.pendingPaint = {
+      sync,
+      resources: active,
+      mutation: this.pendingResidencyMutation,
+      drawSequence: this.drawSequence,
+      presented: false,
+    };
+    gl.flush();
+    this.map?.triggerRepaint();
+  }
+
+  private clearReceipts() {
+    this.paintReceipt = undefined;
+    this.residentReceipt = undefined;
   }
 
   private requireStagingForChunk(chunk: PackedGridChunk): PresentationResources {
@@ -1085,7 +1191,7 @@ export class NationalGridLayer implements CustomLayerInterface {
       ? null
       : presentationFromResidents(residents, selectedObservationId, 4);
     this.staging = null;
-    this.paintReceipt = undefined;
+    this.clearReceipts();
     this.status = "ready";
     this.pendingPaint = null;
     this.pendingResidencyMutation = {
@@ -1177,7 +1283,11 @@ export class NationalGridLayer implements CustomLayerInterface {
     return pending;
   }
 
-  private waitForCommittedPaint(timeoutMs: number, message: string): Promise<NationalPaintReceipt> {
+  private waitForCommittedPaint(
+    timeoutMs: number,
+    message: string,
+    requirePresented = false,
+  ): Promise<NationalPaintReceipt> {
     return new Promise((resolve, reject) => {
       const timeout = globalThis.setTimeout(() => {
         if (this.paintWaiter?.timeout !== timeout) return;
@@ -1189,7 +1299,7 @@ export class NationalGridLayer implements CustomLayerInterface {
         this.rollbackResidencyMutation(this.pendingResidencyMutation, new Error(message));
         reject(new Error(message));
       }, timeoutMs);
-      this.paintWaiter = { resolve, reject, timeout };
+      this.paintWaiter = { resolve, reject, timeout, requirePresented };
     });
   }
 
@@ -1231,7 +1341,7 @@ export class NationalGridLayer implements CustomLayerInterface {
       ...(this.fallback ? [this.fallback] : []),
       ...this.allResidentPresentations(),
     ]);
-    this.paintReceipt = undefined;
+    this.clearReceipts();
     void (async () => {
       for (const presentation of presentations) {
         for (const resource of presentation.chunks.values()) {
@@ -1307,7 +1417,7 @@ export class NationalGridLayer implements CustomLayerInterface {
       }
     }
     this.pendingResidencyMutation = null;
-    this.paintReceipt = undefined;
+    this.clearReceipts();
     const waiter = this.paintWaiter;
     this.paintWaiter = null;
     if (waiter) {
@@ -1337,7 +1447,7 @@ export class NationalGridLayer implements CustomLayerInterface {
     this.awaitingExternalCommit = null;
     this.contextEpoch += 1;
     this.status = "recovering";
-    this.paintReceipt = undefined;
+    this.clearReceipts();
     this.rollbackStaging();
     this.runtimeError = undefined;
   }

@@ -15,6 +15,8 @@ use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 use tauri::ipc::Response;
 
+/// Credits per lane. Site and National each own a pool, so a Site long poll
+/// can never starve National's two-request pipeline, or the reverse.
 pub const TRANSFER_CREDIT_LIMIT: u8 = 2;
 const MAX_BENCHMARK_ITERATIONS: u8 = 20;
 const MAX_DIAGNOSTIC_HOLD_MS: u64 = 2_000;
@@ -41,16 +43,76 @@ impl TransferError {
     }
 }
 
+/// Each radar source owns an independent generation and credit pool, so one
+/// source can keep acquiring while the other is displayed or superseded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TransferLane {
+    Site,
+    National,
+}
+
+impl TransferLane {
+    const ALL: [Self; 2] = [Self::Site, Self::National];
+
+    fn index(self) -> usize {
+        match self {
+            Self::Site => 0,
+            Self::National => 1,
+        }
+    }
+}
+
+impl std::fmt::Display for TransferLane {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Site => "Site",
+            Self::National => "National",
+        })
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct TransferSnapshot {
-    pub session: u64,
+pub struct LaneSnapshot {
     pub generation: u64,
     pub active: bool,
     pub available_credits: u8,
     pub held_credits: u8,
     pub in_flight_credits: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct LaneSnapshots {
+    pub site: LaneSnapshot,
+    pub national: LaneSnapshot,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferSnapshot {
+    pub session: u64,
+    /// Totals across both lanes.
+    pub held_credits: u8,
+    pub in_flight_credits: u8,
+    /// Per-lane limit.
     pub credit_limit: u8,
+    pub lanes: LaneSnapshots,
+}
+
+#[derive(Debug, Default)]
+struct LaneState {
+    generation: u64,
+    active: bool,
+    token: Option<GenerationToken>,
+}
+
+impl LaneState {
+    fn cancel_token(&mut self) {
+        if let Some(token) = self.token.take() {
+            token.cancel();
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -58,31 +120,44 @@ struct TransferState {
     document_epoch: u64,
     session: u64,
     session_document_epoch: u64,
-    generation: u64,
-    active: bool,
-    held_credits_by_owner: BTreeMap<(u64, u64), u8>,
+    // Generations stay unique across lanes, so a release can find its lane
+    // from (session, generation) alone.
+    max_generation: u64,
+    lanes: [LaneState; 2],
+    held_credits_by_owner: BTreeMap<(u64, TransferLane, u64), u8>,
     // Retain every acknowledgement for the lifetime of its frontend session.
     // A control response can be lost for arbitrarily long, so evicting an ID
     // would let its eventual retry release a newer credit from the same owner.
     acknowledged_release_ids: BTreeSet<String>,
-    in_flight_credits_by_session: BTreeMap<u64, u8>,
+    in_flight_credits_by_owner: BTreeMap<(u64, TransferLane), u8>,
     phase4_activity: Phase4ActivitySnapshot,
-    live_generation_token: Option<GenerationToken>,
     phase5_evidence_by_observation: BTreeMap<String, Phase5LiveTransferEvidence>,
+}
+
+impl TransferState {
+    fn lane(&self, lane: TransferLane) -> &LaneState {
+        &self.lanes[lane.index()]
+    }
+
+    fn lane_mut(&mut self, lane: TransferLane) -> &mut LaneState {
+        &mut self.lanes[lane.index()]
+    }
 }
 
 #[derive(Debug)]
 struct InFlightCreditGuard {
     broker: TransferBroker,
     session: u64,
+    lane: TransferLane,
     armed: bool,
 }
 
 impl InFlightCreditGuard {
-    fn new(broker: TransferBroker, session: u64) -> Self {
+    fn new(broker: TransferBroker, session: u64, lane: TransferLane) -> Self {
         Self {
             broker,
             session,
+            lane,
             armed: true,
         }
     }
@@ -94,9 +169,10 @@ impl InFlightCreditGuard {
     ) -> Result<(), TransferError> {
         let broker = self.broker.clone();
         let mut state = broker.lock()?;
-        let credits_before = in_flight_credit_count_for_session(&state, self.session);
-        let completion = complete_for_publish_locked(&mut state, self.session, generation);
-        let credits_after = in_flight_credit_count_for_session(&state, self.session);
+        let credits_before = in_flight_credit_count_for_owner(&state, self.session, self.lane);
+        let completion =
+            complete_for_publish_locked(&mut state, self.session, self.lane, generation);
+        let credits_after = in_flight_credit_count_for_owner(&state, self.session, self.lane);
         if credits_after < credits_before {
             self.armed = false;
         }
@@ -111,7 +187,7 @@ impl InFlightCreditGuard {
 impl Drop for InFlightCreditGuard {
     fn drop(&mut self) {
         if self.armed {
-            self.broker.finish_without_publish(self.session);
+            self.broker.finish_without_publish(self.session, self.lane);
         }
     }
 }
@@ -204,16 +280,17 @@ impl TransferBroker {
                 "the current document still owns transfer credits; only a native page-load epoch can reclaim them",
             ));
         }
-        if let Some(token) = state.live_generation_token.take() {
-            token.cancel();
+        for lane in &mut state.lanes {
+            lane.cancel_token();
+            lane.generation = 0;
+            lane.active = false;
         }
         state.phase5_evidence_by_observation.clear();
         state.session = state.session.checked_add(1).ok_or_else(|| {
             TransferError::new("session_exhausted", "frontend session counter exhausted")
         })?;
         state.session_document_epoch = state.document_epoch;
-        state.generation = 0;
-        state.active = false;
+        state.max_generation = 0;
         state.acknowledged_release_ids.clear();
         Ok(snapshot(&state))
     }
@@ -227,9 +304,9 @@ impl TransferBroker {
             )
         })?;
         state.session_document_epoch = 0;
-        state.active = false;
-        if let Some(token) = state.live_generation_token.take() {
-            token.cancel();
+        for lane in &mut state.lanes {
+            lane.active = false;
+            lane.cancel_token();
         }
         state.phase5_evidence_by_observation.clear();
         // Tauri's native page-load start proves the previous JavaScript
@@ -240,7 +317,12 @@ impl TransferBroker {
         Ok(())
     }
 
-    fn begin(&self, session: u64, generation: u64) -> Result<TransferSnapshot, TransferError> {
+    fn begin(
+        &self,
+        session: u64,
+        lane: TransferLane,
+        generation: u64,
+    ) -> Result<TransferSnapshot, TransferError> {
         if generation == 0 {
             return Err(TransferError::new(
                 "invalid_generation",
@@ -249,56 +331,67 @@ impl TransferBroker {
         }
         let mut state = self.lock()?;
         ensure_session(&state, session)?;
-        if generation <= state.generation {
+        if generation <= state.max_generation {
             return Err(TransferError::new(
                 "stale_generation",
                 format!(
                     "generation {generation} is not newer than {}",
-                    state.generation
+                    state.max_generation
                 ),
             ));
-        }
-        if let Some(token) = state.live_generation_token.take() {
-            token.cancel();
         }
         let token = GenerationClock::default()
             .begin(generation)
             .map_err(|error| TransferError::new("generation_token_failed", error.to_string()))?;
-        state.generation = generation;
-        state.active = true;
-        state.live_generation_token = Some(token);
-        state.phase5_evidence_by_observation.clear();
-        Ok(snapshot(&state))
-    }
-
-    fn cancel(&self, session: u64, generation: u64) -> Result<TransferSnapshot, TransferError> {
-        let mut state = self.lock()?;
-        ensure_current(&state, session, generation)?;
-        state.active = false;
-        if let Some(token) = state.live_generation_token.take() {
-            token.cancel();
+        let lane_state = state.lane_mut(lane);
+        lane_state.cancel_token();
+        lane_state.generation = generation;
+        lane_state.active = true;
+        lane_state.token = Some(token);
+        state.max_generation = generation;
+        if lane == TransferLane::Site {
+            state.phase5_evidence_by_observation.clear();
         }
         Ok(snapshot(&state))
     }
 
-    pub(crate) fn acquire(&self, session: u64, generation: u64) -> Result<(), TransferError> {
+    fn cancel(
+        &self,
+        session: u64,
+        lane: TransferLane,
+        generation: u64,
+    ) -> Result<TransferSnapshot, TransferError> {
         let mut state = self.lock()?;
-        ensure_current(&state, session, generation)?;
-        if !state.active {
+        ensure_current(&state, session, lane, generation)?;
+        let lane_state = state.lane_mut(lane);
+        lane_state.active = false;
+        lane_state.cancel_token();
+        Ok(snapshot(&state))
+    }
+
+    pub(crate) fn acquire(
+        &self,
+        session: u64,
+        lane: TransferLane,
+        generation: u64,
+    ) -> Result<(), TransferError> {
+        let mut state = self.lock()?;
+        ensure_current(&state, session, lane, generation)?;
+        if !state.lane(lane).active {
             return Err(TransferError::new(
                 "generation_cancelled",
                 format!("generation {generation} is cancelled"),
             ));
         }
-        if credits_in_use(&state) >= TRANSFER_CREDIT_LIMIT {
+        if credits_in_use(&state, lane) >= TRANSFER_CREDIT_LIMIT {
             return Err(TransferError::new(
                 "credit_exhausted",
-                "both renderer transfer credits are already in use",
+                format!("both {lane} transfer credits are already in use"),
             ));
         }
         *state
-            .in_flight_credits_by_session
-            .entry(session)
+            .in_flight_credits_by_owner
+            .entry((session, lane))
             .or_default() += 1;
         Ok(())
     }
@@ -314,8 +407,16 @@ impl TransferBroker {
         if state.acknowledged_release_ids.contains(release_id) {
             return Ok(snapshot(&state));
         }
-        let owner = (session, generation);
-        let Some(held) = state.held_credits_by_owner.get_mut(&owner) else {
+        let owner = TransferLane::ALL
+            .into_iter()
+            .map(|lane| (session, lane, generation))
+            .find(|owner| state.held_credits_by_owner.contains_key(owner));
+        let Some((owner, held)) = owner.and_then(|owner| {
+            state
+                .held_credits_by_owner
+                .get_mut(&owner)
+                .map(|held| (owner, held))
+        }) else {
             return Err(TransferError::new(
                 "credit_not_held",
                 format!("session {session} generation {generation} holds no delivered credit"),
@@ -331,35 +432,37 @@ impl TransferBroker {
         Ok(snapshot(&state))
     }
 
-    pub(crate) fn finish_without_publish(&self, session: u64) {
+    pub(crate) fn finish_without_publish(&self, session: u64, lane: TransferLane) {
         if let Ok(mut state) = self.inner.lock() {
-            take_in_flight_credit(&mut state, session);
+            take_in_flight_credit(&mut state, session, lane);
         }
     }
 
     pub(crate) fn complete_for_publish(
         &self,
         session: u64,
+        lane: TransferLane,
         generation: u64,
     ) -> Result<(), TransferError> {
         let mut state = self.lock()?;
-        complete_for_publish_locked(&mut state, session, generation)
+        complete_for_publish_locked(&mut state, session, lane, generation)
     }
 
     pub(crate) fn live_generation_token(
         &self,
         session: u64,
+        lane: TransferLane,
         generation: u64,
     ) -> Result<GenerationToken, TransferError> {
         let state = self.lock()?;
-        ensure_current(&state, session, generation)?;
-        if !state.active {
+        ensure_current(&state, session, lane, generation)?;
+        if !state.lane(lane).active {
             return Err(TransferError::new(
                 "generation_cancelled",
                 format!("generation {generation} is cancelled"),
             ));
         }
-        state.live_generation_token.clone().ok_or_else(|| {
+        state.lane(lane).token.clone().ok_or_else(|| {
             TransferError::new(
                 "generation_token_missing",
                 "active generation has no live acquisition token",
@@ -374,7 +477,7 @@ impl TransferBroker {
         observation_id: &str,
     ) -> Result<Phase5LiveTransferEvidence, TransferError> {
         let state = self.lock()?;
-        ensure_current(&state, session, generation)?;
+        ensure_current(&state, session, TransferLane::Site, generation)?;
         state
             .phase5_evidence_by_observation
             .get(observation_id)
@@ -435,8 +538,10 @@ impl TransferBroker {
 fn complete_for_publish_locked(
     state: &mut TransferState,
     session: u64,
+    lane: TransferLane,
     generation: u64,
 ) -> Result<(), TransferError> {
+    let lane_state = state.lane(lane);
     let publication_error = if session != state.session {
         Some(TransferError::new(
             "stale_session",
@@ -445,15 +550,15 @@ fn complete_for_publish_locked(
                 state.session
             ),
         ))
-    } else if generation != state.generation {
+    } else if generation != lane_state.generation {
         Some(TransferError::new(
             "stale_generation",
             format!(
-                "generation {generation} is stale; current generation is {}",
-                state.generation
+                "generation {generation} is stale; current {lane} generation is {}",
+                lane_state.generation
             ),
         ))
-    } else if !state.active {
+    } else if !lane_state.active {
         Some(TransferError::new(
             "generation_cancelled",
             format!("generation {generation} is cancelled"),
@@ -461,10 +566,10 @@ fn complete_for_publish_locked(
     } else {
         None
     };
-    if !take_in_flight_credit(state, session) {
+    if !take_in_flight_credit(state, session, lane) {
         return Err(TransferError::new(
             "transfer_state_invalid",
-            format!("session {session} completed work without an in-flight credit"),
+            format!("session {session} completed {lane} work without an in-flight credit"),
         ));
     }
     if let Some(error) = publication_error {
@@ -472,7 +577,7 @@ fn complete_for_publish_locked(
     } else {
         *state
             .held_credits_by_owner
-            .entry((session, generation))
+            .entry((session, lane, generation))
             .or_default() += 1;
         Ok(())
     }
@@ -497,40 +602,50 @@ fn ensure_session(state: &TransferState, session: u64) -> Result<(), TransferErr
 fn ensure_current(
     state: &TransferState,
     session: u64,
+    lane: TransferLane,
     generation: u64,
 ) -> Result<(), TransferError> {
     ensure_session(state, session)?;
-    if generation != state.generation {
+    let current = state.lane(lane).generation;
+    if generation != current {
         return Err(TransferError::new(
             "stale_generation",
-            format!(
-                "generation {generation} is stale; current generation is {}",
-                state.generation
-            ),
+            format!("generation {generation} is stale; current {lane} generation is {current}"),
         ));
     }
     Ok(())
 }
 
 fn snapshot(state: &TransferState) -> TransferSnapshot {
-    let available_credits = if state.active {
-        TRANSFER_CREDIT_LIMIT.saturating_sub(credits_in_use(state))
-    } else {
-        0
+    let lane_snapshot = |lane: TransferLane| {
+        let lane_state = state.lane(lane);
+        LaneSnapshot {
+            generation: lane_state.generation,
+            active: lane_state.active,
+            available_credits: if lane_state.active {
+                TRANSFER_CREDIT_LIMIT.saturating_sub(credits_in_use(state, lane))
+            } else {
+                0
+            },
+            held_credits: held_credit_count_for_lane(state, lane),
+            in_flight_credits: in_flight_credit_count_for_lane(state, lane),
+        }
     };
     TransferSnapshot {
         session: state.session,
-        generation: state.generation,
-        active: state.active,
-        available_credits,
         held_credits: held_credit_count(state),
         in_flight_credits: in_flight_credit_count(state),
         credit_limit: TRANSFER_CREDIT_LIMIT,
+        lanes: LaneSnapshots {
+            site: lane_snapshot(TransferLane::Site),
+            national: lane_snapshot(TransferLane::National),
+        },
     }
 }
 
-fn credits_in_use(state: &TransferState) -> u8 {
-    held_credit_count(state).saturating_add(in_flight_credit_count(state))
+fn credits_in_use(state: &TransferState, lane: TransferLane) -> u8 {
+    held_credit_count_for_lane(state, lane)
+        .saturating_add(in_flight_credit_count_for_lane(state, lane))
 }
 
 fn held_credit_count(state: &TransferState) -> u8 {
@@ -541,38 +656,66 @@ fn held_credit_count(state: &TransferState) -> u8 {
         .fold(0, u8::saturating_add)
 }
 
+fn held_credit_count_for_lane(state: &TransferState, lane: TransferLane) -> u8 {
+    state
+        .held_credits_by_owner
+        .iter()
+        .filter(|((_, owner_lane, _), _)| *owner_lane == lane)
+        .map(|(_, held)| *held)
+        .fold(0, u8::saturating_add)
+}
+
 fn held_credit_count_for_session(state: &TransferState, session: u64) -> u8 {
     state
         .held_credits_by_owner
         .iter()
-        .filter(|((owner_session, _), _)| *owner_session == session)
+        .filter(|((owner_session, _, _), _)| *owner_session == session)
         .map(|(_, held)| *held)
         .fold(0, u8::saturating_add)
 }
 
 fn in_flight_credit_count(state: &TransferState) -> u8 {
     state
-        .in_flight_credits_by_session
+        .in_flight_credits_by_owner
         .values()
         .copied()
         .fold(0, u8::saturating_add)
 }
 
+fn in_flight_credit_count_for_lane(state: &TransferState, lane: TransferLane) -> u8 {
+    state
+        .in_flight_credits_by_owner
+        .iter()
+        .filter(|((_, owner_lane), _)| *owner_lane == lane)
+        .map(|(_, held)| *held)
+        .fold(0, u8::saturating_add)
+}
+
 fn in_flight_credit_count_for_session(state: &TransferState, session: u64) -> u8 {
     state
-        .in_flight_credits_by_session
-        .get(&session)
+        .in_flight_credits_by_owner
+        .iter()
+        .filter(|((owner_session, _), _)| *owner_session == session)
+        .map(|(_, held)| *held)
+        .fold(0, u8::saturating_add)
+}
+
+fn in_flight_credit_count_for_owner(state: &TransferState, session: u64, lane: TransferLane) -> u8 {
+    state
+        .in_flight_credits_by_owner
+        .get(&(session, lane))
         .copied()
         .unwrap_or(0)
 }
 
-fn take_in_flight_credit(state: &mut TransferState, session: u64) -> bool {
-    let Some(held) = state.in_flight_credits_by_session.get_mut(&session) else {
+fn take_in_flight_credit(state: &mut TransferState, session: u64, lane: TransferLane) -> bool {
+    let owner = (session, lane);
+    let Some(held) = state.in_flight_credits_by_owner.get_mut(&owner) else {
         return false;
     };
     *held -= 1;
     if *held == 0 {
-        state.in_flight_credits_by_session.remove(&session);
+        state.in_flight_credits_by_owner.remove(&owner);
     }
     true
 }
@@ -602,18 +745,20 @@ pub fn open_phase2_transfer_session(
 pub fn begin_phase2_generation(
     state: tauri::State<'_, TransferBroker>,
     session: u64,
+    lane: TransferLane,
     generation: u64,
 ) -> Result<TransferSnapshot, TransferError> {
-    state.begin(session, generation)
+    state.begin(session, lane, generation)
 }
 
 #[tauri::command]
 pub fn cancel_phase2_generation(
     state: tauri::State<'_, TransferBroker>,
     session: u64,
+    lane: TransferLane,
     generation: u64,
 ) -> Result<TransferSnapshot, TransferError> {
-    state.cancel(session, generation)
+    state.cancel(session, lane, generation)
 }
 
 #[tauri::command]
@@ -658,7 +803,7 @@ pub async fn request_phase2_benchmark_sweep(
     hold_ms: Option<u64>,
 ) -> Result<Response, TransferError> {
     let broker = state.inner().clone();
-    broker.acquire(session, generation)?;
+    broker.acquire(session, TransferLane::Site, generation)?;
     let hold_ms = hold_ms.unwrap_or(0).min(MAX_DIAGNOSTIC_HOLD_MS);
     let task = tauri::async_runtime::spawn_blocking(move || {
         let sweep = phase2_benchmark_sweep();
@@ -674,7 +819,7 @@ pub async fn request_phase2_benchmark_sweep(
     let encoded = match task {
         Ok(encoded) => encoded,
         Err(error) => {
-            broker.finish_without_publish(session);
+            broker.finish_without_publish(session, TransferLane::Site);
             return Err(TransferError::new("backend_task_failed", error.to_string()));
         }
     };
@@ -682,11 +827,11 @@ pub async fn request_phase2_benchmark_sweep(
     let bytes = match encoded {
         Ok(bytes) => bytes,
         Err(error) => {
-            broker.finish_without_publish(session);
+            broker.finish_without_publish(session, TransferLane::Site);
             return Err(error);
         }
     };
-    broker.complete_for_publish(session, generation)?;
+    broker.complete_for_publish(session, TransferLane::Site, generation)?;
     Ok(Response::new(bytes))
 }
 
@@ -697,7 +842,7 @@ pub async fn request_phase3_fixture_sweep(
     generation: u64,
 ) -> Result<Response, TransferError> {
     let broker = state.inner().clone();
-    broker.acquire(session, generation)?;
+    broker.acquire(session, TransferLane::Site, generation)?;
     let task = tauri::async_runtime::spawn_blocking(move || {
         let path = phase3_fixture_path()?;
         let input = read_phase3_archive(&path)?;
@@ -712,18 +857,18 @@ pub async fn request_phase3_fixture_sweep(
     let encoded = match task {
         Ok(encoded) => encoded,
         Err(error) => {
-            broker.finish_without_publish(session);
+            broker.finish_without_publish(session, TransferLane::Site);
             return Err(TransferError::new("backend_task_failed", error.to_string()));
         }
     };
     let bytes = match encoded {
         Ok(bytes) => bytes,
         Err(error) => {
-            broker.finish_without_publish(session);
+            broker.finish_without_publish(session, TransferLane::Site);
             return Err(error);
         }
     };
-    broker.complete_for_publish(session, generation)?;
+    broker.complete_for_publish(session, TransferLane::Site, generation)?;
     Ok(Response::new(bytes))
 }
 
@@ -737,7 +882,7 @@ pub async fn request_phase4_fixture_sweep(
 ) -> Result<Response, TransferError> {
     let broker = state.inner().clone();
     let resource_root = resources.root.clone();
-    broker.acquire(session, generation)?;
+    broker.acquire(session, TransferLane::Site, generation)?;
     let worker_broker = broker.clone();
     let task = tauri::async_runtime::spawn_blocking(move || {
         let fixture = phase4_fixture_expectation(&fixture_id)?;
@@ -756,18 +901,18 @@ pub async fn request_phase4_fixture_sweep(
     let encoded = match task {
         Ok(encoded) => encoded,
         Err(error) => {
-            broker.finish_without_publish(session);
+            broker.finish_without_publish(session, TransferLane::Site);
             return Err(TransferError::new("backend_task_failed", error.to_string()));
         }
     };
     let bytes = match encoded {
         Ok(bytes) => bytes,
         Err(error) => {
-            broker.finish_without_publish(session);
+            broker.finish_without_publish(session, TransferLane::Site);
             return Err(error);
         }
     };
-    broker.complete_for_publish(session, generation)?;
+    broker.complete_for_publish(session, TransferLane::Site, generation)?;
     // Publication already converted the in-flight credit into a delivered
     // credit. It remains releasable by the client if this diagnostic update fails.
     broker.record_phase4_bulk_ipc(bytes.len())?;
@@ -782,7 +927,7 @@ pub async fn request_phase6_n0s_fixture_sweep(
     fixture_id: String,
 ) -> Result<Response, TransferError> {
     let broker = state.inner().clone();
-    broker.acquire(session, generation)?;
+    broker.acquire(session, TransferLane::Site, generation)?;
     let task = tauri::async_runtime::spawn_blocking(move || {
         let fixture = phase6_n0s_fixture_expectation(&fixture_id)?;
         let path = phase6_fixture_path(&fixture)?;
@@ -798,18 +943,18 @@ pub async fn request_phase6_n0s_fixture_sweep(
     let encoded = match task {
         Ok(encoded) => encoded,
         Err(error) => {
-            broker.finish_without_publish(session);
+            broker.finish_without_publish(session, TransferLane::Site);
             return Err(TransferError::new("backend_task_failed", error.to_string()));
         }
     };
     let bytes = match encoded {
         Ok(bytes) => bytes,
         Err(error) => {
-            broker.finish_without_publish(session);
+            broker.finish_without_publish(session, TransferLane::Site);
             return Err(error);
         }
     };
-    broker.complete_for_publish(session, generation)?;
+    broker.complete_for_publish(session, TransferLane::Site, generation)?;
     Ok(Response::new(bytes))
 }
 
@@ -831,13 +976,13 @@ pub async fn request_phase5_live_sweep(
     }
     let history_request = validate_live_history_request(fresh_only, history_cursor)?;
     let broker = state.inner().clone();
-    broker.acquire(session, generation)?;
+    broker.acquire(session, TransferLane::Site, generation)?;
 
     let timeout = Duration::from_secs(timeout_seconds);
-    let credit = InFlightCreditGuard::new(broker.clone(), session);
+    let credit = InFlightCreditGuard::new(broker.clone(), session, TransferLane::Site);
     let worker_broker = broker.clone();
     let worker = tauri::async_runtime::spawn(async move {
-        let token = worker_broker.live_generation_token(session, generation)?;
+        let token = worker_broker.live_generation_token(session, TransferLane::Site, generation)?;
         let client = PublicRadarClient::new()
             .map_err(|error| TransferError::new("live_client_failed", error.to_string()))?;
         let mut live = match history_request {
@@ -1508,19 +1653,163 @@ mod tests {
     }
 
     #[test]
+    fn beginning_one_lane_leaves_the_other_lane_token_and_credits_intact() {
+        let broker = TransferBroker::default();
+        let session = opened(&broker);
+        broker.begin(session, TransferLane::National, 1).unwrap();
+        let national = broker
+            .live_generation_token(session, TransferLane::National, 1)
+            .unwrap();
+        broker.acquire(session, TransferLane::National, 1).unwrap();
+
+        broker.begin(session, TransferLane::Site, 2).unwrap();
+        broker.begin(session, TransferLane::Site, 3).unwrap();
+        assert!(national.is_current());
+        broker
+            .complete_for_publish(session, TransferLane::National, 1)
+            .unwrap();
+        let snapshot = broker.snapshot().unwrap();
+        assert_eq!(snapshot.lanes.national.generation, 1);
+        assert_eq!(snapshot.lanes.national.held_credits, 1);
+        assert_eq!(snapshot.lanes.site.generation, 3);
+        assert_eq!(snapshot.lanes.site.available_credits, 2);
+
+        broker.cancel(session, TransferLane::Site, 3).unwrap();
+        assert!(national.is_current());
+        assert!(broker.snapshot().unwrap().lanes.national.active);
+    }
+
+    #[test]
+    fn each_lane_owns_two_credits() {
+        let broker = TransferBroker::default();
+        let session = opened(&broker);
+        broker.begin(session, TransferLane::Site, 1).unwrap();
+        broker.begin(session, TransferLane::National, 2).unwrap();
+        broker.acquire(session, TransferLane::Site, 1).unwrap();
+        broker.acquire(session, TransferLane::Site, 1).unwrap();
+        assert_eq!(
+            broker
+                .acquire(session, TransferLane::Site, 1)
+                .unwrap_err()
+                .code,
+            "credit_exhausted"
+        );
+        broker.acquire(session, TransferLane::National, 2).unwrap();
+        broker.acquire(session, TransferLane::National, 2).unwrap();
+        assert_eq!(
+            broker
+                .acquire(session, TransferLane::National, 2)
+                .unwrap_err()
+                .code,
+            "credit_exhausted"
+        );
+        let snapshot = broker.snapshot().unwrap();
+        assert_eq!(snapshot.in_flight_credits, 4);
+        assert_eq!(snapshot.lanes.site.in_flight_credits, 2);
+        assert_eq!(snapshot.lanes.national.in_flight_credits, 2);
+    }
+
+    #[test]
+    fn generations_stay_unique_across_lanes() {
+        let broker = TransferBroker::default();
+        let session = opened(&broker);
+        broker.begin(session, TransferLane::Site, 5).unwrap();
+        for generation in [4, 5] {
+            assert_eq!(
+                broker
+                    .begin(session, TransferLane::National, generation)
+                    .unwrap_err()
+                    .code,
+                "stale_generation"
+            );
+        }
+        // A stale-lane generation is rejected even though it was current elsewhere.
+        assert_eq!(
+            broker
+                .acquire(session, TransferLane::National, 5)
+                .unwrap_err()
+                .code,
+            "stale_generation"
+        );
+    }
+
+    #[test]
+    fn release_returns_the_credit_to_the_lane_that_delivered_it() {
+        let broker = TransferBroker::default();
+        let session = opened(&broker);
+        broker.begin(session, TransferLane::Site, 1).unwrap();
+        broker.begin(session, TransferLane::National, 2).unwrap();
+        for (lane, generation) in [(TransferLane::Site, 1), (TransferLane::National, 2)] {
+            broker.acquire(session, lane, generation).unwrap();
+            broker
+                .complete_for_publish(session, lane, generation)
+                .unwrap();
+        }
+        broker.release(session, 2, &release_id(1)).unwrap();
+        let snapshot = broker.snapshot().unwrap();
+        assert_eq!(snapshot.lanes.national.held_credits, 0);
+        assert_eq!(snapshot.lanes.site.held_credits, 1);
+        broker.release(session, 1, &release_id(2)).unwrap();
+        assert_eq!(broker.snapshot().unwrap().held_credits, 0);
+    }
+
+    #[test]
+    fn national_begin_keeps_site_live_evidence() {
+        let broker = TransferBroker::default();
+        let session = opened(&broker);
+        broker.begin(session, TransferLane::Site, 1).unwrap();
+        broker.acquire(session, TransferLane::Site, 1).unwrap();
+        InFlightCreditGuard::new(broker.clone(), session, TransferLane::Site)
+            .complete_phase5_for_publish(1, phase5_evidence(1, &"a".repeat(32)))
+            .unwrap();
+        broker.begin(session, TransferLane::National, 2).unwrap();
+        assert!(
+            broker
+                .phase5_live_evidence(session, 1, &"a".repeat(32))
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn opening_a_session_resets_both_lanes() {
+        let broker = TransferBroker::default();
+        let first = opened(&broker);
+        broker.begin(first, TransferLane::Site, 1).unwrap();
+        broker.begin(first, TransferLane::National, 2).unwrap();
+        let national = broker
+            .live_generation_token(first, TransferLane::National, 2)
+            .unwrap();
+        let second = opened(&broker);
+        assert!(!national.is_current());
+        let snapshot = broker.snapshot().unwrap();
+        assert_eq!(snapshot.session, second);
+        for lane in [snapshot.lanes.site, snapshot.lanes.national] {
+            assert_eq!((lane.generation, lane.active), (0, false));
+        }
+        broker.begin(second, TransferLane::National, 1).unwrap();
+    }
+
+    #[test]
     fn phase5_generation_control_cancels_superseded_and_explicitly_cancelled_tokens() {
         let broker = TransferBroker::default();
         let session = opened(&broker);
-        broker.begin(session, 4).unwrap();
-        let old = broker.live_generation_token(session, 4).unwrap();
-        broker.begin(session, 8).unwrap();
+        broker.begin(session, TransferLane::Site, 4).unwrap();
+        let old = broker
+            .live_generation_token(session, TransferLane::Site, 4)
+            .unwrap();
+        broker.begin(session, TransferLane::Site, 8).unwrap();
         assert!(!old.is_current());
-        let current = broker.live_generation_token(session, 8).unwrap();
+        let current = broker
+            .live_generation_token(session, TransferLane::Site, 8)
+            .unwrap();
         assert!(current.is_current());
-        broker.cancel(session, 8).unwrap();
+        broker.cancel(session, TransferLane::Site, 8).unwrap();
         assert!(!current.is_current());
         assert_eq!(
-            broker.live_generation_token(session, 8).unwrap_err().code,
+            broker
+                .live_generation_token(session, TransferLane::Site, 8)
+                .unwrap_err()
+                .code,
             "generation_cancelled"
         );
     }
@@ -1529,9 +1818,9 @@ mod tests {
     fn phase5_evidence_is_published_atomically_only_for_the_current_generation() {
         let broker = TransferBroker::default();
         let session = opened(&broker);
-        broker.begin(session, 1).unwrap();
-        broker.acquire(session, 1).unwrap();
-        InFlightCreditGuard::new(broker.clone(), session)
+        broker.begin(session, TransferLane::Site, 1).unwrap();
+        broker.acquire(session, TransferLane::Site, 1).unwrap();
+        InFlightCreditGuard::new(broker.clone(), session, TransferLane::Site)
             .complete_phase5_for_publish(1, phase5_evidence(1, &"a".repeat(32)))
             .unwrap();
         assert_eq!(
@@ -1544,9 +1833,9 @@ mod tests {
         );
 
         broker.release(session, 1, &release_id(1)).unwrap();
-        broker.acquire(session, 1).unwrap();
-        let stale = InFlightCreditGuard::new(broker.clone(), session);
-        broker.begin(session, 2).unwrap();
+        broker.acquire(session, TransferLane::Site, 1).unwrap();
+        let stale = InFlightCreditGuard::new(broker.clone(), session, TransferLane::Site);
+        broker.begin(session, TransferLane::Site, 2).unwrap();
         assert_eq!(
             stale
                 .complete_phase5_for_publish(1, phase5_evidence(1, &"b".repeat(32)))
@@ -1567,11 +1856,11 @@ mod tests {
     fn successful_guarded_publication_preserves_the_other_in_flight_credit() {
         let broker = TransferBroker::default();
         let session = opened(&broker);
-        broker.begin(session, 1).unwrap();
-        broker.acquire(session, 1).unwrap();
-        let first = InFlightCreditGuard::new(broker.clone(), session);
-        broker.acquire(session, 1).unwrap();
-        let second = InFlightCreditGuard::new(broker.clone(), session);
+        broker.begin(session, TransferLane::Site, 1).unwrap();
+        broker.acquire(session, TransferLane::Site, 1).unwrap();
+        let first = InFlightCreditGuard::new(broker.clone(), session, TransferLane::Site);
+        broker.acquire(session, TransferLane::Site, 1).unwrap();
+        let second = InFlightCreditGuard::new(broker.clone(), session, TransferLane::Site);
 
         first
             .complete_phase5_for_publish(1, phase5_evidence(1, &"a".repeat(32)))
@@ -1579,13 +1868,13 @@ mod tests {
         let after_first = broker.snapshot().unwrap();
         assert_eq!(after_first.held_credits, 1);
         assert_eq!(after_first.in_flight_credits, 1);
-        assert_eq!(after_first.available_credits, 0);
+        assert_eq!(after_first.lanes.site.available_credits, 0);
 
         drop(second);
         let after_second = broker.snapshot().unwrap();
         assert_eq!(after_second.held_credits, 1);
         assert_eq!(after_second.in_flight_credits, 0);
-        assert_eq!(after_second.available_credits, 1);
+        assert_eq!(after_second.lanes.site.available_credits, 1);
     }
 
     #[tokio::test]
@@ -1607,9 +1896,9 @@ mod tests {
     async fn timed_out_blocking_work_retains_credit_until_native_completion() {
         let broker = TransferBroker::default();
         let session = broker.open_session().unwrap().session;
-        broker.begin(session, 1).unwrap();
-        broker.acquire(session, 1).unwrap();
-        let credit = InFlightCreditGuard::new(broker.clone(), session);
+        broker.begin(session, TransferLane::Site, 1).unwrap();
+        broker.acquire(session, TransferLane::Site, 1).unwrap();
+        let credit = InFlightCreditGuard::new(broker.clone(), session, TransferLane::Site);
         let (started_sender, started_receiver) = tokio::sync::oneshot::channel();
         let (release_sender, release_receiver) = std::sync::mpsc::channel();
         let worker = tokio::spawn(async move {
@@ -1634,7 +1923,7 @@ mod tests {
         assert_eq!(error.code, "live_sweep_failed");
         let timed_out = broker.snapshot().unwrap();
         assert_eq!(timed_out.in_flight_credits, 1);
-        assert_eq!(timed_out.available_credits, 1);
+        assert_eq!(timed_out.lanes.site.available_credits, 1);
 
         release_sender.send(()).expect("release blocking worker");
         tokio::time::timeout(Duration::from_secs(1), async {
@@ -1647,7 +1936,7 @@ mod tests {
         })
         .await
         .expect("credit released after blocking work exits");
-        assert_eq!(broker.snapshot().unwrap().available_credits, 2);
+        assert_eq!(broker.snapshot().unwrap().lanes.site.available_credits, 2);
     }
 
     #[test]
@@ -1780,75 +2069,105 @@ mod tests {
     fn exactly_two_credits_are_available() {
         let broker = TransferBroker::default();
         let session = opened(&broker);
-        assert_eq!(broker.begin(session, 1).unwrap().available_credits, 2);
-        broker.acquire(session, 1).unwrap();
-        broker.acquire(session, 1).unwrap();
+        assert_eq!(
+            broker
+                .begin(session, TransferLane::Site, 1)
+                .unwrap()
+                .lanes
+                .site
+                .available_credits,
+            2
+        );
+        broker.acquire(session, TransferLane::Site, 1).unwrap();
+        broker.acquire(session, TransferLane::Site, 1).unwrap();
         assert_eq!(broker.snapshot().unwrap().in_flight_credits, 2);
         assert_eq!(
-            broker.acquire(session, 1).unwrap_err().code,
+            broker
+                .acquire(session, TransferLane::Site, 1)
+                .unwrap_err()
+                .code,
             "credit_exhausted"
         );
-        broker.complete_for_publish(session, 1).unwrap();
+        broker
+            .complete_for_publish(session, TransferLane::Site, 1)
+            .unwrap();
         assert_eq!(
             broker
                 .release(session, 1, &release_id(1))
                 .unwrap()
+                .lanes
+                .site
                 .available_credits,
             1
         );
-        broker.acquire(session, 1).unwrap();
+        broker.acquire(session, TransferLane::Site, 1).unwrap();
     }
 
     #[test]
     fn new_generation_keeps_old_work_globally_charged_until_completion() {
         let broker = TransferBroker::default();
         let session = opened(&broker);
-        broker.begin(session, 8).unwrap();
-        broker.acquire(session, 8).unwrap();
-        broker.acquire(session, 8).unwrap();
-        let current = broker.begin(session, 9).unwrap();
-        assert_eq!(current.available_credits, 0);
+        broker.begin(session, TransferLane::Site, 8).unwrap();
+        broker.acquire(session, TransferLane::Site, 8).unwrap();
+        broker.acquire(session, TransferLane::Site, 8).unwrap();
+        let current = broker.begin(session, TransferLane::Site, 9).unwrap();
+        assert_eq!(current.lanes.site.available_credits, 0);
         assert_eq!(current.held_credits, 0);
         assert_eq!(current.in_flight_credits, 2);
         assert_eq!(
-            broker.acquire(session, 9).unwrap_err().code,
+            broker
+                .acquire(session, TransferLane::Site, 9)
+                .unwrap_err()
+                .code,
             "credit_exhausted"
         );
         assert_eq!(
-            broker.complete_for_publish(session, 8).unwrap_err().code,
+            broker
+                .complete_for_publish(session, TransferLane::Site, 8)
+                .unwrap_err()
+                .code,
             "stale_generation"
         );
-        assert_eq!(broker.snapshot().unwrap().available_credits, 1);
-        broker.finish_without_publish(session);
-        assert_eq!(broker.snapshot().unwrap().available_credits, 2);
+        assert_eq!(broker.snapshot().unwrap().lanes.site.available_credits, 1);
+        broker.finish_without_publish(session, TransferLane::Site);
+        assert_eq!(broker.snapshot().unwrap().lanes.site.available_credits, 2);
     }
 
     #[test]
     fn delivered_old_generation_stays_charged_until_frontend_acknowledges_it() {
         let broker = TransferBroker::default();
         let session = opened(&broker);
-        broker.begin(session, 8).unwrap();
-        broker.acquire(session, 8).unwrap();
-        broker.complete_for_publish(session, 8).unwrap();
+        broker.begin(session, TransferLane::Site, 8).unwrap();
+        broker.acquire(session, TransferLane::Site, 8).unwrap();
+        broker
+            .complete_for_publish(session, TransferLane::Site, 8)
+            .unwrap();
 
-        let current = broker.begin(session, 9).unwrap();
+        let current = broker.begin(session, TransferLane::Site, 9).unwrap();
         assert_eq!(current.held_credits, 1);
-        assert_eq!(current.available_credits, 1);
-        broker.acquire(session, 9).unwrap();
+        assert_eq!(current.lanes.site.available_credits, 1);
+        broker.acquire(session, TransferLane::Site, 9).unwrap();
         assert_eq!(
-            broker.acquire(session, 9).unwrap_err().code,
+            broker
+                .acquire(session, TransferLane::Site, 9)
+                .unwrap_err()
+                .code,
             "credit_exhausted"
         );
 
         let after_old_ack = broker.release(session, 8, &release_id(1)).unwrap();
         assert_eq!(after_old_ack.held_credits, 0);
         assert_eq!(after_old_ack.in_flight_credits, 1);
-        assert_eq!(after_old_ack.available_credits, 1);
-        broker.complete_for_publish(session, 9).unwrap();
+        assert_eq!(after_old_ack.lanes.site.available_credits, 1);
+        broker
+            .complete_for_publish(session, TransferLane::Site, 9)
+            .unwrap();
         assert_eq!(
             broker
                 .release(session, 9, &release_id(2))
                 .unwrap()
+                .lanes
+                .site
                 .available_credits,
             2
         );
@@ -1858,10 +2177,12 @@ mod tests {
     fn new_session_reclaims_orphaned_delivery_but_not_native_work() {
         let broker = TransferBroker::default();
         let first = opened(&broker);
-        broker.begin(first, 1).unwrap();
-        broker.acquire(first, 1).unwrap();
-        broker.complete_for_publish(first, 1).unwrap();
-        broker.acquire(first, 1).unwrap();
+        broker.begin(first, TransferLane::Site, 1).unwrap();
+        broker.acquire(first, TransferLane::Site, 1).unwrap();
+        broker
+            .complete_for_publish(first, TransferLane::Site, 1)
+            .unwrap();
+        broker.acquire(first, TransferLane::Site, 1).unwrap();
 
         broker.document_started().unwrap();
         let second = opened(&broker);
@@ -1869,23 +2190,28 @@ mod tests {
         assert_eq!(second, first + 1);
         assert_eq!(opened.held_credits, 0);
         assert_eq!(opened.in_flight_credits, 1);
-        assert!(!opened.active);
-        broker.begin(second, 1).unwrap();
-        assert_eq!(broker.snapshot().unwrap().available_credits, 1);
+        assert!(!opened.lanes.site.active && !opened.lanes.national.active);
+        broker.begin(second, TransferLane::Site, 1).unwrap();
+        assert_eq!(broker.snapshot().unwrap().lanes.site.available_credits, 1);
         assert_eq!(
-            broker.complete_for_publish(first, 1).unwrap_err().code,
+            broker
+                .complete_for_publish(first, TransferLane::Site, 1)
+                .unwrap_err()
+                .code,
             "stale_session"
         );
-        assert_eq!(broker.snapshot().unwrap().available_credits, 2);
+        assert_eq!(broker.snapshot().unwrap().lanes.site.available_credits, 2);
     }
 
     #[test]
     fn second_client_in_same_document_cannot_reclaim_live_credit() {
         let broker = TransferBroker::default();
         let first = opened(&broker);
-        broker.begin(first, 1).unwrap();
-        broker.acquire(first, 1).unwrap();
-        broker.complete_for_publish(first, 1).unwrap();
+        broker.begin(first, TransferLane::Site, 1).unwrap();
+        broker.acquire(first, TransferLane::Site, 1).unwrap();
+        broker
+            .complete_for_publish(first, TransferLane::Site, 1)
+            .unwrap();
 
         assert_eq!(
             broker.open_session().unwrap_err().code,
@@ -1903,16 +2229,28 @@ mod tests {
     fn release_acknowledgement_is_idempotent() {
         let broker = TransferBroker::default();
         let session = opened(&broker);
-        broker.begin(session, 1).unwrap();
-        broker.acquire(session, 1).unwrap();
-        broker.complete_for_publish(session, 1).unwrap();
+        broker.begin(session, TransferLane::Site, 1).unwrap();
+        broker.acquire(session, TransferLane::Site, 1).unwrap();
+        broker
+            .complete_for_publish(session, TransferLane::Site, 1)
+            .unwrap();
         let id = release_id(1);
         assert_eq!(
-            broker.release(session, 1, &id).unwrap().available_credits,
+            broker
+                .release(session, 1, &id)
+                .unwrap()
+                .lanes
+                .site
+                .available_credits,
             2
         );
         assert_eq!(
-            broker.release(session, 1, &id).unwrap().available_credits,
+            broker
+                .release(session, 1, &id)
+                .unwrap()
+                .lanes
+                .site
+                .available_credits,
             2
         );
     }
@@ -1921,16 +2259,20 @@ mod tests {
     fn old_release_retry_cannot_release_a_newer_credit() {
         let broker = TransferBroker::default();
         let session = opened(&broker);
-        broker.begin(session, 1).unwrap();
+        broker.begin(session, TransferLane::Site, 1).unwrap();
 
         for index in 1..=66 {
-            broker.acquire(session, 1).unwrap();
-            broker.complete_for_publish(session, 1).unwrap();
+            broker.acquire(session, TransferLane::Site, 1).unwrap();
+            broker
+                .complete_for_publish(session, TransferLane::Site, 1)
+                .unwrap();
             broker.release(session, 1, &release_id(index)).unwrap();
         }
 
-        broker.acquire(session, 1).unwrap();
-        broker.complete_for_publish(session, 1).unwrap();
+        broker.acquire(session, TransferLane::Site, 1).unwrap();
+        broker
+            .complete_for_publish(session, TransferLane::Site, 1)
+            .unwrap();
         assert_eq!(broker.snapshot().unwrap().held_credits, 1);
         assert_eq!(
             broker
@@ -1952,14 +2294,17 @@ mod tests {
     fn cancellation_prevents_publication() {
         let broker = TransferBroker::default();
         let session = opened(&broker);
-        broker.begin(session, 3).unwrap();
-        broker.acquire(session, 3).unwrap();
-        let cancelled = broker.cancel(session, 3).unwrap();
-        assert!(!cancelled.active);
-        assert_eq!(cancelled.available_credits, 0);
+        broker.begin(session, TransferLane::Site, 3).unwrap();
+        broker.acquire(session, TransferLane::Site, 3).unwrap();
+        let cancelled = broker.cancel(session, TransferLane::Site, 3).unwrap();
+        assert!(!cancelled.lanes.site.active);
+        assert_eq!(cancelled.lanes.site.available_credits, 0);
         assert_eq!(cancelled.held_credits, 0);
         assert_eq!(
-            broker.complete_for_publish(session, 3).unwrap_err().code,
+            broker
+                .complete_for_publish(session, TransferLane::Site, 3)
+                .unwrap_err()
+                .code,
             "generation_cancelled"
         );
         assert_eq!(broker.snapshot().unwrap().in_flight_credits, 0);
@@ -1969,13 +2314,19 @@ mod tests {
     fn generations_are_monotonic() {
         let broker = TransferBroker::default();
         let session = opened(&broker);
-        broker.begin(session, 4).unwrap();
+        broker.begin(session, TransferLane::Site, 4).unwrap();
         assert_eq!(
-            broker.begin(session, 4).unwrap_err().code,
+            broker
+                .begin(session, TransferLane::Site, 4)
+                .unwrap_err()
+                .code,
             "stale_generation"
         );
         assert_eq!(
-            broker.begin(session, 2).unwrap_err().code,
+            broker
+                .begin(session, TransferLane::Site, 2)
+                .unwrap_err()
+                .code,
             "stale_generation"
         );
     }

@@ -133,6 +133,7 @@ describe("NationalWorkingSetController", () => {
       uploadedBytes: chunks.reduce((total, chunk) => total + chunk.rawCodes.byteLength, 0),
       framebufferWidth: 3840,
       framebufferHeight: 2160,
+      presented: true,
     };
     const layer = {
       beginStaging() { events.push("begin"); },

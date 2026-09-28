@@ -836,10 +836,9 @@ export class RadarCustomLayer implements CustomLayerInterface {
       }
       const pendingBytes = [...pendingFrames.values()]
         .reduce((total, frame) => total + frame.gpuBytes, 0);
-      this.peakGpuResourceBytes = Math.max(
-        this.peakGpuResourceBytes,
-        this.currentGpuResourceBytes() + pendingBytes + 256 * 4,
-      );
+      const transientBytes = this.currentGpuResourceBytes() + pendingBytes + 256 * 4;
+      assertWithinSiteGpuCeiling(transientBytes);
+      this.peakGpuResourceBytes = Math.max(this.peakGpuResourceBytes, transientBytes);
       if (!this.quadBuffer) throw new RadarRendererError("renderer quad buffer is unavailable");
       gl.bindBuffer(gl.ARRAY_BUFFER, this.quadBuffer);
       gl.bufferData(gl.ARRAY_BUFFER, mercatorQuadVertices(models), gl.STATIC_DRAW);
@@ -937,10 +936,9 @@ export class RadarCustomLayer implements CustomLayerInterface {
       addedFrame = createFrameResources(gl, addedModels[0], this.paletteTexture, palette);
       this.frameUploadCount += 1;
       this.frameUploadBytes += addedFrame.gpuBytes;
-      this.peakGpuResourceBytes = Math.max(
-        this.peakGpuResourceBytes,
-        this.currentGpuResourceBytes() + addedFrame.gpuBytes,
-      );
+      const transientBytes = this.currentGpuResourceBytes() + addedFrame.gpuBytes;
+      assertWithinSiteGpuCeiling(transientBytes);
+      this.peakGpuResourceBytes = Math.max(this.peakGpuResourceBytes, transientBytes);
       if (!this.quadBuffer) throw new RadarRendererError("renderer quad buffer is unavailable");
       gl.bindBuffer(gl.ARRAY_BUFFER, this.quadBuffer);
       gl.bufferData(gl.ARRAY_BUFFER, mercatorQuadVertices(models), gl.STATIC_DRAW);
@@ -1600,6 +1598,19 @@ function createFrameResources(
     if (lookupTexture) gl.deleteTexture(lookupTexture);
     if (radialMetadataTexture) gl.deleteTexture(radialMetadataTexture);
     throw error;
+  }
+}
+
+/**
+ * A 60-frame Site loop is ~152 MiB and briefly ~304 MiB during an atomic
+ * replacement. The ceiling bounds Site so it can sit beside a resident
+ * National loop (3,584 MiB ceiling) inside a known combined budget.
+ */
+export const SITE_GPU_HARD_CEILING_BYTES = 320 * 1024 * 1024;
+
+function assertWithinSiteGpuCeiling(bytes: number) {
+  if (bytes > SITE_GPU_HARD_CEILING_BYTES) {
+    throw new RadarRendererError("Site resident loop exceeds the Site GPU memory ceiling");
   }
 }
 

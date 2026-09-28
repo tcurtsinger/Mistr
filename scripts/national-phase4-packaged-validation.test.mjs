@@ -1,5 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { validateNationalPhase4Acceptance } from "./national-phase4-packaged-validation.mjs";
+import {
+  validateNationalPhase4Acceptance,
+  validateResidentHandoff,
+} from "./national-phase4-packaged-validation.mjs";
+
+function nationalActivity() {
+  return {
+    networkRequests: 40,
+    responseBytes: 90_000_000,
+    decoderRuns: 20,
+    bulkIpcTransfers: 500,
+    bulkIpcBytes: 980_000_000,
+    pointLookupDecodes: 0,
+  };
+}
 
 describe("National Phase 4 packaged acceptance", () => {
   it("accepts bounded resident history, quality locking, recovery, and Site return", () => {
@@ -28,16 +42,52 @@ describe("National Phase 4 packaged acceptance", () => {
     expect(validateNationalPhase4Acceptance(report)).toEqual([]);
   });
 
-  it("requires a failed Site transition to restore a new active National generation", () => {
+  it("requires a failed Site transition to keep the same active National generation", () => {
     const report = validReport();
-    report.failedSiteRecovery.after.painted.generation = 8;
+    report.failedSiteRecovery.after.painted.generation = 10;
     expect(validateNationalPhase4Acceptance(report)).toContain(
-      "failed Site transition restores active National session",
+      "failed Site transition keeps the active National session",
+    );
+
+    const restarted = validReport();
+    restarted.failedSiteRecovery.backfillStartCountAfter += 1;
+    expect(validateNationalPhase4Acceptance(restarted)).toContain(
+      "failed Site transition keeps the active National session",
     );
 
     delete report.failedSiteRecovery;
     expect(validateNationalPhase4Acceptance(report)).toContain(
-      "failed Site transition restores active National session",
+      "failed Site transition keeps the active National session",
+    );
+  });
+
+  it("requires National to stay resident behind a Site and reveal without reacquiring", () => {
+    expect(validateResidentHandoff(validReport().residentHandoff)).toEqual([]);
+
+    const torn = validReport().residentHandoff;
+    torn.whileSite.renderer.visibility = "visible";
+    expect(validateResidentHandoff(torn)).toContain("National stays resident while the Site is displayed");
+
+    const reacquired = validReport().residentHandoff;
+    reacquired.after.painted.generation = 12;
+    expect(validateResidentHandoff(reacquired)).toContain(
+      "resident National reveals under its original generation",
+    );
+
+    const noisy = validReport().residentHandoff;
+    noisy.reveal.activityAfter.networkRequests += 1;
+    expect(validateResidentHandoff(noisy)).toContain(
+      "National reveal performs no acquisition, decode, or bulk transfer",
+    );
+
+    const slow = validReport().residentHandoff;
+    slow.reveal.revealMs = 400;
+    expect(validateResidentHandoff(slow)).toContain("National reveal completes within 250 ms");
+
+    const report = validReport();
+    delete report.residentHandoff;
+    expect(validateNationalPhase4Acceptance(report)).toContain(
+      "National stays resident while the Site is displayed",
     );
   });
 
@@ -264,22 +314,48 @@ function validReport() {
     },
     transferSnapshot: { creditLimit: 2, heldCredits: 0, inFlightCredits: 0 },
     failedSiteRecovery: {
-      failureMessage: "diagnostic Site transition failure after National cancellation",
+      failureMessage: "diagnostic Site transition failure after the Site lane began",
       before: { painted: { source: { kind: "national", domain: "conus" }, generation: 8 } },
-      after: { painted: { source: { kind: "national", domain: "conus" }, generation: 10 } },
-      history: { retained: [{ generation: 10 }] },
+      after: { painted: { source: { kind: "national", domain: "conus" }, generation: 8 } },
+      history: { retained: [{ generation: 8 }] },
       renderer: {
         status: "painted",
-        generation: 10,
-        contextEpoch: 3,
-        paintReceipt: { generation: 10, contextEpoch: 3 },
+        generation: 8,
+        contextEpoch: 2,
+        paintReceipt: { generation: 8, contextEpoch: 2 },
       },
-      transfer: { generation: 10 },
+      transfer: { lanes: { national: { generation: 8, active: true } } },
       backfillStartCountBefore: 1,
-      backfillStartCountAfter: 2,
+      backfillStartCountAfter: 1,
       playbackBeforeFailure: { playing: true },
-      playbackAfterRestoration: { playing: false },
+      playbackAfterRestoration: { playing: true },
       rendererBeforeFailure: { contextEpoch: 2 },
+    },
+    residentHandoff: {
+      before: { painted: { source: { kind: "national", domain: "conus" }, generation: 8 } },
+      nationalGenerationBefore: 8,
+      backfillStartCountBefore: 1,
+      retainedBefore: 2,
+      whileSite: {
+        sourceState: { painted: { source: { kind: "site", siteIcao: "KTLX" }, generation: 9 } },
+        renderer: { visibility: "resident", status: "resident" },
+        transfer: { lanes: { national: { generation: 8, active: true } } },
+        resident: true,
+      },
+      reveal: {
+        activityBefore: nationalActivity(),
+        activityAfter: nationalActivity(),
+        revealMs: 34,
+      },
+      after: { painted: { source: { kind: "national", domain: "conus" }, generation: 8 } },
+      renderer: {
+        status: "painted",
+        visibility: "visible",
+        paintReceipt: { generation: 8, presented: true },
+      },
+      history: { retained: [{ generation: 8 }, { generation: 8 }] },
+      backfillStartCountAfter: 1,
+      siteLayerRemoved: true,
     },
     restoredSite: {
       sourceState: { painted: { source: { kind: "site", siteIcao: "KTLX" } }, transition: null },
