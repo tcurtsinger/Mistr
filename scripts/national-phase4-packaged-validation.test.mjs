@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   validateNationalPhase4Acceptance,
   validateResidentHandoff,
+  validateSiteInspection,
   validateTimeCarry,
   validateZoomHandoff,
 } from "./national-phase4-packaged-validation.mjs";
@@ -91,6 +92,14 @@ describe("National Phase 4 packaged acceptance", () => {
     expect(validateNationalPhase4Acceptance(report)).toContain(
       "National stays resident while the Site is displayed",
     );
+  });
+
+  it("requires a Site opened from National to inspect the scan it painted", () => {
+    expect(validateSiteInspection(validReport().siteInspection)).toEqual([]);
+    const stale = validReport().siteInspection;
+    stale.steps[1].inspectedObservationId = "s-old";
+    expect(validateSiteInspection(stale)).toEqual(["a Site opened from National inspects the scan it painted"]);
+    expect(validateSiteInspection(undefined)).toEqual(["a Site opened from National inspects the scan it painted"]);
   });
 
   it("requires each switch to keep the playback time or keep the loop playing", () => {
@@ -493,6 +502,13 @@ function validReport() {
         },
       },
       playing: { site: { playing: true, frames: 3 }, national: { playing: true } },
+    },
+    siteInspection: {
+      site: "KTLX",
+      steps: [
+        { index: 0, paintedObservationId: "s-old", inspectedObservationId: "s-old" },
+        { index: 4, paintedObservationId: "s-new", inspectedObservationId: "s-new" },
+      ],
     },
     restoredSite: {
       sourceState: { painted: { source: { kind: "site", siteIcao: "KTLX" } }, transition: null },

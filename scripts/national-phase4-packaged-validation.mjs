@@ -159,6 +159,7 @@ export function validateNationalPhase4Acceptance(report) {
   failures.push(...validateResidentHandoff(report.residentHandoff));
   failures.push(...validateZoomHandoff(report.zoomHandoff));
   failures.push(...validateTimeCarry(report.timeCarry));
+  failures.push(...validateSiteInspection(report.siteInspection));
   const site = report.restoredSite;
   if (
     site?.sourceState?.painted?.source?.kind !== "site"
@@ -265,6 +266,15 @@ export function validateTimeCarry(carry) {
     failures.push("National revealed from a playing Site keeps the loop playing");
   }
   return failures;
+}
+
+// A Site opened from National re-inspects the pinned point on every scan it paints.
+export function validateSiteInspection(inspection) {
+  const steps = inspection?.steps ?? [];
+  const followsScan = steps.length === 2
+    && new Set(steps.map((step) => step.paintedObservationId)).size === 2
+    && steps.every((step) => step.paintedObservationId && step.inspectedObservationId === step.paintedObservationId);
+  return followsScan ? [] : ["a Site opened from National inspects the scan it painted"];
 }
 
 export function validateZoomHandoff(handoff) {

@@ -376,6 +376,7 @@ export function App() {
     let clickHandler: ((event: MapMouseEvent) => void) | null = null;
     let autoSourceMoveHandlerForCleanup: ((event: { originalEvent?: unknown }) => void) | null = null;
     let unsubscribeAutoSourceFlush: (() => void) | null = null;
+    let autoSiteRetryTimer: ReturnType<typeof globalThis.setTimeout> | null = null;
     let latestReport: Phase4Report | null = null;
     let activeScenario: Promise<Phase4ScenarioReport> | null = null;
     let startupAcquisition: Promise<void> | null = null;
@@ -427,6 +428,37 @@ export function App() {
       if (synchronized === liveDisplay) return;
       liveDisplay = synchronized;
       publishPhase5({ ...latestPhase5, display: synchronized });
+    };
+
+    // Every Site layer, however it was created, keeps the display mode and the
+    // inspected value bound to the scan it actually painted.
+    const handleSiteRendererSnapshot = (
+      renderer: RadarRendererSnapshot,
+      siteController: ResidentPlaybackController | null,
+    ) => {
+      if (renderer.displayMode !== displayModeRef.current) {
+        displayModeRef.current = renderer.displayMode;
+        setDisplayMode(renderer.displayMode);
+        storeRadarDisplayMode(renderer.displayMode);
+      }
+      setPlaybackError((current) => playbackErrorAfterRendererStatus(current, renderer.status));
+      synchronizePaintedDisplay(renderer);
+      const receipt = renderer.paintReceipt;
+      const point = inspectionPointRef.current;
+      if (
+        receipt
+        && point
+        && interrogationObservationRef.current !== receipt.observationId
+      ) {
+        const paintedModel = modelsById.get(receipt.observationId);
+        if (paintedModel) {
+          interrogationObservationRef.current = receipt.observationId;
+          const nextInterrogation = interrogateLngLat(paintedModel, point);
+          setInterrogation(nextInterrogation);
+          setInspectionState(nextInterrogation ? "settled" : "outside");
+        }
+      }
+      publish({ renderer, playback: siteController?.snapshot() });
     };
 
     const publish = (patch: Partial<Phase4Report> = {}) => {
@@ -681,32 +713,7 @@ export function App() {
         displayMode,
         recoveryBeforeLayerId: ANCHOR_LAYER_ID,
         onSnapshot(renderer) {
-          if (renderer.displayMode !== displayModeRef.current) {
-            displayModeRef.current = renderer.displayMode;
-            setDisplayMode(renderer.displayMode);
-            storeRadarDisplayMode(renderer.displayMode);
-          }
-          setPlaybackError((current) => playbackErrorAfterRendererStatus(current, renderer.status));
-          synchronizePaintedDisplay(renderer);
-          const receipt = renderer.paintReceipt;
-          const point = inspectionPointRef.current;
-          if (
-            receipt
-            && point
-            && interrogationObservationRef.current !== receipt.observationId
-          ) {
-            const paintedModel = modelsById.get(receipt.observationId);
-            if (paintedModel) {
-              interrogationObservationRef.current = receipt.observationId;
-              const nextInterrogation = interrogateLngLat(paintedModel, point);
-              setInterrogation(nextInterrogation);
-              setInspectionState(nextInterrogation ? "settled" : "outside");
-            }
-          }
-          publish({
-            renderer,
-            playback: controller?.snapshot(),
-          });
+          handleSiteRendererSnapshot(renderer, controller);
         },
       });
       radarLayerRef.current = layer;
@@ -1196,9 +1203,7 @@ export function App() {
             // The first frame paints invisibly, then fades in over National.
             opacity: fadeMs > 0 ? 0 : 1,
             onSnapshot(renderer) {
-              setPlaybackError((current) => playbackErrorAfterRendererStatus(current, renderer.status));
-              synchronizePaintedDisplay(renderer);
-              publish({ renderer, playback: createdController?.snapshot() });
+              handleSiteRendererSnapshot(renderer, createdController);
             },
           });
           const beforeId = radarContextAnchorLayerId(instance.getStyle().layers ?? []);
@@ -1397,7 +1402,10 @@ export function App() {
         if (decision.target.kind !== "site" || decision.target.siteIcao !== autoErrorSite) {
           clearAutoSiteError();
         }
-        if (sameAutoSource(decision.target, visible)) {
+        // A Site showing only the bundled archive scan still needs its live radar.
+        const visibleSiteIsLive = painted.source.kind !== "site"
+          || residentLiveHistory?.at(-1)?.siteIcao === painted.source.siteIcao;
+        if (sameAutoSource(decision.target, visible) && visibleSiteIsLive) {
           if (decision.preload) void prefetchSite(decision.preload);
           return;
         }
@@ -1428,6 +1436,12 @@ export function App() {
             };
             autoErrorSite = target;
             setAutoSiteError(target);
+            // Retry once the cooldown ends, if the camera still calls for this Site.
+            if (autoSiteRetryTimer !== null) globalThis.clearTimeout(autoSiteRetryTimer);
+            autoSiteRetryTimer = globalThis.setTimeout(() => {
+              autoSiteRetryTimer = null;
+              if (!cancelled) evaluateAutoSource();
+            }, AUTO_SITE_RETRY_MS + 50);
           }
           settleAutoSwitch(false);
         });
@@ -1449,6 +1463,8 @@ export function App() {
       autoSourceRef.current = {
         setPreferredSite(site) {
           preferredSite = site;
+          // Picking a Site is an explicit retry; it skips the failure cooldown.
+          if (site) autoSiteFailures.delete(site);
         },
         prefetch(site) {
           void prefetchSite(site);
@@ -3020,6 +3036,42 @@ export function App() {
             siteLayerRemoved: !instance.getLayer(DIAGNOSTIC_LAYER_IDS.radar),
           };
         },
+        async proveSiteInspectionFollowsScan(site = "KTLX") {
+          const coordinator = radarSessionCoordinatorRef.current!;
+          const location = radarSiteById(normalizeRadarSite(site));
+          if (!siteLevel2Session || !nationalMrmsSession || !location) {
+            throw new Error("Site inspection proof is unavailable");
+          }
+          if (coordinator.snapshot().painted?.source.kind !== "national") {
+            throw new Error("National must be displayed before the Site inspection proof");
+          }
+          const waitFor = async (condition: () => boolean, timeoutMs: number, label: string) => {
+            const started = performance.now();
+            while (!condition()) {
+              if (performance.now() - started > timeoutMs) throw new Error(`${label} timed out`);
+              await waitMilliseconds(100);
+            }
+          };
+          await siteLevel2Session.start(location.id, { persistOnPaint: false });
+          await waitFor(() => (residentLiveHistory?.length ?? 0) >= 3, 180_000, "Site history of three scans");
+          // Pin a point 30 km north of the radar, as a click would.
+          inspectionPointRef.current = { longitude: location.longitude, latitude: location.latitude + 0.27 };
+          interrogationObservationRef.current = null;
+          const steps = [];
+          for (const index of [0, (residentLiveHistory?.length ?? 1) - 1]) {
+            await controller!.scrub(index);
+            await waitMilliseconds(100);
+            steps.push({
+              index,
+              paintedObservationId: layer?.getSnapshot().paintReceipt?.observationId ?? null,
+              inspectedObservationId: interrogationObservationRef.current,
+            });
+          }
+          inspectionPointRef.current = null;
+          interrogationObservationRef.current = null;
+          await nationalMrmsSession.start();
+          return { site: location.id, steps };
+        },
         async proveTimeCarry(site = "KTLX") {
           const coordinator = radarSessionCoordinatorRef.current!;
           const before = coordinator.snapshot();
@@ -3418,6 +3470,7 @@ export function App() {
       if (clickHandler) instance.off("click", clickHandler);
       if (autoSourceMoveHandlerForCleanup) instance.off("moveend", autoSourceMoveHandlerForCleanup);
       unsubscribeAutoSourceFlush?.();
+      if (autoSiteRetryTimer !== null) globalThis.clearTimeout(autoSiteRetryTimer);
       autoSourceRef.current = null;
       if (globalThis.__MISTR_AUTO_SOURCE__) delete globalThis.__MISTR_AUTO_SOURCE__;
       if (globalThis.__MISTR_PHASE4__) delete globalThis.__MISTR_PHASE4__;
@@ -4623,6 +4676,7 @@ declare global {
     proveResidentHandoff(site?: string): Promise<NationalPhase4ResidentHandoffReport>;
     proveZoomHandoff(site?: string, nextSite?: string): Promise<unknown>;
     proveTimeCarry(site?: string): Promise<unknown>;
+    proveSiteInspectionFollowsScan(site?: string): Promise<unknown>;
     loadTrace(): { atUnixMs: number; step: string; detail?: string }[];
     waitForHistory(frameCount?: number, timeoutMs?: number): Promise<NationalPhase4Report>;
     beginResidentEvidence(): Promise<void>;
