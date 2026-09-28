@@ -53,6 +53,38 @@ describe("decideAutoSource", () => {
     ).target).toEqual(ktlx);
   });
 
+  it("hops a displayed Site to National when a nearby Site is picked", () => {
+    // KVNX is ~110 km from KTLX, well inside KTLX's own keep range.
+    const kvnx = { longitude: -98.1281, latitude: 36.7408 };
+    expect(decideAutoSource({ zoom: 9.5, center: kvnx, visible: ktlx }, RADAR_SITES))
+      .toEqual({ target: ktlx });
+    expect(decideAutoSource(
+      { zoom: 9.5, center: kvnx, visible: ktlx, preferredSite: "KVNX" },
+      RADAR_SITES,
+    )).toEqual({ target: national });
+    expect(decideAutoSource(
+      { zoom: 9.5, center: kvnx, visible: national, preferredSite: "KVNX" },
+      RADAR_SITES,
+    )).toEqual({ target: { kind: "site", siteIcao: "KVNX" } });
+    // Below the enter zoom the displayed Site holds rather than dropping to National.
+    expect(decideAutoSource(
+      { zoom: 8.7, center: kvnx, visible: ktlx, preferredSite: "KVNX" },
+      RADAR_SITES,
+    )).toEqual({ target: ktlx });
+  });
+
+  it("marks the pick spent once the view leaves its coverage", () => {
+    const amarillo = { longitude: -101.83, latitude: 35.22 };
+    expect(decideAutoSource(
+      { zoom: 10, center: amarillo, visible: ktlx, preferredSite: "KTLX" },
+      RADAR_SITES,
+    )).toEqual({ target: national, preferenceSpent: true });
+    expect(decideAutoSource(
+      { zoom: 10, center: KTLX, visible: ktlx, preferredSite: "KTLX" },
+      RADAR_SITES,
+    )).toEqual({ target: ktlx });
+  });
+
   it("compares sources by kind and site", () => {
     expect(sameAutoSource(national, { kind: "national" })).toBe(true);
     expect(sameAutoSource(ktlx, { kind: "site", siteIcao: "KTLX" })).toBe(true);

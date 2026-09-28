@@ -62,12 +62,13 @@ The Site layer gains a 320 MiB GPU ceiling (a 60-frame loop is about 152 MiB, ab
 |---|---|
 | National shown, zoom ≥ 9, a Site within 200 km of the center | Switch to the nearest such Site (or the picked Site while within 230 km) |
 | National shown, zoom ≥ 8 and < 9, same Site condition | Stay on National; preload that Site |
+| Site shown, zoom ≥ 9, a different picked Site within 230 km of the center | Return to National (then on to the picked Site) |
 | Site shown, zoom ≥ 8.5 and center within 230 km of it | Stay on the Site |
 | Site shown, otherwise | Return to National |
 
-Moving between Sites always passes through National, so only one Site layer exists. Site coordinates live in `src/data/radar-sites.json`: 150 from nexrad-model's registry (a Rust test keeps them in sync) and 5 from api.weather.gov.
+Moving between Sites always passes through National, so only one Site layer exists. A switch that succeeds re-checks the same camera, so one pan into another Site's coverage runs both legs. A pick stops applying once the center leaves its 230 km range. Site coordinates live in `src/data/radar-sites.json`: 150 from nexrad-model's registry (a Rust test keeps them in sync) and 5 from api.weather.gov.
 
-Only camera moves the operator makes are evaluated (MapLibre events with an `originalEvent`), plus the landing of an explicit picker or recenter flight. Programmatic cameras, including every packaged harness camera, never switch sources.
+Only camera moves the operator makes are evaluated (MapLibre events with an `originalEvent`), plus the landing of an explicit picker or recenter flight. A move made while any switch is running is evaluated once it ends. Programmatic cameras, including every packaged harness camera, never switch sources.
 
 ### Switching
 
@@ -79,7 +80,7 @@ Only camera moves the operator makes are evaluated (MapLibre events with an `ori
 
 ### Camera
 
-Automatic switches never move the camera. The picker flies to a Site at zoom 9.5 (preloading during the flight when National is shown) and makes it preferred; picking National zooms out to the country; recenter uses the same targets. The camera is stored on every move and restored at launch.
+Automatic switches never move the camera. The picker flies to a Site at zoom 9.5 (preloading during the flight when National is shown) and makes it preferred, so the landing switches to it from National or from another Site; picking National always zooms out to the country, even when National is already shown; recenter uses the same targets. The camera is stored on every move and restored at launch.
 
 ### Known limits
 
@@ -88,4 +89,4 @@ Automatic switches never move the camera. The picker flies to a Site at zoom 9.5
 
 ### Validation
 
-`proveZoomHandoff` in the National packaged gate: at zoom 8.3 over KTLX the Site preloads; at 9.6 the Site fades in under the preloaded generation with National resident and the camera untouched; at 7.5 the same National history returns, the Site layer is removed, and the camera is untouched.
+`proveZoomHandoff` in the National packaged gate: at zoom 8.3 over KTLX the Site preloads; at 9.6 the Site fades in under the preloaded generation with National resident and the camera untouched; one jump to KFWS at 9.6 goes KTLX, National, KFWS with no further move; at 7.5 the same National history returns, the Site layer is removed, and the camera is untouched.

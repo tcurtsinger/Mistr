@@ -362,6 +362,7 @@ export function App() {
     let staticNationalDiagnostic = false;
     let clickHandler: ((event: MapMouseEvent) => void) | null = null;
     let autoSourceMoveHandlerForCleanup: ((event: { originalEvent?: unknown }) => void) | null = null;
+    let unsubscribeAutoSourceFlush: (() => void) | null = null;
     let latestReport: Phase4Report | null = null;
     let activeScenario: Promise<Phase4ScenarioReport> | null = null;
     let startupAcquisition: Promise<void> | null = null;
@@ -1339,9 +1340,11 @@ export function App() {
         return siteLevel2Session.start(site, { ...options, residentGeneration });
       };
 
-      const settleAutoSwitch = () => {
+      // A switch that succeeded re-checks the same camera: Site to Site goes
+      // through National, and the second leg needs no further camera move.
+      const settleAutoSwitch = (succeeded: boolean) => {
         autoSwitchInFlight = false;
-        if (!pendingAutoEvaluation) return;
+        if (!succeeded && !pendingAutoEvaluation) return;
         pendingAutoEvaluation = false;
         evaluateAutoSource();
       };
@@ -1366,17 +1369,18 @@ export function App() {
           preferredSite,
         }, RADAR_SITES);
         lastAutoDecision = { ...decision, atUnixMs: Date.now() };
+        if (decision.preferenceSpent) preferredSite = undefined;
         if (sameAutoSource(decision.target, visible)) {
           if (decision.preload) void prefetchSite(decision.preload);
           return;
         }
         if (decision.target.kind === "national") {
           autoSwitchInFlight = true;
-          void nationalMrmsSession.start().then(settleAutoSwitch, (error: unknown) => {
+          void nationalMrmsSession.start().then(() => settleAutoSwitch(true), (error: unknown) => {
             if (!isRadarSourceSuperseded(error)) {
               setNationalRequestError(error instanceof Error ? error.message : String(error));
             }
-            settleAutoSwitch();
+            settleAutoSwitch(false);
           });
           return;
         }
@@ -1384,12 +1388,12 @@ export function App() {
         const failedAt = autoSiteFailures.get(target);
         if (failedAt !== undefined && Date.now() - failedAt < AUTO_SITE_RETRY_MS) return;
         autoSwitchInFlight = true;
-        void startSiteSession(target).then(settleAutoSwitch, (error: unknown) => {
+        void startSiteSession(target).then(() => settleAutoSwitch(true), (error: unknown) => {
           if (!isRadarSourceSuperseded(error)) {
             autoSiteFailures.set(target, Date.now());
             setSiteRequestError(error instanceof Error ? error.message : String(error));
           }
-          settleAutoSwitch();
+          settleAutoSwitch(false);
         });
       };
 
@@ -1400,6 +1404,12 @@ export function App() {
       };
       instance.on("moveend", autoSourceMoveHandler);
       autoSourceMoveHandlerForCleanup = autoSourceMoveHandler;
+      // A camera move made during a manual switch is evaluated once it ends.
+      unsubscribeAutoSourceFlush = radarSessionCoordinatorRef.current!.subscribe((snapshot) => {
+        if (snapshot.transition || autoSwitchInFlight || !pendingAutoEvaluation) return;
+        pendingAutoEvaluation = false;
+        queueMicrotask(evaluateAutoSource);
+      });
       autoSourceRef.current = {
         setPreferredSite(site) {
           preferredSite = site;
@@ -2831,10 +2841,11 @@ export function App() {
             siteLayerRemoved: !instance.getLayer(DIAGNOSTIC_LAYER_IDS.radar),
           };
         },
-        async proveZoomHandoff(site = "KTLX") {
+        async proveZoomHandoff(site = "KTLX", nextSite = "KFWS") {
           const location = radarSiteById(normalizeRadarSite(site));
+          const nextLocation = radarSiteById(normalizeRadarSite(nextSite));
           const auto = globalThis.__MISTR_AUTO_SOURCE__;
-          if (!location || !auto || !nationalLayer) {
+          if (!location || !nextLocation || !auto || !nationalLayer) {
             throw new Error("zoom handoff diagnostic is unavailable");
           }
           const coordinator = radarSessionCoordinatorRef.current!;
@@ -2878,7 +2889,42 @@ export function App() {
             nationalRenderer: nationalLayer?.getSnapshot() ?? null,
           };
 
-          instance.jumpTo({ center, zoom: 7.5, bearing: 0, pitch: 0 });
+          // Panning at detail zoom into another Site's coverage fades through
+          // National and on to that Site from one camera move.
+          const nextCenter: [number, number] = [nextLocation.longitude, nextLocation.latitude];
+          const hopSources: string[] = [];
+          const stopWatchingHop = coordinator.subscribe((snapshot) => {
+            const painted = snapshot.painted?.source;
+            const label = !painted ? "none" : painted.kind === "site" ? painted.siteIcao : "national";
+            if (hopSources.at(-1) !== label) hopSources.push(label);
+          });
+          instance.jumpTo({ center: nextCenter, zoom: 9.6, bearing: 0, pitch: 0 });
+          const hopCameraSet = camera();
+          const hopStarted = performance.now();
+          let afterHop;
+          try {
+            auto.evaluate();
+            await waitFor(
+              () => settled("site") && coordinator.snapshot().painted?.source.kind === "site"
+                && (coordinator.snapshot().painted?.source as { siteIcao?: string }).siteIcao === nextLocation.id,
+              120_000,
+              "Site to Site pan",
+            );
+            afterHop = {
+              site: nextLocation.id,
+              switchMs: performance.now() - hopStarted,
+              sources: [...hopSources],
+              sourceState: coordinator.snapshot(),
+              camera: camera(),
+              cameraSet: hopCameraSet,
+              siteOpacity: layer?.getOpacity() ?? null,
+              nationalRenderer: nationalLayer?.getSnapshot() ?? null,
+            };
+          } finally {
+            stopWatchingHop();
+          }
+
+          instance.jumpTo({ center: nextCenter, zoom: 7.5, bearing: 0, pitch: 0 });
           const nationalCameraSet = camera();
           const nationalStarted = performance.now();
           auto.evaluate();
@@ -2891,6 +2937,7 @@ export function App() {
             preloaded,
             siteSwitchMs,
             afterSite,
+            afterHop,
             nationalSwitchMs,
             afterNational: {
               sourceState: coordinator.snapshot(),
@@ -3093,6 +3140,7 @@ export function App() {
       if (radarLayerRef.current === layer) radarLayerRef.current = null;
       if (clickHandler) instance.off("click", clickHandler);
       if (autoSourceMoveHandlerForCleanup) instance.off("moveend", autoSourceMoveHandlerForCleanup);
+      unsubscribeAutoSourceFlush?.();
       autoSourceRef.current = null;
       if (globalThis.__MISTR_AUTO_SOURCE__) delete globalThis.__MISTR_AUTO_SOURCE__;
       if (globalThis.__MISTR_PHASE4__) delete globalThis.__MISTR_PHASE4__;
@@ -3311,7 +3359,8 @@ export function App() {
     interrogationObservationRef.current = null;
     inspectionRequestRef.current = null;
     // The picker flies to the Site; zoom then keeps it displayed. From National
-    // the Site preloads during the flight and the landing switches to it.
+    // the Site preloads during the flight and the landing switches to it; from
+    // another Site the landing fades through National first.
     const auto = autoSourceRef.current;
     auto?.setPreferredSite(normalized);
     const instance = map.current;
@@ -3321,8 +3370,8 @@ export function App() {
       flyToSite(instance, location);
     }
     const painted = radarSessionCoordinatorRef.current?.snapshot().painted;
-    if (auto && instance && location && painted?.source.kind === "national") {
-      auto.prefetch(normalized);
+    if (auto && instance && location && painted) {
+      if (painted.source.kind === "national") auto.prefetch(normalized);
       auto.evaluateIfSettled();
       return;
     }
@@ -3346,20 +3395,21 @@ export function App() {
       return;
     }
     const sourceState = radarSessionCoordinatorRef.current?.snapshot();
-    if (
-      sourceState?.transition?.requestedSource.kind === "national"
-      || (sourceState?.painted?.source.kind === "national" && !sourceState.transition)
-    ) return;
-    setNationalRequestError(null);
-    setSiteRequestError(null);
-    setInterrogation(null);
-    setInspectionState("idle");
-    inspectionMarkerRef.current?.remove();
-    inspectionMarkerRef.current = null;
-    inspectionPointRef.current = null;
-    interrogationObservationRef.current = null;
-    inspectionRequestRef.current = null;
-    // Picking National zooms out to the country; the landing switches source.
+    const alreadyNational = sourceState?.transition?.requestedSource.kind === "national"
+      || (sourceState?.painted?.source.kind === "national" && !sourceState.transition);
+    if (!alreadyNational) {
+      setNationalRequestError(null);
+      setSiteRequestError(null);
+      setInterrogation(null);
+      setInspectionState("idle");
+      inspectionMarkerRef.current?.remove();
+      inspectionMarkerRef.current = null;
+      inspectionPointRef.current = null;
+      interrogationObservationRef.current = null;
+      inspectionRequestRef.current = null;
+    }
+    // Picking National zooms out to the country, even when National is already
+    // displayed; the landing switches source if needed.
     const auto = autoSourceRef.current;
     auto?.setPreferredSite(undefined);
     const instance = map.current;
@@ -3369,6 +3419,7 @@ export function App() {
       auto.evaluateIfSettled();
       return;
     }
+    if (alreadyNational) return;
     void session.start().then(
       () => setNationalRequestError(null),
       (error: unknown) => {
@@ -4287,7 +4338,7 @@ declare global {
     startSite(site?: string): Promise<Phase5Report>;
     proveFailedSiteKeepsNational(site?: string): Promise<NationalPhase4FailedSiteRecoveryReport>;
     proveResidentHandoff(site?: string): Promise<NationalPhase4ResidentHandoffReport>;
-    proveZoomHandoff(site?: string): Promise<unknown>;
+    proveZoomHandoff(site?: string, nextSite?: string): Promise<unknown>;
     waitForHistory(frameCount?: number, timeoutMs?: number): Promise<NationalPhase4Report>;
     beginResidentEvidence(): Promise<void>;
     endResidentEvidence(): void;

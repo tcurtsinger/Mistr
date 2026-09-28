@@ -242,6 +242,20 @@ export function validateZoomHandoff(handoff) {
     || !sameCamera(afterSite?.camera, afterSite?.cameraSet)
     || !(handoff?.siteSwitchMs >= 0 && handoff.siteSwitchMs <= 1_500 + fadeMs)
   ) failures.push("zooming in fades the preloaded Site in without moving the camera");
+  const hop = handoff?.afterHop;
+  const hopSources = hop?.sources ?? [];
+  if (
+    !hop?.site
+    || hop.site === site
+    || hop?.sourceState?.painted?.source?.kind !== "site"
+    || hop?.sourceState?.painted?.source?.siteIcao !== hop.site
+    || hop?.sourceState?.transition
+    || hopSources.join(">") !== `${site}>national>${hop.site}`
+    || hop?.siteOpacity !== 1
+    || hop?.nationalRenderer?.visibility !== "resident"
+    || !sameCamera(hop?.camera, hop?.cameraSet)
+    || !(hop?.switchMs >= 0)
+  ) failures.push("panning into another Site's coverage fades through National to that Site");
   const afterNational = handoff?.afterNational;
   if (
     afterNational?.sourceState?.painted?.source?.kind !== "national"

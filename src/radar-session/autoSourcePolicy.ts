@@ -28,6 +28,8 @@ export interface AutoSourceDecision {
   readonly target: AutoSource;
   /** Site worth fetching ahead of the switch, only while National is displayed. */
   readonly preload?: string;
+  /** The view has left the preferred Site's coverage, so the pick no longer applies. */
+  readonly preferenceSpent?: true;
 }
 
 const NATIONAL: AutoSource = { kind: "national" };
@@ -41,18 +43,29 @@ export function decideAutoSource(
   sites: readonly RadarSiteOption[],
 ): AutoSourceDecision {
   const { zoom, center, visible } = input;
+  const preferred = input.preferredSite
+    ? sites.find((site) => site.id === input.preferredSite)
+    : undefined;
+  const preferenceHolds = Boolean(
+    preferred && distanceM(center, preferred) <= AUTO_SITE_KEEP_RANGE_M,
+  );
+  const spent = input.preferredSite && !preferenceHolds ? { preferenceSpent: true as const } : {};
   if (visible.kind === "site") {
+    // A picked Site replaces the displayed one by way of National.
+    if (preferenceHolds && preferred!.id !== visible.siteIcao && zoom >= AUTO_SITE_ENTER_ZOOM) {
+      return { target: NATIONAL };
+    }
     const current = sites.find((site) => site.id === visible.siteIcao);
     const stays = current
       && zoom >= AUTO_SITE_EXIT_ZOOM
       && distanceM(center, current) <= AUTO_SITE_KEEP_RANGE_M;
-    return { target: stays ? visible : NATIONAL };
+    return { target: stays ? visible : NATIONAL, ...spent };
   }
-  const candidate = candidateSite(center, input.preferredSite, sites);
-  if (!candidate) return { target: NATIONAL };
-  if (zoom >= AUTO_SITE_ENTER_ZOOM) return { target: { kind: "site", siteIcao: candidate } };
-  if (zoom >= AUTO_SITE_PRELOAD_ZOOM) return { target: NATIONAL, preload: candidate };
-  return { target: NATIONAL };
+  const candidate = preferenceHolds ? preferred!.id : nearestCoveringSite(center, sites);
+  if (!candidate) return { target: NATIONAL, ...spent };
+  if (zoom >= AUTO_SITE_ENTER_ZOOM) return { target: { kind: "site", siteIcao: candidate }, ...spent };
+  if (zoom >= AUTO_SITE_PRELOAD_ZOOM) return { target: NATIONAL, preload: candidate, ...spent };
+  return { target: NATIONAL, ...spent };
 }
 
 export function sameAutoSource(left: AutoSource, right: AutoSource): boolean {
@@ -60,13 +73,10 @@ export function sameAutoSource(left: AutoSource, right: AutoSource): boolean {
     && (left.kind === "national" || left.siteIcao === (right as { siteIcao: string }).siteIcao);
 }
 
-function candidateSite(
+function nearestCoveringSite(
   center: LngLatPoint,
-  preferredSite: string | undefined,
   sites: readonly RadarSiteOption[],
 ): string | undefined {
-  const preferred = preferredSite ? sites.find((site) => site.id === preferredSite) : undefined;
-  if (preferred && distanceM(center, preferred) <= AUTO_SITE_KEEP_RANGE_M) return preferred.id;
   let nearest: { id: string; distance: number } | undefined;
   for (const site of sites) {
     const distance = distanceM(center, site);
