@@ -2834,7 +2834,13 @@ export function App() {
       nationalHistory?.retained.length ?? 0,
     );
   const sitePlayback = phase4.kind === "complete" ? phase4.report.playback : undefined;
-  const playback = nationalActive ? nationalPlayback ?? undefined : sitePlayback;
+  // A brief hold for an atomic National history commit resumes on its own,
+  // so the chrome keeps presenting it as playing.
+  const playback = nationalActive
+    ? nationalPlayback?.resumingAfterReplacement
+      ? { ...nationalPlayback, playing: true }
+      : nationalPlayback ?? undefined
+    : sitePlayback;
   const frameIndex = paintedFrameIndex(timelineFrames, playback);
   const displayedAtUnixMs = playback?.playheadObservedAtUnixMs
     ?? (nationalActive
@@ -2947,7 +2953,9 @@ export function App() {
       const controller = nationalPlaybackControllerRef.current;
       if (!controller) return;
       const snapshot = controller.snapshot();
-      if (snapshot.playing || snapshot.preparingQuality) controller.pause();
+      if (snapshot.playing || snapshot.preparingQuality || snapshot.resumingAfterReplacement) {
+        controller.pause();
+      }
       else {
         void controller.play().catch((error) => {
           if (isRadarSourceSuperseded(error)) return;

@@ -16,6 +16,11 @@ export interface NationalPlaybackSnapshot {
   transitionCount: number;
   completedCycles: number;
   residentReplacementPending: boolean;
+  /**
+   * Playback is held only for an atomic history commit and will resume on its
+   * own. The chrome keeps showing Pause, so background commits never flicker.
+   */
+  resumingAfterReplacement: boolean;
   holdReason?: string;
   qualityLockFactor?: number;
   refining: boolean;
@@ -63,6 +68,7 @@ export class NationalPlaybackController {
   private refinementAfterQualityPreparation = false;
   private suppressSettledRefinement = false;
   private mutationResumeRequest = -1;
+  private mutationWasPlaying = false;
   private nextFrameDueAt: number | null = null;
   private mutationRemainingDwellMs: number | undefined;
   private readonly dwellMs: number;
@@ -228,6 +234,9 @@ export class NationalPlaybackController {
     // resumeAfterMutation may only undo THIS pause. If the operator pauses or
     // plays while the mutation commits, their intent owns playback state.
     this.mutationResumeRequest = this.playRequest;
+    // Only a history-commit hold (marked pending first) resumes by itself.
+    this.mutationWasPlaying = wasPlaying && this.replacementPending;
+    this.emit();
     if (!scheduleRefinement) {
       // Callers settling resident paint for a transition or history mutation
       // must not have refinement armed behind their back when the pending
@@ -244,6 +253,7 @@ export class NationalPlaybackController {
   }
 
   resumeAfterMutation(wasPlaying: boolean): void {
+    this.mutationWasPlaying = false;
     if (
       wasPlaying
       && !this.disposed
@@ -329,6 +339,8 @@ export class NationalPlaybackController {
       transitionCount: this.transitionCount,
       completedCycles: this.completedCycles,
       residentReplacementPending: this.replacementPending,
+      resumingAfterReplacement: this.mutationWasPlaying
+        && this.playRequest === this.mutationResumeRequest,
       qualityLockFactor: renderer.playbackQualityFactor,
       refining: this.refinementTimer !== null,
       preparingQuality: this.preparingQuality,

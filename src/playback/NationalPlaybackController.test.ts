@@ -149,6 +149,36 @@ describe("NationalPlaybackController", () => {
     controller.dispose();
   });
 
+  it("presents an atomic history commit hold as resuming, never as an operator pause", async () => {
+    vi.useFakeTimers();
+    const observations = frames(3);
+    const layer = new FakeNationalLayer(observations);
+    const states: boolean[] = [];
+    const controller = new NationalPlaybackController(layer, observations, {
+      onState: (snapshot) => states.push(snapshot.playing || snapshot.resumingAfterReplacement),
+    });
+    controller.establishInitialPaint(layer.receipt());
+    await controller.play();
+    states.length = 0;
+    controller.markReplacementPending(true);
+    const wasPlaying = await controller.pauseAndWait(false);
+    expect(controller.snapshot()).toMatchObject({ playing: false, resumingAfterReplacement: true });
+    controller.acceptHistory(observations, layer.receipt());
+    controller.resumeAfterMutation(wasPlaying);
+    expect(controller.snapshot()).toMatchObject({ playing: true, resumingAfterReplacement: false });
+    // Only the pause inside the hold itself may present as stopped, and the
+    // same synchronous turn already re-reports resuming before any render.
+    const resumedFrom = states.indexOf(true, states.indexOf(false));
+    expect(resumedFrom).toBeGreaterThan(0);
+    expect(states.slice(resumedFrom), JSON.stringify(states)).not.toContain(false);
+
+    controller.markReplacementPending(true);
+    await controller.pauseAndWait(false);
+    controller.pause();
+    expect(controller.snapshot().resumingAfterReplacement).toBe(false);
+    controller.dispose();
+  });
+
   it("uses the complete all-frame factor-4 fallback when no finer viewport is ready", async () => {
     vi.useFakeTimers();
     const observations = frames(3);

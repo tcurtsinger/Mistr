@@ -5,6 +5,7 @@ import {
   validateNationalPartialPlaybackChrome,
   validateNationalPhase4Acceptance,
 } from "./national-phase4-packaged-validation.mjs";
+import { LIVE_HISTORY_CAPACITY } from "./live-history-capacity.mjs";
 
 const port = Number(process.env.MISTR_CDP_PORT ?? 9344);
 const output = resolve(process.env.MISTR_NATIONAL_PHASE4_OUTPUT ?? "artifacts/national-phase-4");
@@ -126,7 +127,7 @@ try {
     30_000,
   );
   const newest = await evaluate(
-    serialized("window.__MISTR_NATIONAL_PHASE4__.scrubWithEvidence(19)"),
+    serialized(`window.__MISTR_NATIONAL_PHASE4__.scrubWithEvidence(${LIVE_HISTORY_CAPACITY - 1})`),
     true,
     30_000,
   );
@@ -146,7 +147,7 @@ try {
     true,
     60_000,
   );
-  await evaluate(serialized("window.__MISTR_NATIONAL_PHASE4__.scrub(19)"), true, 30_000);
+  await evaluate(serialized(`window.__MISTR_NATIONAL_PHASE4__.scrub(${LIVE_HISTORY_CAPACITY - 1})`), true, 30_000);
   const restoredNewestInspection = await evaluate(
     serialized(`window.__MISTR_NATIONAL_PHASE4__.waitForInspection(${JSON.stringify(newest.receipt.observationId)})`),
     true,
@@ -394,7 +395,7 @@ async function observePlaybackChrome(durationMs) {
         announcement:document.querySelector('.radar-announcement')?.textContent?.replace(/\s+/g,' ').trim()??'',
         buttonDisabled:document.querySelector('.playback-toggle')?.disabled??null,
         loadingNotice:/Loading recent observations/i.test(document.querySelector('.radar-notice')?.textContent??''),
-        playing:report?.playback?.playing===true,
+        playing:['Pause radar loop','Cancel radar playback preparation'].includes(document.querySelector('.playback-toggle')?.getAttribute('aria-label')),
         retainedCount:report?.history?.retained?.length??0,
       });
       await new Promise(resolve=>setTimeout(resolve,16));
