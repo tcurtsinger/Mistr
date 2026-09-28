@@ -21,16 +21,16 @@ use std::time::Instant;
 use tauri::ipc::Response;
 use tokio::sync::Semaphore;
 
-const HISTORY_LIMIT: usize = 20;
+const HISTORY_LIMIT: usize = 60;
 // Native-residency owner decision (2026-08-04): every retained observation is
 // served at the exact full-resolution grid. The presentation named "overview"
 // throughout this store is therefore factor 1 — there is exactly one version
 // of the data, and no coarser level ever reaches the operator.
 const OVERVIEW_FACTOR: u16 = 1;
-// Twenty retained native-resolution encodings (~49 MB each) plus one staged
+// Sixty retained native-resolution encodings (~49 MB each) plus one staged
 // mutation and the compressed downloads. Sized for the supported desktop
 // floor (tens of GB of system memory), not a minimal device.
-const HISTORY_BACKEND_TARGET_BYTES: usize = 2048 * 1024 * 1024;
+const HISTORY_BACKEND_TARGET_BYTES: usize = 4096 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -1076,6 +1076,68 @@ pub fn request_national_history_chunk(
     publish_history_bytes(&broker, &state, session, generation, result)
 }
 
+// One credit covers a bounded batch of unchanged, hash-validated PackedGrid v1 chunks.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn request_national_history_chunk_batch(
+    broker: tauri::State<'_, TransferBroker>,
+    state: tauri::State<'_, NationalHistoryState>,
+    session: u64,
+    generation: u64,
+    observation_time_unix_ms: i64,
+    content_sha256: String,
+    presentation_factor: u16,
+    chunk_indices: Vec<u32>,
+) -> Result<Response, TransferError> {
+    broker.acquire(session, generation)?;
+    let result = history_frame_bytes(
+        &state,
+        generation,
+        observation_time_unix_ms,
+        &content_sha256,
+        presentation_factor,
+        |frame| encode_chunk_batch(&frame.chunks, &chunk_indices),
+    )
+    .and_then(|bytes| bytes);
+    publish_history_bytes(&broker, &state, session, generation, result)
+}
+
+fn encode_chunk_batch(chunks: &[Vec<u8>], indices: &[u32]) -> Result<Vec<u8>, TransferError> {
+    if indices.is_empty()
+        || indices.len() > 16
+        || indices
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
+            != indices.len()
+    {
+        return Err(TransferError::new(
+            "national_batch_invalid",
+            "batch requires 1 to 16 unique chunk indices",
+        ));
+    }
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"MGB1");
+    bytes.extend_from_slice(&(indices.len() as u32).to_be_bytes());
+    for index in indices {
+        let chunk = chunks.get(*index as usize).ok_or_else(|| {
+            TransferError::new(
+                "national_chunk_not_found",
+                "batch chunk is outside presentation",
+            )
+        })?;
+        if chunk.is_empty() || chunk.len() > crate::packed_grid::PACKED_GRID_CHUNK_LIMIT {
+            return Err(TransferError::new(
+                "national_batch_invalid",
+                "batch chunk exceeds wire bounds",
+            ));
+        }
+        bytes.extend_from_slice(&(chunk.len() as u32).to_be_bytes());
+        bytes.extend_from_slice(chunk);
+    }
+    Ok(bytes)
+}
+
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn lookup_national_history_point(
@@ -1583,6 +1645,28 @@ mod tests {
     use std::collections::BTreeMap;
 
     #[test]
+    fn chunk_batch_envelope_preserves_order_and_bounded_payloads() {
+        let chunks = vec![vec![1, 2], vec![3]];
+        assert_eq!(
+            encode_chunk_batch(&chunks, &[1, 0]).unwrap(),
+            vec![
+                b'M', b'G', b'B', b'1', 0, 0, 0, 2, 0, 0, 0, 1, 3, 0, 0, 0, 2, 1, 2,
+            ]
+        );
+        for indices in [vec![], vec![0, 0], vec![2], (0..17).collect()] {
+            assert!(encode_chunk_batch(&chunks, &indices).is_err());
+        }
+        assert!(encode_chunk_batch(&[vec![]], &[0]).is_err());
+        assert!(
+            encode_chunk_batch(
+                &[vec![0; crate::packed_grid::PACKED_GRID_CHUNK_LIMIT + 1]],
+                &[0]
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
     fn commits_current_and_strictly_older_predecessors_chronologically() {
         let mut store = test_store(20);
         store.reset(7, VecDeque::new());
@@ -1805,18 +1889,20 @@ mod tests {
 
     #[test]
     fn newer_append_evicts_exactly_one_oldest_frame_at_the_shipping_limit() {
-        let mut store = test_store(20);
+        let mut store = test_store(HISTORY_LIMIT);
         store.reset(7, VecDeque::new());
         commit(&mut store, NationalHistoryMutationKind::Current, 1_000).unwrap();
         let mut evicted = None;
-        for time in (2..=21).map(|value| value * 1_000) {
+        for time in (2..=HISTORY_LIMIT as i64 + 1).map(|value| value * 1_000) {
             evicted = commit(&mut store, NationalHistoryMutationKind::Newer, time).unwrap();
         }
 
-        assert_eq!(store.retained.len(), 20);
+        assert_eq!(store.retained.len(), HISTORY_LIMIT);
         assert_eq!(
             retained_times(&store),
-            (2..=21).map(|value| value * 1_000).collect::<Vec<_>>()
+            (2..=HISTORY_LIMIT as i64 + 1)
+                .map(|value| value * 1_000)
+                .collect::<Vec<_>>()
         );
         assert_eq!(evicted.unwrap().observation_time_unix_ms, 1_000);
     }

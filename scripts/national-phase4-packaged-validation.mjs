@@ -1,8 +1,8 @@
-// Native-residency contract (owner decision, 2026-08-04): all 20 retained
+// Native-residency contract (owner decision, 2026-08-04): all 60 retained
 // observations are GPU-resident at the exact factor-1 grid; receipts carry
 // the native manifest factor, and no detail/fallback level exists.
-const TARGET_BYTES = 1280 * 1024 * 1024;
-const HARD_CEILING_BYTES = 1536 * 1024 * 1024;
+const TARGET_BYTES = 3328 * 1024 * 1024;
+const HARD_CEILING_BYTES = 3584 * 1024 * 1024;
 // Slices adapt to measured throughput; cold-start overshoot of the 4 ms
 // pacing budget is tolerated, long tasks are not.
 const UPLOAD_SLICE_LONG_TASK_CEILING_MS = 50;
@@ -28,9 +28,9 @@ export function validateNationalPhase4Acceptance(report) {
   const ids = retained.map(observationId);
   const times = retained.map((observation) => observation.observationTimeUnixMs);
 
-  if (history?.historyLimit !== 20 || retained.length !== 20) failures.push("20 retained observations");
-  if (!strictlyIncreasing(times) || new Set(ids).size !== 20) failures.push("chronological unique history");
-  if (!(times.at(-1) - times[0] >= 30 * 60_000)) failures.push("approximately 38 minute history span");
+  if (history?.historyLimit !== 60 || retained.length !== 60) failures.push("60 retained observations");
+  if (!strictlyIncreasing(times) || new Set(ids).size !== 60) failures.push("chronological unique history");
+  if (!(times.at(-1) - times[0] >= 100 * 60_000)) failures.push("approximately two-hour history span");
   if (
     history?.staged !== null
     || history?.mutationReversible !== false
@@ -40,12 +40,12 @@ export function validateNationalPhase4Acceptance(report) {
   if (
     renderer?.status !== "painted"
     || renderer?.mutationAwaitingCommit !== false
-    || renderer?.commonResidentObservationIds?.length !== 20
+    || renderer?.commonResidentObservationIds?.length !== 60
     || !sameMembers(renderer?.commonResidentObservationIds ?? [], ids)
   ) failures.push("all-frame common GPU residency");
   if (!(renderer?.gpuResourceBytes > 0 && renderer.gpuResourceBytes < TARGET_BYTES && renderer.peakGpuResourceBytes < HARD_CEILING_BYTES)) failures.push("National GPU memory budget");
   if (!(renderer?.maximumUploadSliceMs > 0 && renderer.maximumUploadSliceMs <= UPLOAD_SLICE_LONG_TASK_CEILING_MS)) failures.push("upload slice long-task ceiling");
-  if (playback?.residentCount !== 20 || !ids.includes(playback?.selectedObservationId)) failures.push("20-frame playback timeline");
+  if (playback?.residentCount !== 60 || !ids.includes(playback?.selectedObservationId)) failures.push("60-frame playback timeline");
 
   const transitions = report.transitions;
   if (transitions?.requestedTransitions !== 1_000 || transitions?.completedTransitions !== 1_000) failures.push("1000 resident transitions");
@@ -74,7 +74,7 @@ export function validateNationalPhase4Acceptance(report) {
   if (
     detail?.presentationFactor !== 1
     || detail?.fallbackChunkCount !== 0
-    || detail?.commonResidentObservationIds?.length !== 20
+    || detail?.commonResidentObservationIds?.length !== 60
     || detail?.detailedObservationIds?.length !== 0
     || detail?.mutationAwaitingCommit !== false
   ) failures.push("camera-independent native residency");
@@ -108,7 +108,7 @@ export function validateNationalPhase4Acceptance(report) {
   if (
     reset?.receipt?.contextEpoch !== (reset?.before?.contextEpoch ?? 0) + 1
     || reset?.after?.status !== "painted"
-    || reset?.after?.commonResidentObservationIds?.length !== 20
+    || reset?.after?.commonResidentObservationIds?.length !== 60
     || !zeroActivity(reset?.activityDelta)
   ) failures.push("network-free all-frame context recovery");
 

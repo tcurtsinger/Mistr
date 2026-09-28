@@ -32,3 +32,11 @@ tokio = { version = "=1.53.1", features = ["macros", "rt-multi-thread", "signal"
 
 [dev-dependencies]
 proptest = "=1.9.0"
+
+# Unoptimized debug builds take ~5 s per native National frame (decode +
+# encode) versus ~0.35 s with these settings; release is ~0.18 s.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3

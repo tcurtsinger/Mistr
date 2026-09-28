@@ -1,7 +1,7 @@
 import type { RadarSweepCpuModel } from "../radar-renderer/cpuModel";
 import { isSupportedRadarSite } from "../data/radarSites";
 
-export const MAX_LIVE_HISTORY_FRAMES = 20;
+export const MAX_LIVE_HISTORY_FRAMES = 60;
 
 export interface LiveHistoryUpdate {
   frames: readonly RadarSweepCpuModel[];

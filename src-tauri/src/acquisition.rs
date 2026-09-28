@@ -115,6 +115,13 @@ pub struct PublicRadarClient {
 
 impl PublicRadarClient {
     pub fn new() -> Result<Self, AcquisitionError> {
+        static HTTP: OnceLock<Client> = OnceLock::new();
+        if let Some(http) = HTTP.get() {
+            return Ok(Self {
+                http: http.clone(),
+                counters: Arc::default(),
+            });
+        }
         let http = Client::builder()
             .connect_timeout(CONNECT_TIMEOUT)
             .timeout(HTTP_TIMEOUT)
@@ -122,6 +129,7 @@ impl PublicRadarClient {
             .user_agent("Mistr/0.0.1 (+https://github.com/tcurtsinger/Mistr)")
             .build()
             .map_err(|error| AcquisitionError::Request(error.to_string()))?;
+        let _ = HTTP.set(http.clone());
         Ok(Self {
             http,
             counters: Arc::default(),

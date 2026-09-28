@@ -2,13 +2,16 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { CdpClient, fetchJsonWithTimeout, openWebSocketWithTimeout } from "./cdp-client.mjs";
 import { validateAlphaLiveSoak } from "./alpha-live-soak-validation.mjs";
+import { LIVE_HISTORY_CAPACITY } from "./live-history-capacity.mjs";
 
 const port = Number(process.env.MISTR_CDP_PORT ?? 9341);
-const targetFrames = Number(process.env.MISTR_ALPHA_SOAK_FRAMES ?? 20);
+const targetFrames = Number(process.env.MISTR_ALPHA_SOAK_FRAMES ?? LIVE_HISTORY_CAPACITY);
 const timeoutSeconds = Number(process.env.MISTR_ALPHA_SOAK_TIMEOUT_SECONDS ?? 2_700);
 const output = resolve(process.env.MISTR_ALPHA_SOAK_OUTPUT ?? "artifacts/alpha-release/live-soak");
 if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) throw new Error("invalid CDP port");
-if (!Number.isSafeInteger(targetFrames) || targetFrames < 4 || targetFrames > 20) throw new Error("soak target must be between 4 and 20 frames");
+if (!Number.isSafeInteger(targetFrames) || targetFrames < 4 || targetFrames > LIVE_HISTORY_CAPACITY) {
+  throw new Error(`soak target must be between 4 and ${LIVE_HISTORY_CAPACITY} frames`);
+}
 if (!Number.isSafeInteger(timeoutSeconds) || timeoutSeconds < 900 || timeoutSeconds > 7_200) throw new Error("soak timeout must be between 900 and 7200 seconds");
 
 await mkdir(output, { recursive: true });

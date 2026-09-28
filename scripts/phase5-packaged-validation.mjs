@@ -1,3 +1,5 @@
+import { LIVE_HISTORY_CAPACITY } from "./live-history-capacity.mjs";
+
 export function validatePhase5Acceptance(report, cancellation, rolling, bounds, bodyText) {
   const failures = [];
   const evidence = report?.evidence;
@@ -43,7 +45,11 @@ export function validatePhase5Acceptance(report, cancellation, rolling, bounds, 
     "rolling history did not advance measured volume time",
   );
   requireGate(failures, rolling?.history?.residentCount === 2, "rolling history did not retain two observations");
-  requireGate(failures, rolling?.history?.capacity === 20, "rolling history capacity is not bounded at twenty");
+  requireGate(
+    failures,
+    rolling?.history?.capacity === LIVE_HISTORY_CAPACITY,
+    `rolling history capacity is not bounded at ${LIVE_HISTORY_CAPACITY}`,
+  );
   requireGate(failures, rolling?.history?.partial === true, "partial rolling history is not explicit");
   requireGate(
     failures,

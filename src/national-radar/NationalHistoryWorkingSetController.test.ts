@@ -8,10 +8,19 @@ import {
 } from "./NationalHistoryWorkingSetController";
 
 describe("NationalHistoryWorkingSetController", () => {
-  it("keeps an initial GPU paint provisional until the backend history commits", async () => {
+  it("uses batched transfers and keeps an initial GPU paint provisional until the backend history commits", async () => {
     const fixture = historyFixture();
     const events: string[] = [];
-    const controller = new NationalHistoryWorkingSetController(fixture.client(events), {
+    const client = fixture.client(events);
+    const controller = new NationalHistoryWorkingSetController({
+      ...client,
+      async requestNationalHistoryChunkBatch(observation, indices, factor) {
+        expect(indices).toEqual([0]);
+        const lease = await client.requestNationalHistoryChunk(observation, indices[0], factor);
+        return { ...lease, packed: { generation: lease.packed.generation, chunks: [lease.packed] } };
+      },
+      async requestNationalHistoryChunk() { throw new Error("legacy single-chunk path must not run"); },
+    }, {
       async waitForPaintQuiescence() {},
       beginStaging() { events.push("begin"); },
       async uploadStagedChunk() { events.push("upload"); },
@@ -114,12 +123,14 @@ describe("NationalHistoryWorkingSetController", () => {
     const fixture = historyFixture();
     const events: string[] = [];
     const committedFactors: number[] = [];
+    let currentSelection = "selection-before-upload";
     const controller = new NationalHistoryWorkingSetController(fixture.client(events), {
       async waitForPaintQuiescence() {},
       beginStaging() {},
-      async uploadStagedChunk() {},
+      async uploadStagedChunk() { currentSelection = "selection-after-upload"; },
       async commitInitialHistoryStaging() { throw new Error("not used"); },
       async commitHistoryStaging(_timeline, _selected, presentationFactor, deferExternalCommit) {
+        expect(_selected).toBe("selection-after-pending-paint");
         committedFactors.push(presentationFactor ?? 4);
         expect(deferExternalCommit).toBe(true);
         return fixture.receipt;
@@ -132,8 +143,12 @@ describe("NationalHistoryWorkingSetController", () => {
     const result = await controller.stageHistoryOverview(
       fixture.observation,
       [observationId(fixture.observation)],
-      observationId(fixture.observation),
+      () => currentSelection,
       () => {},
+      async () => {
+        expect(currentSelection).toBe("selection-after-upload");
+        currentSelection = "selection-after-pending-paint";
+      },
     );
 
     // The staged manifest is the exact native grid; the commit selector

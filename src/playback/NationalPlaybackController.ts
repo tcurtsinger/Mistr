@@ -4,6 +4,7 @@ import type {
   NationalPaintReceipt,
 } from "../national-radar/NationalGridLayer";
 import { observationId } from "../national-radar/NationalHistoryWorkingSetController";
+import { MAX_LIVE_HISTORY_FRAMES } from "../live/liveHistory";
 
 export interface NationalPlaybackSnapshot {
   generation: number;
@@ -27,7 +28,7 @@ export interface NationalPlaybackControllerOptions {
   dwellMs?: number;
   latestDwellMs?: number;
   refinementSettleMs?: number;
-  historyLimit?: 20 | 30;
+  historyLimit?: 20 | 30 | 60;
   onState?(snapshot: NationalPlaybackSnapshot): void;
   onPaint?(receipt: NationalPaintReceipt): void;
   onRefinementRequested?(observation: NationalHistoryObservation): void;
@@ -62,17 +63,19 @@ export class NationalPlaybackController {
   private refinementAfterQualityPreparation = false;
   private suppressSettledRefinement = false;
   private mutationResumeRequest = -1;
+  private nextFrameDueAt: number | null = null;
+  private mutationRemainingDwellMs: number | undefined;
   private readonly dwellMs: number;
   private readonly latestDwellMs: number;
   private readonly refinementSettleMs: number;
-  private readonly historyLimit: 20 | 30;
+  private readonly historyLimit: 20 | 30 | 60;
 
   constructor(
     private readonly layer: PlaybackLayer,
     private observations: readonly NationalHistoryObservation[],
     private readonly options: NationalPlaybackControllerOptions = {},
   ) {
-    this.historyLimit = options.historyLimit ?? 20;
+    this.historyLimit = options.historyLimit ?? MAX_LIVE_HISTORY_FRAMES;
     assertObservationTimeline(observations, this.historyLimit);
     this.dwellMs = options.dwellMs ?? 120;
     this.latestDwellMs = options.latestDwellMs ?? 600;
@@ -130,6 +133,10 @@ export class NationalPlaybackController {
    * loop is never held for preparation, and a camera change never stops it.
    */
   play(): Promise<void> {
+    return this.startPlayback();
+  }
+
+  private startPlayback(initialDwellMs?: number): Promise<void> {
     this.assertActive();
     if (this.playing || this.observations.length < 2) {
       return Promise.resolve();
@@ -156,7 +163,7 @@ export class NationalPlaybackController {
         throw error;
       }
       if (this.playing && this.playRequest === request && !this.operation) {
-        this.scheduleNext(this.dwellForCurrent());
+        this.scheduleNext(initialDwellMs ?? this.dwellForCurrent());
       }
     })();
   }
@@ -205,6 +212,7 @@ export class NationalPlaybackController {
     this.playing = false;
     if (this.timer !== null) globalThis.clearTimeout(this.timer);
     this.timer = null;
+    this.nextFrameDueAt = null;
     this.layer.setPlaybackQualityLock(undefined);
     this.emit();
     if (!this.operation) this.scheduleRefinement();
@@ -212,7 +220,11 @@ export class NationalPlaybackController {
 
   async pauseAndWait(scheduleRefinement = true): Promise<boolean> {
     const wasPlaying = this.playing;
+    const remainingDwellMs = this.nextFrameDueAt === null
+      ? undefined
+      : Math.max(0, this.nextFrameDueAt - performance.now());
     this.pause();
+    this.mutationRemainingDwellMs = remainingDwellMs;
     // resumeAfterMutation may only undo THIS pause. If the operator pauses or
     // plays while the mutation commits, their intent owns playback state.
     this.mutationResumeRequest = this.playRequest;
@@ -236,7 +248,7 @@ export class NationalPlaybackController {
       wasPlaying
       && !this.disposed
       && this.playRequest === this.mutationResumeRequest
-    ) void this.play();
+    ) void this.startPlayback(this.mutationRemainingDwellMs);
   }
 
   async scrub(index: number): Promise<NationalPaintReceipt> {
@@ -344,8 +356,10 @@ export class NationalPlaybackController {
 
   private scheduleNext(delayMs: number) {
     if (!this.playing || this.disposed || this.timer !== null) return;
+    this.nextFrameDueAt = performance.now() + delayMs;
     this.timer = globalThis.setTimeout(() => {
       this.timer = null;
+      this.nextFrameDueAt = null;
       void this.advanceOnce().then(
         () => {
           if (this.playing) this.scheduleNext(this.dwellForCurrent());
@@ -481,7 +495,7 @@ export class NationalPlaybackController {
 
 function assertObservationTimeline(
   observations: readonly NationalHistoryObservation[],
-  historyLimit: 20 | 30,
+  historyLimit: 20 | 30 | 60,
 ) {
   if (observations.length < 1 || observations.length > historyLimit) {
     throw new Error(`National playback history must contain 1 to ${historyLimit} observations`);

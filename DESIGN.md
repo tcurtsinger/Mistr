@@ -160,6 +160,19 @@ The bottom-center playback bar remains stable regardless of panel state. Site an
 On compact desktop windows, the icon-led toolbar retains its controls and accessible tooltips while the playback timeline keeps the largest flexible share. Displayed time, numeric age, and an active dBZ sample remain visible. The map is never converted into a dashboard grid.
 
 ### Spatial Rules
+
+**Owner preference, 2026-09-10 (supersedes visible-notice rules below):** No
+notification banner appears above the playback bar, for either informational or
+error states. Background acquisition/retries and retained radar continue normally;
+status text remains available to accessibility and diagnostics without occupying
+map space. The existing first-paint preparation state stays inside the playback
+area. Scan timestamps use local 12-hour time with seconds, AM/PM, and the local
+time-zone abbreviation; dates and elapsed frame ages retain their formats.
+
+A 10px status mark beside the frame age shows that a notice exists without a
+banner: a hollow Scan Cyan ring for information, a solid Danger dot for a
+problem. Hovering or focusing it reveals the notice text above the playback bar.
+
 - **Top changes where and how radar is drawn:** explicit National/Site source selection, Site station selection, source-aware recenter, and the real `Smooth`/`Native` spatial display choice; other controls appear only after they become real capabilities.
 - **Sides stay clear:** no application menu, placeholder alert control, or control chain competes with radar.
 - **Bottom controls when:** playback, measured time, numeric age, and inspection value.

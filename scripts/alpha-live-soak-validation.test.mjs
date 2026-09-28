@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { validateAlphaLiveSoak } from "./alpha-live-soak-validation.mjs";
+import { LIVE_HISTORY_CAPACITY } from "./live-history-capacity.mjs";
 
 function validReport(targetFrames = 4) {
   // Acquisition builds newest-to-oldest; resident playback is oldest-to-newest.
@@ -42,8 +43,8 @@ function validReport(targetFrames = 4) {
       },
       history: {
         residentCount: targetFrames,
-        capacity: 20,
-        partial: targetFrames < 20,
+        capacity: LIVE_HISTORY_CAPACITY,
+        partial: targetFrames < LIVE_HISTORY_CAPACITY,
         observationIds: ids,
         observedAtUnixMs,
       },
@@ -90,11 +91,19 @@ describe("Alpha live soak validation", () => {
   });
 
   it("accepts full capacity with a matching visible and accessible timeline", () => {
-    expect(validateAlphaLiveSoak(validReport(20), 20)).toEqual([]);
-    const mislabeled = validReport(20);
-    mislabeled.final.sliderValueText = "Frame 19 of 20";
-    expect(validateAlphaLiveSoak(mislabeled, 20))
+    const full = LIVE_HISTORY_CAPACITY;
+    expect(validateAlphaLiveSoak(validReport(full), full)).toEqual([]);
+    const mislabeled = validReport(full);
+    mislabeled.final.sliderValueText = `Frame ${full - 1} of ${full}`;
+    expect(validateAlphaLiveSoak(mislabeled, full))
       .toContain("timeline accessible value does not match the painted newest frame");
+  });
+
+  it("rejects the retired 20-frame capacity and targets beyond the product capacity", () => {
+    const report = validReport(20);
+    report.final.history.capacity = 20;
+    expect(validateAlphaLiveSoak(report, 20)).toContain(`live history capacity is not ${LIVE_HISTORY_CAPACITY}`);
+    expect(validateAlphaLiveSoak(validReport(4), LIVE_HISTORY_CAPACITY + 1)).toContain("invalid soak target");
   });
 
   it.each([

@@ -1,6 +1,12 @@
+import { LIVE_HISTORY_CAPACITY } from "./live-history-capacity.mjs";
+
 export function validateAlphaLiveSoak(report, targetFrames) {
   const failures = [];
-  requireGate(failures, Number.isSafeInteger(targetFrames) && targetFrames >= 4 && targetFrames <= 20, "invalid soak target");
+  requireGate(
+    failures,
+    Number.isSafeInteger(targetFrames) && targetFrames >= 4 && targetFrames <= LIVE_HISTORY_CAPACITY,
+    "invalid soak target",
+  );
   requireGate(failures, report?.startup?.firstPaintMs > 0 && report.startup.firstPaintMs <= 15_000, "packaged first radar paint exceeded 15 seconds");
   requireGate(failures, report?.startup?.preparedArchiveFrameCount === 1, "normal startup decoded the full diagnostic archive before first paint");
   requireGate(failures, report?.startup?.diskReads === 1, "normal startup performed more than one archive disk read before live radar");
@@ -15,8 +21,16 @@ export function validateAlphaLiveSoak(report, targetFrames) {
   requireGate(failures, report?.siteSwitch?.finalTopSite === "KTLX", "superseding KTLX did not own final site truth");
   requireGate(failures, (report?.historyEvents?.length ?? 0) >= 1, "soak did not observe live-history growth");
   requireGate(failures, report?.final?.history?.residentCount === targetFrames, "final live history count is wrong");
-  requireGate(failures, report?.final?.history?.capacity === 20, "live history capacity is not twenty");
-  requireGate(failures, report?.final?.history?.partial === (targetFrames < 20), "partial-history truth is wrong");
+  requireGate(
+    failures,
+    report?.final?.history?.capacity === LIVE_HISTORY_CAPACITY,
+    `live history capacity is not ${LIVE_HISTORY_CAPACITY}`,
+  );
+  requireGate(
+    failures,
+    report?.final?.history?.partial === (targetFrames < LIVE_HISTORY_CAPACITY),
+    "partial-history truth is wrong",
+  );
   requireGate(failures, report?.final?.renderer?.metrics?.residentFrameCount === targetFrames, "renderer and live history counts disagree");
   requireGate(failures, report?.final?.renderer?.residentObservationIds?.length === targetFrames, "renderer ID list is incomplete");
   requireGate(failures, new Set(report?.final?.renderer?.residentObservationIds ?? []).size === targetFrames, "resident history contains duplicate IDs");

@@ -38,6 +38,20 @@ export interface InspectionReadoutPresentation {
 
 export type LiveHistoryStatus = "loading" | "partial" | "full";
 
+/**
+ * Pending predecessors only mean "loading" while backfill is still running:
+ * once it finishes or gives up, a short loop is partial, not in progress.
+ */
+export function nationalHistoryStatus(
+  retainedCount: number,
+  historyLimit: number,
+  pendingBackfillCount: number,
+  backfillRunning: boolean,
+): LiveHistoryStatus {
+  if (retainedCount >= historyLimit) return "full";
+  return backfillRunning && pendingBackfillCount > 0 ? "loading" : "partial";
+}
+
 export function normalizeRadarDisplayMode(value: string | null | undefined): RadarDisplayMode {
   return value === "native" ? "native" : "smooth";
 }

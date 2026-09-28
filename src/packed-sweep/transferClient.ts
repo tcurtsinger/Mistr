@@ -1,4 +1,5 @@
 import { parsePackedSweep, type PackedSweep } from "./packedSweep";
+import { GRID_TRANSFER_BATCH_SIZE, parseGridChunkBatch, type PackedGridBatch } from "../packed-grid/chunkBatch";
 import {
   parsePackedGridChunk,
   parsePackedGridManifest,
@@ -249,7 +250,7 @@ export interface NationalPointLookup {
   valueDbz: number | null;
 }
 
-export interface PackedGridLease<T extends PackedGridManifest | PackedGridChunk> {
+export interface PackedGridLease<T extends PackedGridManifest | PackedGridChunk | PackedGridBatch> {
   packed: T;
   wireBytes: number;
   timing: TransferTiming;
@@ -729,6 +730,24 @@ export class PackedSweepTransferClient {
     return result;
   }
 
+  async requestNationalHistoryChunkBatch(
+    observation: NationalHistoryObservation,
+    chunkIndices: number[],
+    presentationFactor: 1 | 2 | 4 = 1,
+  ): Promise<PackedGridLease<PackedGridBatch>> {
+    this.assertNationalHistoryIdentity(observation);
+    assertPresentationFactor(presentationFactor);
+    if (chunkIndices.length < 1 || chunkIndices.length > GRID_TRANSFER_BATCH_SIZE
+      || new Set(chunkIndices).size !== chunkIndices.length
+      || chunkIndices.some(index => !Number.isSafeInteger(index) || index < 0)) {
+      throw new RangeError("Invalid grid batch indices");
+    }
+    return this.requestNationalRaw("request_national_history_chunk_batch", {
+      observationTimeUnixMs: observation.observationTimeUnixMs,
+      contentSha256: observation.contentSha256, presentationFactor, chunkIndices,
+    }, response => parseGridChunkBatch(response, chunkIndices));
+  }
+
   async nationalHistoryActivitySnapshot(): Promise<NationalHistoryActivitySnapshot> {
     this.assertSessionOpen();
     const result = await this.invoke<NationalHistoryActivitySnapshot>(
@@ -1037,12 +1056,13 @@ export class PackedSweepTransferClient {
     assertNationalHistoryObservation(observation, observation.generation);
   }
 
-  private async requestNationalRaw<T extends PackedGridManifest | PackedGridChunk>(
+  private async requestNationalRaw<T extends PackedGridManifest | PackedGridChunk | PackedGridBatch>(
     command:
       | "request_national_packed_grid_manifest"
       | "request_national_packed_grid_chunk"
       | "request_national_history_manifest"
-      | "request_national_history_chunk",
+      | "request_national_history_chunk"
+      | "request_national_history_chunk_batch",
     extraArguments: Record<string, unknown>,
     parse: (response: ArrayBuffer) => Promise<T>,
   ): Promise<PackedGridLease<T>> {
@@ -1534,7 +1554,7 @@ function assertNationalHistorySnapshot(snapshot: NationalHistorySnapshot, genera
   if (
     !Number.isSafeInteger(snapshot.generation)
     || snapshot.generation !== generation
-    || (snapshot.historyLimit !== 20 && snapshot.historyLimit !== 30)
+    || (snapshot.historyLimit !== 20 && snapshot.historyLimit !== 30 && snapshot.historyLimit !== 60)
     || typeof snapshot.mutationReversible !== "boolean"
     || snapshot.retained.length > snapshot.historyLimit
     || !Number.isSafeInteger(snapshot.pendingBackfillCount)

@@ -16,7 +16,7 @@ use sha2::{Digest, Sha256};
 use std::fmt::Write as _;
 use std::io::{Cursor, Read};
 use std::sync::{
-    Arc,
+    Arc, OnceLock,
     atomic::{AtomicU64, Ordering},
 };
 use std::time::Duration;
@@ -218,6 +218,13 @@ pub struct MrmsClient {
 
 impl MrmsClient {
     pub fn new() -> Result<Self, MrmsError> {
+        static HTTP: OnceLock<Client> = OnceLock::new();
+        if let Some(http) = HTTP.get() {
+            return Ok(Self {
+                http: http.clone(),
+                counters: Arc::default(),
+            });
+        }
         let http = Client::builder()
             .connect_timeout(CONNECT_TIMEOUT)
             .timeout(HTTP_TIMEOUT)
@@ -225,6 +232,7 @@ impl MrmsClient {
             .user_agent("Mistr/0.0.1 (+https://github.com/tcurtsinger/Mistr)")
             .build()
             .map_err(|error| MrmsError::Request(error.to_string()))?;
+        let _ = HTTP.set(http.clone());
         Ok(Self {
             http,
             counters: Arc::default(),
@@ -253,9 +261,9 @@ impl MrmsClient {
         now: DateTime<Utc>,
         count: usize,
     ) -> Result<Vec<MrmsObject>, MrmsError> {
-        if !(1..=30).contains(&count) {
+        if !(1..=60).contains(&count) {
             return Err(MrmsError::InvalidInventory(
-                "requested history count must be in 1..=30".into(),
+                "requested history count must be in 1..=60".into(),
             ));
         }
         let mut candidates = self.discover_latest_up_to(now, count).await?;
@@ -277,9 +285,9 @@ impl MrmsClient {
         now: DateTime<Utc>,
         count: usize,
     ) -> Result<Vec<MrmsObject>, MrmsError> {
-        if !(1..=30).contains(&count) {
+        if !(1..=60).contains(&count) {
             return Err(MrmsError::InvalidInventory(
-                "requested history count must be in 1..=30".into(),
+                "requested history count must be in 1..=60".into(),
             ));
         }
         let current_date = now.date_naive();

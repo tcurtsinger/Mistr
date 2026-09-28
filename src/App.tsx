@@ -115,6 +115,7 @@ import {
   LatestOnlyAsyncQueue,
   type LatestOnlyAsyncQueueSnapshot,
 } from "./national-radar/LatestOnlyAsyncQueue";
+import { retryBackfillStep } from "./live/backfillRetry";
 import { runNationalBackfillLoop } from "./national-radar/NationalBackfillLoop";
 import { finalizeNationalHistoryUntilSettled } from "./national-radar/NationalFinalizeLoop";
 import {
@@ -129,6 +130,7 @@ import { colorForReflectivity } from "./radar-renderer/palette";
 import { RadarChrome } from "./ui/RadarChrome";
 import {
   frameAgePresentation,
+  nationalHistoryStatus,
   userFacingRadarError,
   normalizeRadarDisplayMode,
   normalizeRadarSite,
@@ -311,6 +313,7 @@ export function App() {
     > | null = null;
     let nationalHistorySession = 0;
     let nationalBackfillStartCount = 0;
+    let activeNationalBackfillSession: number | null = null;
     let nationalMrmsSession: NationalMrmsSession<NationalPhase3Report> | null = null;
     let lastNationalRestorationAfterSiteFailure: Promise<NationalPhase3Report> | null = null;
     let failNextSiteFromNationalForDiagnostics = false;
@@ -1017,7 +1020,12 @@ export function App() {
           && residentLiveHistory.length < historyLimit
         ) {
           try {
-            await acquireLive(site, true, 30, "before");
+            const loaded = await retryBackfillStep(
+              () => acquireLive(site, true, 30, "before"),
+              () => !cancelled && pollingSession === livePollingSession,
+              delay,
+            );
+            if (!loaded) throw new Error("Historical predecessor unavailable after bounded retries");
             if (!cancelled && pollingSession === livePollingSession) {
               setLiveHistoryStatus(
                 residentLiveHistory.length >= MAX_LIVE_HISTORY_FRAMES ? "full" : "loading",
@@ -1572,11 +1580,12 @@ export function App() {
           observationId: nationalObservationId(observation),
           observedAtUnixMs: observation.observationTimeUnixMs,
         })));
-        setLiveHistoryStatus(
-          history.retained.length >= history.historyLimit
-            ? "full"
-            : history.pendingBackfillCount > 0 ? "loading" : "partial",
-        );
+        setLiveHistoryStatus(nationalHistoryStatus(
+          history.retained.length,
+          history.historyLimit,
+          history.pendingBackfillCount,
+          activeNationalBackfillSession !== null,
+        ));
         nationalPlaybackController?.acceptHistory(nationalObservations, receipt);
         nationalPlaybackController?.resumeAfterMutation(resumePlayback);
       };
@@ -1610,22 +1619,20 @@ export function App() {
         const candidateId = nationalObservationId(preparation.observation);
         const proposed = preparation.kind === "predecessor"
           ? [preparation.observation, ...before]
-          : [...before, preparation.observation].slice(-20);
-        const playbackBefore = activePlayback.snapshot();
+          : [...before, preparation.observation].slice(-MAX_LIVE_HISTORY_FRAMES);
         const previousNewestId = before.length > 0
           ? nationalObservationId(before.at(-1)!)
           : candidateId;
-        let selectedObservationId = playbackBefore.selectedObservationId;
-        if (
-          preparation.kind === "newer"
-          && !playbackBefore.playing
-          && selectedObservationId === previousNewestId
-        ) {
-          selectedObservationId = candidateId;
-        }
-        if (!proposed.some((observation) => nationalObservationId(observation) === selectedObservationId)) {
-          selectedObservationId = nationalObservationId(proposed[0]);
-        }
+        // Resolve only after staging and the pending playback paint have settled.
+        // Capturing this before uploading would rewind a still-running loop.
+        const selectionAtCommit = () => {
+          const current = activePlayback.snapshot();
+          let selected = current.selectedObservationId;
+          if (preparation.kind === "newer" && !resumePlayback && !current.playing
+            && selected === previousNewestId) selected = candidateId;
+          return proposed.some(item => nationalObservationId(item) === selected)
+            ? selected : nationalObservationId(proposed[0]);
+        };
         let resumePlayback = false;
         let workingSet: NationalHistoryWorkingSetResult | undefined;
         let backendFinalized = false;
@@ -1636,13 +1643,12 @@ export function App() {
           workingSet = await activeWorkingSet.stageHistoryOverview(
             preparation.observation,
             proposed.map(nationalObservationId),
-            selectedObservationId,
+            selectionAtCommit,
             () => nationalHistoryOwnershipCheck(generation, historySession),
             async () => {
               activePlayback.markReplacementPending(true);
-              resumePlayback = activePlayback.snapshot().playing
-                ? await activePlayback.pauseAndWait(false)
-                : false;
+              // Even an operator-paused loop may still have a paint in flight.
+              resumePlayback = await activePlayback.pauseAndWait(false);
               nationalHistoryOwnershipCheck(generation, historySession);
             },
           );
@@ -1726,6 +1732,7 @@ export function App() {
         nationalBackfillStartCount += 1;
         const historySession = nationalHistorySession + 1;
         nationalHistorySession = historySession;
+        activeNationalBackfillSession = historySession;
         setLiveHistoryStatus("loading");
         try {
           const result = await runNationalBackfillLoop({
@@ -1739,10 +1746,10 @@ export function App() {
                 () => commitNationalHistoryMutation(preparation, historySession),
               );
             },
-            reachedLimit: () => nationalObservations.length >= 20,
+            reachedLimit: () => nationalObservations.length >= MAX_LIVE_HISTORY_FRAMES,
             isSuperseded: isRadarSourceSuperseded,
             onFailure(error) {
-              setLiveHistoryStatus(nationalObservations.length >= 20 ? "full" : "loading");
+              setLiveHistoryStatus(nationalObservations.length >= MAX_LIVE_HISTORY_FRAMES ? "full" : "loading");
               setNationalRequestError(error instanceof Error ? error.message : String(error));
             },
             async waitBeforeRetry(attempt) {
@@ -1759,14 +1766,16 @@ export function App() {
               }
               nationalHistoryOwnershipCheck(generation, historySession);
             },
+          }).finally(() => {
+            if (activeNationalBackfillSession === historySession) activeNationalBackfillSession = null;
           });
           if (result === "superseded") return;
           nationalHistoryOwnershipCheck(generation, historySession);
-          setLiveHistoryStatus(nationalObservations.length >= 20 ? "full" : "partial");
+          setLiveHistoryStatus(nationalObservations.length >= MAX_LIVE_HISTORY_FRAMES ? "full" : "partial");
           await runNationalPolling(generation, historySession);
         } catch (error) {
           if (isRadarSourceSuperseded(error)) return;
-          setLiveHistoryStatus(nationalObservations.length >= 20 ? "full" : "partial");
+          setLiveHistoryStatus(nationalObservations.length >= MAX_LIVE_HISTORY_FRAMES ? "full" : "partial");
           setNationalRequestError(error instanceof Error ? error.message : String(error));
         }
       };
@@ -1950,7 +1959,7 @@ export function App() {
             || frameCount < 4
             || frameCount > MAX_LIVE_HISTORY_FRAMES
           ) {
-            throw new Error("diagnostic history limit must be between 4 and 20 frames");
+            throw new Error("diagnostic history limit must be between 4 and 60 frames");
           }
           diagnosticHistoryLimit = frameCount;
         },
@@ -2423,9 +2432,9 @@ export function App() {
             rendererBeforeFailure,
           };
         },
-        async waitForHistory(frameCount = 20, timeoutMs = 300_000) {
-          if (!Number.isSafeInteger(frameCount) || frameCount < 1 || frameCount > 20) {
-            throw new RangeError("National history wait requires 1 to 20 observations");
+        async waitForHistory(frameCount = MAX_LIVE_HISTORY_FRAMES, timeoutMs = 300_000) {
+          if (!Number.isSafeInteger(frameCount) || frameCount < 1 || frameCount > MAX_LIVE_HISTORY_FRAMES) {
+            throw new RangeError("National history wait requires 1 to 60 observations");
           }
           const started = performance.now();
           while ((latestNationalHistory?.retained.length ?? 0) < frameCount) {
