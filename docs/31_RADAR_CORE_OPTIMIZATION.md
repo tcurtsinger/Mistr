@@ -102,3 +102,43 @@ dwell (all intermediate frames must play), post-staging selection resolution, an
 operator pause during a mutation. Native user validation remains required; this
 follow-up does not claim a measured runtime speedup or eliminate every possible
 cause of the generic unavailable banner.
+
+## Loading and draw cost follow-up (2026-09-28)
+
+A CPU profile of the packaged app (audit batch 3) found blocking WebGL round
+trips dominating main-thread time.
+
+- **Per-frame GL state capture (fixed).** Both custom layers saved and restored
+  blend, texture, program, and VAO state through `getParameter`/`isEnabled` on
+  every draw: 82% of regional-playback JavaScript time. MapLibre already marks
+  its GL state dirty after every custom layer and restores it (`drawCustom`
+  calls `context.setDirty()`), so each draw now sets only the state it uses.
+- **Upload progress (fixed).** Chunk uploads emitted a full renderer snapshot
+  each (about 440 a second during a fill) and rescanned every resident
+  presentation for the GPU byte peak. Progress now emits once per animation
+  frame and the peak is tracked incrementally during staging.
+- **Per-slice upload error checks (kept).** Every upload slice drains and reads
+  `getError`, about half of loading JavaScript time. Checking once per chunk was
+  tried and reverted: those synchronous checks also keep the upload pacer's
+  per-row estimate honest about GPU work. Without them the GPU queue filled,
+  upload calls blocked on backpressure, the pacer collapsed to minimum bands,
+  and context-loss recovery at 4K slowed from about 20 s to over 60 s in the
+  packaged gate. Removing them needs fence-based flow control that bounds
+  in-flight upload work, a separate change.
+
+Measured on the same machine, old build against new, two runs each:
+
+| | Before | After |
+|---|---:|---:|
+| GPU staging per frame (p50) | 585–604 ms | 427–428 ms |
+| Main-thread CPU per uploaded chunk | 0.92 ms | 0.78–0.83 ms |
+| Long tasks during the 60-frame load | 9 | 2 |
+| Regional playback JavaScript busy time per 10 s | 2.63–2.68 s | 0.46 s |
+| 60 frames loaded | 56.7 s | 50.6–52.4 s |
+
+Culling off-screen chunk draws was evaluated and not done: after the draw fix,
+all draw submission is about 0.4 s per 10 s of playback, so the saving is small.
+
+Benchmark: `scripts/run-national-load-bench.ps1` (results in `artifacts/bench/`).
+For readable CPU profiles, `MISTR_UNMINIFIED=1 npm run tauri:build -- --no-bundle`
+builds the frontend without minification.
