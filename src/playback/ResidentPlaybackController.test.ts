@@ -391,6 +391,37 @@ describe("resident playback truth", () => {
     expect(controller.snapshot()).toMatchObject({ playing: false, residentCount: 4 });
   });
 
+  it("keeps an operator Play pressed during a history update whose paint rolls back", async () => {
+    const layer = new FakeLayer();
+    const controller = new ResidentPlaybackController(layer, frames(), {
+      dwellMs: 60_000,
+      latestDwellMs: 60_000,
+    });
+    await controller.establishInitialPaint();
+    const newest = controller.scrub(2);
+    await vi.waitFor(() => expect(layer.getSnapshot().selectedObservationId).toBe("frame-c"));
+    layer.completePaint();
+    await newest;
+
+    // Paused on newest, so the update follows the new scan and awaits its paint.
+    const update = controller.updateResidentHistory([...frames(), frame("frame-d", 400)]);
+    const updateFailure = expect(update).rejects.toThrow("paint failed");
+    await vi.waitFor(() => expect(layer.getSnapshot().selectedObservationId).toBe("frame-d"));
+    controller.play();
+    layer.failPaint();
+    await vi.waitFor(() => {
+      expect(controller.snapshot()).toMatchObject({
+        selectedObservationId: "frame-c",
+        holdReason: "AWAITING_GPU_PAINT",
+      });
+    });
+    layer.completePaint();
+    await updateFailure;
+
+    expect(controller.snapshot()).toMatchObject({ playing: true, residentCount: 3 });
+    controller.pause();
+  });
+
   it("queues a scrub behind a history update and keeps the scan the operator picked", async () => {
     const layer = new FakeLayer();
     const controller = new ResidentPlaybackController(layer, frames());

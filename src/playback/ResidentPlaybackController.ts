@@ -34,9 +34,11 @@ export class ResidentPlaybackController {
   private operation: Promise<RadarPaintReceipt> | null = null;
   private replacementTail: Promise<void> = Promise.resolve();
   private residentReplacementCount = 0;
-  // Bumped by every operator play, pause, or scrub. A history update resumes
-  // the loop only if the operator did nothing while it ran.
+  // Bumped by every operator play, pause, or scrub. A history update restores
+  // its own prior state only if the operator did nothing while it ran;
+  // otherwise it honors the operator's latest request.
   private intentRevision = 0;
+  private operatorWantsPlaying = false;
   private readonly dwellMs: number;
   private readonly latestDwellMs: number;
 
@@ -185,12 +187,17 @@ export class ResidentPlaybackController {
       } finally {
         this.operation = null;
         this.emit();
-        if (resumePlayback && !this.disposed && this.intentRevision === revision) this.startPlaying();
+        if (this.shouldResumeAfterMutation(resumePlayback, revision)) this.startPlaying();
       }
       throw error;
     }
-    if (resumePlayback && !this.disposed && this.intentRevision === revision) this.startPlaying();
+    if (this.shouldResumeAfterMutation(resumePlayback, revision)) this.startPlaying();
     return receipt;
+  }
+
+  private shouldResumeAfterMutation(wasPlaying: boolean, revision: number): boolean {
+    if (this.disposed) return false;
+    return this.intentRevision === revision ? wasPlaying : this.operatorWantsPlaying;
   }
 
   private async replaceResidentFramesNow(
@@ -255,6 +262,7 @@ export class ResidentPlaybackController {
   play(): void {
     this.assertActive();
     this.intentRevision += 1;
+    this.operatorWantsPlaying = true;
     this.startPlaying();
   }
 
@@ -282,6 +290,7 @@ export class ResidentPlaybackController {
 
   pause(): void {
     this.intentRevision += 1;
+    this.operatorWantsPlaying = false;
     this.stopPlaying();
   }
 
@@ -330,6 +339,7 @@ export class ResidentPlaybackController {
     }
     const target = this.frames[index];
     this.intentRevision += 1;
+    this.operatorWantsPlaying = false;
     this.stopPlaying();
     // Wait only when there is something to wait for, so an idle scrub selects at once.
     if (this.residentReplacementCount > 0) await this.settleReplacements();
