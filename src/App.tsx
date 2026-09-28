@@ -16,7 +16,6 @@ import type {
 import fixtureManifest from "../fixtures/manifest.json";
 import openFreeMapDarkStyle from "./data/openFreeMapDarkStyle.json";
 import { radarContextAnchorLayerId } from "./data/radarMapContext";
-import { RADAR_SITES } from "./data/radarSites";
 import { configureMapLibreWorker } from "./mapWorker";
 import { mapReadinessError, updateMapReadiness, type MapReadiness } from "./mapReadiness";
 import { assertChunkMatchesManifest } from "./packed-grid/packedGrid";
@@ -101,6 +100,7 @@ import {
   SiteLevel2Session,
 } from "./radar-session/SiteLevel2Session";
 import { NationalMrmsSession, type NationalMrmsPaintResult } from "./radar-session/NationalMrmsSession";
+import { RADAR_SITES, radarSiteById, type RadarSiteOption } from "./data/radarSites";
 import {
   commonResidencyReadyForInteraction,
   NationalGridLayer,
@@ -129,6 +129,12 @@ import {
 } from "./national-radar/NationalRollbackLoop";
 import { colorForReflectivity } from "./radar-renderer/palette";
 import { RadarChrome } from "./ui/RadarChrome";
+import { fadeOpacity } from "./radar-renderer/fade";
+import {
+  decideAutoSource,
+  sameAutoSource,
+  type AutoSource,
+} from "./radar-session/autoSourcePolicy";
 import {
   frameAgePresentation,
   nationalHistoryStatus,
@@ -167,6 +173,17 @@ const RADAR_SOURCE_STORAGE_KEY = "mistr.radarSource";
 const RADAR_DISPLAY_MODE_STORAGE_KEY = "mistr.radarDisplayMode";
 const RADAR_ENGINE_PREPARING_ERROR = "Radar engine is still preparing the resident loop";
 const LIVE_POLL_RETRY_MS = 15_000;
+const CAMERA_STORAGE_KEY = "mistr.camera";
+/** Zoom the picker and recenter use for a Site: past the automatic switch threshold. */
+const SITE_DETAIL_ZOOM = 9.5;
+const SOURCE_FADE_MS = 300;
+const CAMERA_FLIGHT_MS = 1_200;
+/** A preloaded Site scan older than this is refetched at the switch. */
+const SITE_PREFETCH_MAX_AGE_MS = 5 * 60_000;
+/** An automatic switch to a Site that just failed waits this long before retrying. */
+const AUTO_SITE_RETRY_MS = 60_000;
+const CONUS_BOUNDS: [[number, number], [number, number]] = [[-125.0, 24.0], [-66.5, 50.0]];
+const CAMERA_PADDING = { top: 100, right: 88, bottom: 124, left: 88 };
 
 // Starting a source from scratch cancels the other lane. Site requests use
 // beginSiteLane instead, so a resident National survives them.
@@ -202,6 +219,7 @@ export function App() {
   const siteLevel2SessionRef = useRef<SiteLevel2Session<Phase5Report> | null>(null);
   const nationalMrmsSessionRef = useRef<NationalMrmsSession<NationalPhase3Report> | null>(null);
   const radarModelRef = useRef<RadarSweepCpuModel | null>(null);
+  const autoSourceRef = useRef<AutoSourceHandle | null>(null);
   const inspectionMarkerRef = useRef<maplibregl.Marker | null>(null);
   const inspectionPointRef = useRef<{ longitude: number; latitude: number } | null>(null);
   const interrogationObservationRef = useRef<string | null>(null);
@@ -269,8 +287,7 @@ export function App() {
       instance = new maplibregl.Map({
         container: mapContainer.current,
         style: structuredClone(MAP_STYLE),
-        center: DEFAULT_CENTER,
-        zoom: 5.8,
+        ...initialMapCamera(startupSourceRef.current),
         bearing: 0,
         pitch: 0,
         attributionControl: false,
@@ -284,6 +301,8 @@ export function App() {
         canvasContextAttributes: { antialias: false },
       });
       instance.addControl(new maplibregl.AttributionControl({ compact: true }), "top-right");
+      const created = instance;
+      created.on("moveend", () => storeCamera(created));
       instance.once("style.load", () => {
         instance?.setProjection({ type: "mercator" });
         setRadarHostReady(true);
@@ -332,7 +351,6 @@ export function App() {
     let nationalGeneration = 0;
     let nationalResident = false;
     let hiddenNationalRequestError: string | null = null;
-    let resumeNationalPlaybackAfterSiteFailure = false;
     const revealedNationalReports = new WeakSet<NationalPhase3Report>();
     let nationalMrmsSession: NationalMrmsSession<NationalPhase3Report> | null = null;
     let lastNationalRestorationAfterSiteFailure: Promise<NationalPhase3Report> | null = null;
@@ -343,6 +361,7 @@ export function App() {
     let latestNationalPhase3: NationalPhase3Report | null = null;
     let staticNationalDiagnostic = false;
     let clickHandler: ((event: MapMouseEvent) => void) | null = null;
+    let autoSourceMoveHandlerForCleanup: ((event: { originalEvent?: unknown }) => void) | null = null;
     let latestReport: Phase4Report | null = null;
     let activeScenario: Promise<Phase4ScenarioReport> | null = null;
     let startupAcquisition: Promise<void> | null = null;
@@ -750,7 +769,6 @@ export function App() {
       instance.on("click", clickHandler);
       setInterrogation(null);
       setInspectionState("idle");
-      focusRadar(instance, diagnosticModel);
       globalThis.__MISTR_PHASE4__ = {
         report: () => ({
           ...latestReport!,
@@ -979,7 +997,6 @@ export function App() {
               paintedModel,
               createAlignmentReport(paintedModel),
             );
-            if (!appendingHistory && !prependingHistory) focusRadar(instance, paintedModel);
           } catch (diagnosticError) {
             report = {
               ...report,
@@ -1107,57 +1124,50 @@ export function App() {
         pollingSession: number;
       } | null = null;
 
+      const nextSiteGeneration = () => Math.max(
+        transferGeneration + 1,
+        (layer?.getSnapshot().generation ?? transferGeneration) + 1,
+        (nationalLayer?.getSnapshot().generation ?? transferGeneration) + 1,
+      );
+
       const startSiteFromNational = async (
         site: string,
         generation: number,
       ): Promise<Phase5Report> => {
         if (!client) throw new Error("selected-site transfer client is unavailable");
         const activeClient = client;
-        const assertSiteTransitionStillCurrent = () => {
+        const siteTransitionIsCurrent = () => {
           const transition = radarSessionCoordinatorRef.current!.snapshot().transition;
-          if (
-            transition?.generation !== generation
-            || transition.requestedSource.kind !== "site"
-            || transition.requestedSource.siteIcao !== site
-          ) {
-            throw new RadarSourceSupersededError(
-              "Site transition was superseded while National activity settled",
-            );
-          }
+          return transition?.generation === generation
+            && transition.requestedSource.kind === "site"
+            && transition.requestedSource.siteIcao === site;
         };
-        assertSiteTransitionStillCurrent();
+        if (!siteTransitionIsCurrent()) {
+          throw new RadarSourceSupersededError("Site transition was superseded before it began");
+        }
         queuedScrubRef.current = null;
-        // National keeps acquiring on its own lane and becomes resident once
-        // the Site paints; only its playback settles here.
-        const playbackToSettle = nationalPlaybackController;
-        resumeNationalPlaybackAfterSiteFailure = playbackToSettle
-          ? await playbackToSettle.pauseAndWait(false)
-          : false;
-        assertSiteTransitionStillCurrent();
+        // National keeps acquiring and playing on its own lane until the Site
+        // has faded in over it; then it becomes resident.
+        const prefetched = takePrefetchedSite(site, generation);
         transferGeneration = generation;
         livePollingSession += 1;
         const pollingSession = livePollingSession;
-        await activeClient.begin("site", generation);
-        if (failNextSiteFromNationalForDiagnostics) {
-          failNextSiteFromNationalForDiagnostics = false;
-          throw new Error("diagnostic Site transition failure after the Site lane began");
+        let sweep: PrefetchedSiteSweep;
+        if (prefetched) {
+          sweep = prefetched;
+        } else {
+          await activeClient.begin("site", generation);
+          if (failNextSiteFromNationalForDiagnostics) {
+            failNextSiteFromNationalForDiagnostics = false;
+            throw new Error("diagnostic Site transition failure after the Site lane began");
+          }
+          sweep = await acquireSiteSweep(activeClient, site, generation);
         }
-        const lease = await activeClient.requestPhase5Live(site, false, 180);
+        const { model, evidence } = sweep;
+        const fadeMs = sourceFadeMs();
         let createdLayer: RadarCustomLayer | null = null;
         let createdController: ResidentPlaybackController | null = null;
         try {
-          const model = createRadarSweepCpuModel(lease.packed);
-          if (model.sourceKind !== "nexrad_level2_chunks" || model.siteIcao !== site) {
-            throw new Error("live response does not match the requested NEXRAD site/source");
-          }
-          const evidence = await activeClient.phase5LiveEvidence(model.observationId);
-          if (
-            evidence.observationId !== model.observationId
-            || evidence.safe.generation !== generation
-            || evidence.safe.site !== site
-          ) {
-            throw new Error("live evidence does not match the decoded response");
-          }
           if (transferGeneration !== generation) {
             throw new RadarSourceSupersededError("Site bootstrap was superseded before GPU staging");
           }
@@ -1166,6 +1176,8 @@ export function App() {
           createdLayer = new RadarCustomLayer([model], {
             displayMode: displayModeRef.current,
             recoveryBeforeLayerId: ANCHOR_LAYER_ID,
+            // The first frame paints invisibly, then fades in over National.
+            opacity: fadeMs > 0 ? 0 : 1,
             onSnapshot(renderer) {
               setPlaybackError((current) => playbackErrorAfterRendererStatus(current, renderer.status));
               synchronizePaintedDisplay(renderer);
@@ -1193,6 +1205,12 @@ export function App() {
           if (transferGeneration !== generation || receipt.generation !== generation) {
             throw new RadarSourceSupersededError("Site bootstrap was superseded before paint acceptance");
           }
+          const fadingLayer = createdLayer;
+          const faded = await fadeOpacity((value) => fadingLayer.setOpacity(value), 0, 1, {
+            durationMs: fadeMs,
+            isCurrent: () => siteTransitionIsCurrent() && transferGeneration === generation,
+          });
+          if (!faded) throw new RadarSourceSupersededError("Site fade-in was superseded");
           const nextHistory = beginLiveHistory(model, generation);
           residentLiveHistory = nextHistory;
           const cursor = {
@@ -1206,7 +1224,7 @@ export function App() {
             display,
             evidence,
             receipt,
-            transferTiming: lease.timing,
+            transferTiming: sweep.timing,
             renderer: createdLayer.getSnapshot(),
             history: liveHistoryReport(nextHistory),
           };
@@ -1222,8 +1240,201 @@ export function App() {
             playbackControllerRef.current = null;
           }
           throw error;
+        }
+      };
+
+      const acquireSiteSweep = async (
+        activeClient: PackedSweepTransferClient,
+        site: string,
+        generation: number,
+      ): Promise<PrefetchedSiteSweep> => {
+        const lease = await activeClient.requestPhase5Live(site, false, 180);
+        try {
+          const model = createRadarSweepCpuModel(lease.packed);
+          if (model.sourceKind !== "nexrad_level2_chunks" || model.siteIcao !== site) {
+            throw new Error("live response does not match the requested NEXRAD site/source");
+          }
+          const evidence = await activeClient.phase5LiveEvidence(model.observationId);
+          if (
+            evidence.observationId !== model.observationId
+            || evidence.safe.generation !== generation
+            || evidence.safe.site !== site
+          ) {
+            throw new Error("live evidence does not match the decoded response");
+          }
+          return { site, generation, model, evidence, timing: lease.timing, fetchedAtUnixMs: Date.now() };
         } finally {
           await lease.release();
+        }
+      };
+
+      // --- Automatic source switching ------------------------------------------
+      // Zoom decides the source; only camera moves the operator makes (or an
+      // explicit picker/recenter flight) are evaluated, never programmatic ones.
+      let preferredSite: string | undefined;
+      let evaluateOnNextMove = false;
+      let pendingAutoEvaluation = false;
+      // An automatic switch may wait on a preload before its transition begins.
+      let autoSwitchInFlight = false;
+      let prefetchedSite: PrefetchedSiteSweep | null = null;
+      let prefetchInFlight: { site: string; promise: Promise<void> } | null = null;
+      let prefetchSession = 0;
+      const autoSiteFailures = new Map<string, number>();
+      let lastAutoDecision: { target: AutoSource; preload?: string; atUnixMs: number } | null = null;
+
+      const prefetchIsUsable = (sweep: PrefetchedSiteSweep | null, site: string) => Boolean(
+        sweep
+        && sweep.site === site
+        && Date.now() - sweep.fetchedAtUnixMs <= SITE_PREFETCH_MAX_AGE_MS
+        && client?.isActive("site")
+        && client.laneGeneration("site") === sweep.generation,
+      );
+
+      const takePrefetchedSite = (site: string, generation: number): PrefetchedSiteSweep | null => {
+        const sweep = prefetchedSite;
+        prefetchedSite = null;
+        prefetchSession += 1;
+        return sweep && sweep.generation === generation && prefetchIsUsable(sweep, site) ? sweep : null;
+      };
+
+      const prefetchSite = (site: string): Promise<void> => {
+        const activeClient = client;
+        const snapshot = radarSessionCoordinatorRef.current!.snapshot();
+        if (
+          !activeClient
+          || cancelled
+          || snapshot.transition
+          || snapshot.painted?.source.kind !== "national"
+          || layer
+          || !radarSiteById(site)
+        ) return Promise.resolve();
+        if (prefetchInFlight?.site === site) return prefetchInFlight.promise;
+        if (prefetchIsUsable(prefetchedSite, site)) return Promise.resolve();
+        const token = ++prefetchSession;
+        prefetchedSite = null;
+        const generation = nextSiteGeneration();
+        transferGeneration = generation;
+        const entry: { site: string; promise: Promise<void> } = { site, promise: Promise.resolve() };
+        entry.promise = (async () => {
+          try {
+            await beginSiteLane(activeClient, generation);
+            const sweep = await acquireSiteSweep(activeClient, site, generation);
+            if (token === prefetchSession) prefetchedSite = sweep;
+          } catch {
+            // Preloading is best-effort; the switch fetches if nothing is ready.
+          } finally {
+            if (prefetchInFlight === entry) prefetchInFlight = null;
+          }
+        })();
+        prefetchInFlight = entry;
+        return entry.promise;
+      };
+
+      const startSiteSession = async (site: string, options: { persistOnPaint?: boolean } = {}) => {
+        if (!siteLevel2Session) throw new Error("selected-site session is unavailable");
+        if (prefetchInFlight?.site === site) await prefetchInFlight.promise;
+        const residentGeneration = prefetchIsUsable(prefetchedSite, site)
+          ? prefetchedSite!.generation
+          : undefined;
+        return siteLevel2Session.start(site, { ...options, residentGeneration });
+      };
+
+      const settleAutoSwitch = () => {
+        autoSwitchInFlight = false;
+        if (!pendingAutoEvaluation) return;
+        pendingAutoEvaluation = false;
+        evaluateAutoSource();
+      };
+
+      const evaluateAutoSource = () => {
+        if (cancelled || !siteLevel2Session || !nationalMrmsSession) return;
+        const snapshot = radarSessionCoordinatorRef.current!.snapshot();
+        if (snapshot.transition || autoSwitchInFlight) {
+          pendingAutoEvaluation = true;
+          return;
+        }
+        const painted = snapshot.painted;
+        if (!painted) return;
+        const visible: AutoSource = painted.source.kind === "national"
+          ? { kind: "national" }
+          : { kind: "site", siteIcao: painted.source.siteIcao };
+        const center = instance.getCenter();
+        const decision = decideAutoSource({
+          zoom: instance.getZoom(),
+          center: { longitude: center.lng, latitude: center.lat },
+          visible,
+          preferredSite,
+        }, RADAR_SITES);
+        lastAutoDecision = { ...decision, atUnixMs: Date.now() };
+        if (sameAutoSource(decision.target, visible)) {
+          if (decision.preload) void prefetchSite(decision.preload);
+          return;
+        }
+        if (decision.target.kind === "national") {
+          autoSwitchInFlight = true;
+          void nationalMrmsSession.start().then(settleAutoSwitch, (error: unknown) => {
+            if (!isRadarSourceSuperseded(error)) {
+              setNationalRequestError(error instanceof Error ? error.message : String(error));
+            }
+            settleAutoSwitch();
+          });
+          return;
+        }
+        const target = decision.target.siteIcao;
+        const failedAt = autoSiteFailures.get(target);
+        if (failedAt !== undefined && Date.now() - failedAt < AUTO_SITE_RETRY_MS) return;
+        autoSwitchInFlight = true;
+        void startSiteSession(target).then(settleAutoSwitch, (error: unknown) => {
+          if (!isRadarSourceSuperseded(error)) {
+            autoSiteFailures.set(target, Date.now());
+            setSiteRequestError(error instanceof Error ? error.message : String(error));
+          }
+          settleAutoSwitch();
+        });
+      };
+
+      const autoSourceMoveHandler = (event: { originalEvent?: unknown }) => {
+        if (!event.originalEvent && !evaluateOnNextMove) return;
+        evaluateOnNextMove = false;
+        evaluateAutoSource();
+      };
+      instance.on("moveend", autoSourceMoveHandler);
+      autoSourceMoveHandlerForCleanup = autoSourceMoveHandler;
+      autoSourceRef.current = {
+        setPreferredSite(site) {
+          preferredSite = site;
+        },
+        prefetch(site) {
+          void prefetchSite(site);
+        },
+        evaluateAfterNextMove() {
+          evaluateOnNextMove = true;
+        },
+      };
+      globalThis.__MISTR_AUTO_SOURCE__ = {
+        evaluate: evaluateAutoSource,
+        state: () => ({
+          preferredSite: preferredSite ?? null,
+          lastDecision: lastAutoDecision,
+          prefetchedSite: prefetchedSite
+            ? { site: prefetchedSite.site, generation: prefetchedSite.generation, fetchedAtUnixMs: prefetchedSite.fetchedAtUnixMs }
+            : null,
+          prefetchInFlight: prefetchInFlight?.site ?? null,
+          siteOpacity: layer?.getOpacity() ?? null,
+        }),
+        prefetch: (site) => prefetchSite(normalizeRadarSite(site)),
+      };
+
+      const fadeOutSiteLayer = async (isCurrent: () => boolean) => {
+        const siteLayer = layer;
+        if (!siteLayer) return;
+        const faded = await fadeOpacity((value) => siteLayer.setOpacity(value), siteLayer.getOpacity(), 0, {
+          durationMs: sourceFadeMs(),
+          isCurrent,
+        });
+        if (!faded) {
+          siteLayer.setOpacity(1);
+          throw new RadarSourceSupersededError("National switch was superseded during the fade");
         }
       };
 
@@ -1245,7 +1456,6 @@ export function App() {
         inspectionPointRef.current = null;
         interrogationObservationRef.current = null;
         updateDiagnosticSources(instance, model, createAlignmentReport(model));
-        focusRadar(instance, model);
         if (!hideNationalBehindSite()) teardownNational();
         continueLiveBackfillAndPolling(model.siteIcao, pollingSession);
         radarSessionCoordinatorRef.current!.synchronizePaint(
@@ -1260,13 +1470,10 @@ export function App() {
           || sourceState.transition
           || sourceState.painted?.source.kind !== "national"
         ) return;
-        // National never stopped acquiring on its lane; only the failed Site
-        // lane and the paused National playback need attention.
+        // National never stopped acquiring or playing; only the failed Site
+        // lane needs releasing.
         if (client?.isActive("site")) void client.cancel("site").catch(() => {});
-        const resume = resumeNationalPlaybackAfterSiteFailure;
-        resumeNationalPlaybackAfterSiteFailure = false;
         const restoration = (async () => {
-          if (resume) await nationalPlaybackController?.play();
           if (!latestNationalPhase3) throw new Error("National radar is no longer displayed");
           return latestNationalPhase3;
         })();
@@ -1280,11 +1487,7 @@ export function App() {
       if (!layer) throw new Error("selected-site renderer is unavailable");
       siteLevel2Session = new SiteLevel2Session({
         coordinator: radarSessionCoordinatorRef.current!,
-        nextGeneration: () => Math.max(
-          transferGeneration + 1,
-          (layer?.getSnapshot().generation ?? transferGeneration) + 1,
-          (nationalLayer?.getSnapshot().generation ?? transferGeneration) + 1,
-        ),
+        nextGeneration: () => nextSiteGeneration(),
         acquireAndPaint: async (siteIcao, generation) => {
           // A National layer may exist only as partial staging while Site is
           // still the authoritative paint. Reuse that painted Site renderer
@@ -1425,7 +1628,6 @@ export function App() {
         nationalPlaybackController?.pause();
         activeLayer.setVisibility("resident");
         nationalResident = true;
-        resumeNationalPlaybackAfterSiteFailure = false;
         nationalInspectionLookupQueueForCleanup?.cancelPending();
         return true;
       };
@@ -1853,8 +2055,13 @@ export function App() {
           if (!receipt.presented || receipt.generation !== generation) {
             throw new Error("National reveal did not paint the resident history");
           }
+          await fadeOutSiteLayer(() => {
+            const current = radarSessionCoordinatorRef.current!.snapshot().transition;
+            return current?.generation === generation && current.requestedSource.kind === "national";
+          });
         } catch (error) {
           if (nationalResident && nationalLayer === activeLayer) activeLayer.setVisibility("resident");
+          layer?.setOpacity(1);
           throw error;
         }
         const report: NationalPhase3Report = {
@@ -1904,7 +2111,6 @@ export function App() {
         inspectionRequestRef.current = null;
         nationalInspectionLookupQueue.cancelPending();
         nationalPlaybackController?.acceptHistory(nationalObservations, report.workingSet.receipt);
-        focusNational(instance);
       };
 
       nationalMrmsSession = new NationalMrmsSession({
@@ -1973,6 +2179,14 @@ export function App() {
               historyWorkingSet.receipt,
             );
             ownershipCheck();
+            await fadeOutSiteLayer(() => {
+              try {
+                ownershipCheck();
+                return true;
+              } catch {
+                return false;
+              }
+            });
             const workingSet = workingSetWithReceipt({
               ...historyWorkingSet,
               receipt: authoritativeReceipt,
@@ -2075,7 +2289,6 @@ export function App() {
           nationalInspectionLookupQueue.cancelPending();
           removeSiteAfterNationalPaint();
           setLiveHistoryStatus(staticNationalDiagnostic ? "partial" : "loading");
-          focusNational(instance);
           if (!staticNationalDiagnostic) {
             void runNationalBackfill(report.workingSet.receipt.generation);
           }
@@ -2593,6 +2806,7 @@ export function App() {
               activityBefore,
               activityAfter: await client.nationalHistoryActivitySnapshot(),
               revealMs,
+              fadeMs: sourceFadeMs(),
             };
           } finally {
             release();
@@ -2802,6 +3016,9 @@ export function App() {
       if (playbackControllerRef.current === controller) playbackControllerRef.current = null;
       if (radarLayerRef.current === layer) radarLayerRef.current = null;
       if (clickHandler) instance.off("click", clickHandler);
+      if (autoSourceMoveHandlerForCleanup) instance.off("moveend", autoSourceMoveHandlerForCleanup);
+      autoSourceRef.current = null;
+      if (globalThis.__MISTR_AUTO_SOURCE__) delete globalThis.__MISTR_AUTO_SOURCE__;
       if (globalThis.__MISTR_PHASE4__) delete globalThis.__MISTR_PHASE4__;
       if (globalThis.__MISTR_PHASE5__) delete globalThis.__MISTR_PHASE5__;
       if (globalThis.__MISTR_PHASE6__) delete globalThis.__MISTR_PHASE6__;
@@ -3017,6 +3234,21 @@ export function App() {
     inspectionPointRef.current = null;
     interrogationObservationRef.current = null;
     inspectionRequestRef.current = null;
+    // The picker flies to the Site; zoom then keeps it displayed. From National
+    // the Site preloads during the flight and the landing switches to it.
+    const auto = autoSourceRef.current;
+    auto?.setPreferredSite(normalized);
+    const instance = map.current;
+    const location = radarSiteById(normalized);
+    if (instance && location) {
+      auto?.evaluateAfterNextMove();
+      flyToSite(instance, location);
+    }
+    const painted = radarSessionCoordinatorRef.current?.snapshot().painted;
+    if (auto && instance && location && painted?.source.kind === "national") {
+      auto.prefetch(normalized);
+      return;
+    }
     void session.start(normalized).then(
       () => {
         setSiteRequestError(null);
@@ -3050,6 +3282,15 @@ export function App() {
     inspectionPointRef.current = null;
     interrogationObservationRef.current = null;
     inspectionRequestRef.current = null;
+    // Picking National zooms out to the country; the landing switches source.
+    const auto = autoSourceRef.current;
+    auto?.setPreferredSite(undefined);
+    const instance = map.current;
+    if (auto && instance) {
+      auto.evaluateAfterNextMove();
+      flyToNational(instance);
+      return;
+    }
     void session.start().then(
       () => setNationalRequestError(null),
       (error: unknown) => {
@@ -3061,12 +3302,14 @@ export function App() {
 
   const recenterRadar = () => {
     const instance = map.current;
-    if (instance && paintedRadarSource.kind === "national") {
-      focusNational(instance);
+    if (!instance) return;
+    autoSourceRef.current?.evaluateAfterNextMove();
+    if (paintedRadarSource.kind === "national") {
+      flyToNational(instance);
       return;
     }
-    const model = radarModelRef.current;
-    if (instance && model) focusRadar(instance, model);
+    const location = radarSiteById(paintedRadarSource.siteIcao);
+    if (location) flyToSite(instance, location);
   };
 
   const selectDisplayMode = (mode: RadarDisplayMode) => {
@@ -3187,17 +3430,93 @@ function focusRadar(instance: MapLibreMap, model: RadarSweepCpuModel): void {
   );
 }
 
-function focusNational(instance: MapLibreMap): void {
-  instance.fitBounds(
-    [[-125.0, 24.0], [-66.5, 50.0]],
-    {
-      bearing: 0,
-      duration: 0,
-      maxZoom: 5.5,
-      padding: { top: 100, right: 88, bottom: 124, left: 88 },
-      pitch: 0,
-    },
-  );
+interface AutoSourceHandle {
+  setPreferredSite(site: string | undefined): void;
+  prefetch(site: string): void;
+  evaluateAfterNextMove(): void;
+}
+
+interface PrefetchedSiteSweep {
+  site: string;
+  generation: number;
+  model: RadarSweepCpuModel;
+  evidence: Phase5LiveTransferEvidence;
+  timing: TransferTiming;
+  fetchedAtUnixMs: number;
+}
+
+function prefersReducedMotion(): boolean {
+  try {
+    return globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+  } catch {
+    return false;
+  }
+}
+
+function sourceFadeMs(): number {
+  return prefersReducedMotion() ? 0 : SOURCE_FADE_MS;
+}
+
+function flyToSite(instance: MapLibreMap, site: RadarSiteOption): void {
+  instance.flyTo({
+    center: [site.longitude, site.latitude],
+    zoom: Math.max(instance.getZoom(), SITE_DETAIL_ZOOM),
+    bearing: 0,
+    pitch: 0,
+    duration: prefersReducedMotion() ? 0 : CAMERA_FLIGHT_MS,
+    essential: true,
+  });
+}
+
+function flyToNational(instance: MapLibreMap): void {
+  instance.fitBounds(CONUS_BOUNDS, {
+    bearing: 0,
+    pitch: 0,
+    maxZoom: 5.5,
+    padding: CAMERA_PADDING,
+    duration: prefersReducedMotion() ? 0 : CAMERA_FLIGHT_MS,
+  });
+}
+
+function initialMapCamera(
+  startupSource: RadarSourceKey,
+): Pick<maplibregl.MapOptions, "center" | "zoom" | "bounds" | "fitBoundsOptions"> {
+  const stored = restoreCamera();
+  if (stored) return stored;
+  if (startupSource.kind === "site") {
+    const site = radarSiteById(startupSource.siteIcao);
+    if (site) return { center: [site.longitude, site.latitude], zoom: SITE_DETAIL_ZOOM };
+    return { center: DEFAULT_CENTER, zoom: SITE_DETAIL_ZOOM };
+  }
+  return { bounds: CONUS_BOUNDS, fitBoundsOptions: { padding: CAMERA_PADDING, maxZoom: 5.5 } };
+}
+
+function restoreCamera(): { center: [number, number]; zoom: number } | null {
+  try {
+    const value = JSON.parse(globalThis.localStorage?.getItem(CAMERA_STORAGE_KEY) ?? "null");
+    if (
+      value
+      && Number.isFinite(value.longitude) && Math.abs(value.longitude) <= 180
+      && Number.isFinite(value.latitude) && Math.abs(value.latitude) <= 85
+      && Number.isFinite(value.zoom) && value.zoom >= 0 && value.zoom <= 22
+    ) return { center: [value.longitude, value.latitude], zoom: value.zoom };
+  } catch {
+    // A missing or malformed camera falls back to the startup source.
+  }
+  return null;
+}
+
+function storeCamera(instance: MapLibreMap): void {
+  try {
+    const center = instance.getCenter();
+    globalThis.localStorage?.setItem(CAMERA_STORAGE_KEY, JSON.stringify({
+      longitude: center.lng,
+      latitude: center.lat,
+      zoom: instance.getZoom(),
+    }));
+  } catch {
+    // Camera memory is a convenience; storage failure changes nothing else.
+  }
 }
 
 function mapBounds(instance: MapLibreMap) {
@@ -3581,6 +3900,7 @@ export interface NationalPhase4ResidentHandoffReport {
     activityBefore: NationalHistoryActivitySnapshot;
     activityAfter: NationalHistoryActivitySnapshot;
     revealMs: number;
+    fadeMs: number;
   } | undefined;
   after: RadarSessionSnapshot;
   renderer: NationalGridRendererSnapshot | null;
@@ -3869,6 +4189,17 @@ declare global {
     transferSnapshot(): Promise<import("./packed-sweep/transferClient").TransferSnapshot>;
     sourceState(): import("./radar-session/RadarSessionCoordinator").RadarSessionSnapshot | null;
     isolateRadarForEvidence(): void;
+  };
+  var __MISTR_AUTO_SOURCE__: undefined | {
+    evaluate(): void;
+    state(): {
+      preferredSite: string | null;
+      lastDecision: { target: AutoSource; preload?: string; atUnixMs: number } | null;
+      prefetchedSite: { site: string; generation: number; fetchedAtUnixMs: number } | null;
+      prefetchInFlight: string | null;
+      siteOpacity: number | null;
+    };
+    prefetch(site: string): Promise<void>;
   };
   var __MISTR_NATIONAL_PHASE4__: undefined | {
     report(): NationalPhase4Report;

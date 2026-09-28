@@ -81,8 +81,8 @@ describe("National Phase 4 packaged acceptance", () => {
     );
 
     const slow = validReport().residentHandoff;
-    slow.reveal.revealMs = 400;
-    expect(validateResidentHandoff(slow)).toContain("National reveal completes within 250 ms");
+    slow.reveal.revealMs = 600;
+    expect(validateResidentHandoff(slow)).toContain("National reveal completes within 250 ms plus the fade");
 
     const report = validReport();
     delete report.residentHandoff;
@@ -345,7 +345,8 @@ function validReport() {
       reveal: {
         activityBefore: nationalActivity(),
         activityAfter: nationalActivity(),
-        revealMs: 34,
+        revealMs: 334,
+        fadeMs: 300,
       },
       after: { painted: { source: { kind: "national", domain: "conus" }, generation: 8 } },
       renderer: {
