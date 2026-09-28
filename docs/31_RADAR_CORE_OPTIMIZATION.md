@@ -74,8 +74,10 @@ prove the larger loop loads faster.
 - Persistent decoded/on-disk history caching for warm starts.
 - Concurrent observation acquisition/decode or parallel Site chunk downloads.
 - Completed-archive fallback when Site's real-time predecessor is unavailable.
-- Interleaving fresh observations with a successful long backfill; polling still
-  begins after backfill completes or gives up after bounded failures.
+- ~~Interleaving fresh observations with a successful long backfill.~~ Done
+  2026-09-28: National checks for a newer observation every 30 seconds and Sites
+  probe every 2 minutes while history backfills; continuous polling still begins
+  after backfill completes or gives up.
 
 These are follow-up candidates, not capabilities to infer from the higher capacity.
 

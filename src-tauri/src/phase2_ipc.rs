@@ -959,6 +959,7 @@ pub async fn request_phase6_n0s_fixture_sweep(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn request_phase5_live_sweep(
     state: tauri::State<'_, TransferBroker>,
     session: u64,
@@ -967,6 +968,7 @@ pub async fn request_phase5_live_sweep(
     fresh_only: bool,
     timeout_seconds: u64,
     history_cursor: Option<LiveHistoryCursorArgs>,
+    wait_seconds: Option<u64>,
 ) -> Result<Response, TransferError> {
     if !(10..=900).contains(&timeout_seconds) {
         return Err(TransferError::new(
@@ -974,6 +976,7 @@ pub async fn request_phase5_live_sweep(
             "live timeout must be between 10 and 900 seconds",
         ));
     }
+    let wait = live_sweep_wait(timeout_seconds, wait_seconds)?;
     let history_request = validate_live_history_request(fresh_only, history_cursor)?;
     let broker = state.inner().clone();
     broker.acquire(session, TransferLane::Site, generation)?;
@@ -1016,7 +1019,7 @@ pub async fn request_phase5_live_sweep(
         }
         .map_err(|error| TransferError::new("live_start_failed", error.to_string()))?;
         let safe = live
-            .wait_for_safe_sweep(timeout)
+            .wait_for_safe_sweep_discovered_within(wait, timeout)
             .await
             .map_err(|error| TransferError::new("live_sweep_failed", error.to_string()))?;
         let safe_evidence = safe.evidence;
@@ -1061,6 +1064,23 @@ pub async fn request_phase5_live_sweep(
         .credit
         .complete_phase5_for_publish(generation, charged.evidence)?;
     Ok(Response::new(charged.bytes))
+}
+
+/// How long to wait for the target volume to be discovered. A short wait
+/// probes for a newer scan without holding up other work; once its chunks
+/// are listed, the complete timeout bounds assembly, download, and decode.
+fn live_sweep_wait(
+    timeout_seconds: u64,
+    wait_seconds: Option<u64>,
+) -> Result<Duration, TransferError> {
+    match wait_seconds {
+        None => Ok(Duration::from_secs(timeout_seconds)),
+        Some(wait) if (1..=timeout_seconds).contains(&wait) => Ok(Duration::from_secs(wait)),
+        Some(_) => Err(TransferError::new(
+            "invalid_live_wait",
+            "live wait must be between 1 second and the complete timeout",
+        )),
+    }
 }
 
 fn validate_live_history_request(
@@ -1875,6 +1895,26 @@ mod tests {
         assert_eq!(after_second.held_credits, 1);
         assert_eq!(after_second.in_flight_credits, 0);
         assert_eq!(after_second.lanes.site.available_credits, 1);
+    }
+
+    #[test]
+    fn live_sweep_wait_defaults_to_the_complete_timeout_and_bounds_a_probe() {
+        assert_eq!(
+            live_sweep_wait(180, None).unwrap(),
+            Duration::from_secs(180)
+        );
+        assert_eq!(
+            live_sweep_wait(60, Some(3)).unwrap(),
+            Duration::from_secs(3)
+        );
+        assert_eq!(
+            live_sweep_wait(60, Some(0)).unwrap_err().code,
+            "invalid_live_wait"
+        );
+        assert_eq!(
+            live_sweep_wait(60, Some(61)).unwrap_err().code,
+            "invalid_live_wait"
+        );
     }
 
     #[tokio::test]

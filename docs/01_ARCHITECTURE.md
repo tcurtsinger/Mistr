@@ -294,7 +294,7 @@ Mistr does not build a national mosaic from Level II sites and never switches so
 The approved model is one coordinator with exactly one active source generation and one painted source truth:
 
 - `SiteLevel2Session` owns the currently implemented per-site Level II path.
-- `NationalMrmsSession` owns the explicit CONUS path. It paints current first, backfills up to 19 predecessors with bounded retry for an unconsumed failed candidate, then polls inventory for strictly newer observations.
+- `NationalMrmsSession` owns the explicit CONUS path. It paints current first, backfills up to 19 predecessors with bounded retry for an unconsumed failed candidate, then polls inventory for strictly newer observations. While it backfills, it also checks for a newer observation every 30 seconds, so fresh weather never waits behind the history fill.
 - Site and National keep independent timelines, but only the painted source exposes one timeline at a time.
 - During transition the old source may remain visibly painted, but superseded backfill stops and the replacement does not become UI truth until a complete receipt commits.
 - After commit, the old source releases its complete loop; Mistr does not keep two permanent warm radar histories.

@@ -118,7 +118,7 @@ import {
   type LatestOnlyAsyncQueueSnapshot,
 } from "./national-radar/LatestOnlyAsyncQueue";
 import { retryBackfillStep } from "./live/backfillRetry";
-import { runNationalBackfillLoop } from "./national-radar/NationalBackfillLoop";
+import { runNationalBackfillLoop, waitRunningDueChecks } from "./national-radar/NationalBackfillLoop";
 import { finalizeNationalHistoryUntilSettled } from "./national-radar/NationalFinalizeLoop";
 import {
   nationalPollingFallbackDelayMs,
@@ -178,6 +178,10 @@ const CAMERA_STORAGE_KEY = "mistr.camera";
 /** Zoom the picker and recenter use for a Site: past the automatic switch threshold. */
 const SITE_DETAIL_ZOOM = 9.5;
 const SOURCE_FADE_MS = 300;
+// While history backfills, how often newer observations are checked.
+const NATIONAL_BACKFILL_FRESHNESS_MS = 30_000;
+const SITE_BACKFILL_FRESHNESS_MS = 120_000;
+const SITE_FRESHNESS_PROBE_WAIT_S = 3;
 const CAMERA_FLIGHT_MS = 1_200;
 /** A preloaded Site scan older than this is refetched at the switch. */
 const SITE_PREFETCH_MAX_AGE_MS = 5 * 60_000;
@@ -352,6 +356,8 @@ export function App() {
     > | null = null;
     let nationalHistorySession = 0;
     let nationalBackfillStartCount = 0;
+    // Newer-observation checks made during the latest National backfill.
+    let nationalBackfillFreshness = { checks: 0, commits: 0, startedAtUnixMs: 0, completedAtUnixMs: 0 };
     // Recent National load steps, kept so a stalled load can be diagnosed.
     const nationalLoadTrace: { atUnixMs: number; step: string; detail?: string }[] = [];
     const traceNationalLoad = (step: string, detail?: string) => {
@@ -834,6 +840,8 @@ export function App() {
         timeoutSeconds = freshOnly ? 900 : 180,
         historyDirection: "after" | "before" = "after",
         requestedGeneration?: number,
+        // Waits this briefly for a newer scan; finding none changes nothing.
+        probeWaitSeconds?: number,
       ): Promise<Phase5Report> => {
         if (!layer || !controller || !client) throw new Error("live renderer is unavailable");
         const activeLayer = layer;
@@ -858,6 +866,11 @@ export function App() {
           && residentLiveHistory?.[0]?.siteIcao === site
           && residentLiveHistory[0].sourceKind === "nexrad_level2_chunks"
           && liveBackfillCursor !== null;
+        const probing = probeWaitSeconds !== undefined && appendingHistory;
+        if (probeWaitSeconds !== undefined && !probing) {
+          throw new Error("a newer-scan probe requires painted live history for the site");
+        }
+        const displayBeforeProbe = liveDisplay;
         if (!prependingHistory) {
           liveDisplay = appendingHistory
             ? beginLiveRefresh(liveDisplay, generation, site)
@@ -881,6 +894,7 @@ export function App() {
                 ? liveSweepCursor ?? undefined
                 : undefined,
             historyDirection,
+            probeWaitSeconds,
           );
           const model = createRadarSweepCpuModel(lease.packed);
           if (model.sourceKind !== "nexrad_level2_chunks" || model.siteIcao !== site) {
@@ -1034,7 +1048,13 @@ export function App() {
             if (priorStagedModel) modelsById.set(stagedObservationId, priorStagedModel);
             else modelsById.delete(stagedObservationId);
           }
-          if (!prependingHistory && transferGeneration === generation) {
+          if (probing) {
+            // No newer scan yet: leave the display exactly as it was.
+            if (liveDisplay.kind === "refreshing" && liveDisplay.generation === generation) {
+              liveDisplay = displayBeforeProbe;
+              publishPhase5({ ...latestPhase5, display: liveDisplay });
+            }
+          } else if (!prependingHistory && transferGeneration === generation) {
             const priorDisplay = liveDisplay;
             const failedDisplay = failLiveDisplay(
               liveDisplay,
@@ -1071,6 +1091,18 @@ export function App() {
         pollingSession: number,
         historyLimit: number,
       ): Promise<boolean> => {
+        // Newer scans are probed while the history fills, so fresh weather
+        // never waits behind the whole backfill.
+        let nextFreshnessProbeAt = Date.now() + SITE_BACKFILL_FRESHNESS_MS;
+        const probeForNewerScan = async () => {
+          if (cancelled || pollingSession !== livePollingSession || Date.now() < nextFreshnessProbeAt) return;
+          try {
+            await acquireLive(site, true, 60, "after", undefined, SITE_FRESHNESS_PROBE_WAIT_S);
+          } catch {
+            // No newer scan yet, or a transient failure the next probe retries.
+          }
+          nextFreshnessProbeAt = Date.now() + SITE_BACKFILL_FRESHNESS_MS;
+        };
         while (
           !cancelled
           && pollingSession === livePollingSession
@@ -1089,6 +1121,7 @@ export function App() {
                 residentLiveHistory.length >= MAX_LIVE_HISTORY_FRAMES ? "full" : "loading",
               );
             }
+            await probeForNewerScan();
           } catch {
             // A missing/replaced ring predecessor is not a live-radar failure.
             // Preserve the current painted observation and the history already
@@ -2180,6 +2213,36 @@ export function App() {
         activeNationalBackfillSession = historySession;
         setVisibleNationalHistoryStatus("loading");
         traceNationalLoad("backfill:start", String(generation));
+        // Newer observations are checked while the history fills, so fresh
+        // weather never waits behind the whole backfill.
+        let nextFreshnessCheckAt = Date.now() + NATIONAL_BACKFILL_FRESHNESS_MS;
+        let freshnessAttempt = 0;
+        const freshness = { checks: 0, commits: 0, startedAtUnixMs: Date.now(), completedAtUnixMs: 0 };
+        nationalBackfillFreshness = freshness;
+        const checkFreshnessDuringBackfill = async () => {
+          if (Date.now() < nextFreshnessCheckAt) return;
+          freshness.checks += 1;
+          try {
+            await runNationalAcquisition(async () => {
+              nationalHistoryOwnershipCheck(generation, historySession);
+              traceNationalLoad("backfill:freshness-check");
+              const preparation = await activeClientForNational().prepareNationalHistoryNewer();
+              nationalHistoryOwnershipCheck(generation, historySession);
+              await commitNationalHistoryMutation(preparation, historySession);
+            });
+            freshness.commits += 1;
+            freshnessAttempt = 0;
+          } catch (error) {
+            if (isRadarSourceSuperseded(error)) throw error;
+            freshnessAttempt = nationalHistoryErrorCode(error) === "mrms_not_strictly_newer"
+              ? 0
+              : Math.min(freshnessAttempt + 1, 3);
+          }
+          nextFreshnessCheckAt = Date.now() + Math.max(
+            NATIONAL_BACKFILL_FRESHNESS_MS,
+            nationalPollingFallbackDelayMs(freshnessAttempt),
+          );
+        };
         try {
           const result = await runNationalBackfillLoop({
             shouldContinue: () => !cancelled && historySession === nationalHistorySession,
@@ -2197,30 +2260,43 @@ export function App() {
             },
             reachedLimit: () => nationalObservations.length >= MAX_LIVE_HISTORY_FRAMES,
             isSuperseded: isRadarSourceSuperseded,
+            betweenSteps: checkFreshnessDuringBackfill,
             onFailure(error) {
               traceNationalLoad("backfill:failure", error instanceof Error ? error.message : String(error));
               setVisibleNationalHistoryStatus(nationalObservations.length >= MAX_LIVE_HISTORY_FRAMES ? "full" : "loading");
               reportNationalRequestError(error instanceof Error ? error.message : String(error));
             },
             async waitBeforeRetry(attempt) {
+              let delayMs: number;
               try {
                 const delay = await activeClientForNational().nationalHistoryPollDelay(
                   attempt,
                   Date.now() % Number.MAX_SAFE_INTEGER,
                 );
-                traceNationalLoad("backfill:retry-wait", String(delay.totalMs));
-                await waitMilliseconds(delay.totalMs);
+                delayMs = delay.totalMs;
               } catch (error) {
                 nationalHistoryOwnershipCheck(generation, historySession);
                 reportNationalRequestError(error instanceof Error ? error.message : String(error));
-                await waitMilliseconds(nationalPollingFallbackDelayMs(attempt));
+                delayMs = nationalPollingFallbackDelayMs(attempt);
               }
+              traceNationalLoad("backfill:retry-wait", String(delayMs));
+              // A predecessor waiting to retry must not hold newer observations
+              // back: freshness checks keep their own cadence through the wait.
+              await waitRunningDueChecks(delayMs, {
+                nextCheckAt: () => nextFreshnessCheckAt,
+                check: async () => {
+                  nationalHistoryOwnershipCheck(generation, historySession);
+                  await checkFreshnessDuringBackfill();
+                },
+                wait: waitMilliseconds,
+              });
               nationalHistoryOwnershipCheck(generation, historySession);
             },
           }).finally(() => {
             if (activeNationalBackfillSession === historySession) activeNationalBackfillSession = null;
           });
           traceNationalLoad("backfill:end", result);
+          freshness.completedAtUnixMs = Date.now();
           if (result === "superseded") return;
           nationalHistoryOwnershipCheck(generation, historySession);
           setVisibleNationalHistoryStatus(nationalObservations.length >= MAX_LIVE_HISTORY_FRAMES ? "full" : "partial");
@@ -2934,6 +3010,7 @@ export function App() {
       globalThis.__MISTR_NATIONAL_PHASE4__ = {
         loadTrace: () => [...nationalLoadTrace],
         report: () => ({
+          backfillFreshness: { ...nationalBackfillFreshness },
           history: latestNationalHistory,
           renderer: nationalLayer?.getSnapshot() ?? null,
           playback: nationalPlaybackController?.snapshot() ?? null,

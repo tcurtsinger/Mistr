@@ -1,5 +1,30 @@
 export type NationalBackfillLoopResult = "complete" | "partial" | "superseded";
 
+export interface DueCheckWaitOptions {
+  /** When the periodic check is next due, in `now()` milliseconds. */
+  nextCheckAt(): number;
+  /** Runs the check if it is due and reschedules it; may throw to stop the wait. */
+  check(): Promise<void>;
+  wait(delayMs: number): Promise<void>;
+  now?: () => number;
+}
+
+/**
+ * Waits `delayMs` while still running a periodic check whenever it comes due,
+ * so a long retry delay never holds that periodic work back.
+ */
+export async function waitRunningDueChecks(
+  delayMs: number,
+  options: DueCheckWaitOptions,
+): Promise<void> {
+  const now = options.now ?? (() => Date.now());
+  const until = now() + delayMs;
+  while (now() < until) {
+    await options.wait(Math.max(0, Math.min(until, options.nextCheckAt()) - now()));
+    if (now() < until) await options.check();
+  }
+}
+
 export interface NationalBackfillLoopOptions<Candidate> {
   shouldContinue(): boolean;
   prepare(): Promise<Candidate | null>;
@@ -8,6 +33,12 @@ export interface NationalBackfillLoopOptions<Candidate> {
   isSuperseded(error: unknown): boolean;
   onFailure(error: unknown, retryAttempt: number): void;
   waitBeforeRetry(retryAttempt: number): Promise<void>;
+  /**
+   * Runs between successful backfill steps, so newer observations are not
+   * held behind the whole history fill. Only supersession stops the backfill;
+   * any other failure is the hook's own to report.
+   */
+  betweenSteps?(): Promise<void>;
   maximumRetryAttempt?: number;
 }
 
@@ -45,7 +76,16 @@ export async function runNationalBackfillLoop<Candidate>(
         if (!options.shouldContinue() || options.isSuperseded(waitError)) return "superseded";
         throw waitError;
       }
+      continue;
     }
+    if (!options.betweenSteps || !options.shouldContinue()) continue;
+    try {
+      await options.betweenSteps();
+    } catch (error) {
+      if (options.isSuperseded(error)) return "superseded";
+    }
+    // A newer observation can fill the history before the predecessors do.
+    if (options.reachedLimit()) return "complete";
   }
   return "superseded";
 }

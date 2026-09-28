@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   validateNationalPhase4Acceptance,
   validateResidentHandoff,
+  validateBackfillFreshness,
   validateSiteInspection,
   validateTimeCarry,
   validateZoomHandoff,
@@ -92,6 +93,17 @@ describe("National Phase 4 packaged acceptance", () => {
     expect(validateNationalPhase4Acceptance(report)).toContain(
       "National stays resident while the Site is displayed",
     );
+  });
+
+  it("requires a long backfill to check for newer observations", () => {
+    expect(validateBackfillFreshness({ checks: 1, commits: 0, startedAtUnixMs: 1_000, completedAtUnixMs: 56_000 }))
+      .toEqual([]);
+    expect(validateBackfillFreshness({ checks: 0, commits: 0, startedAtUnixMs: 1_000, completedAtUnixMs: 20_000 }))
+      .toEqual([]);
+    expect(validateBackfillFreshness({ checks: 0, commits: 0, startedAtUnixMs: 1_000, completedAtUnixMs: 56_000 }))
+      .toEqual(["National history backfill checks for newer observations while it fills"]);
+    expect(validateBackfillFreshness(undefined))
+      .toEqual(["National history backfill reports its newer-observation checks"]);
   });
 
   it("requires a Site opened from National to inspect the scan it painted", () => {
@@ -301,6 +313,7 @@ function validReport() {
       firstDisabledStableStaging: null,
     },
     history: {
+      backfillFreshness: { checks: 1, commits: 0, startedAtUnixMs: 1_000, completedAtUnixMs: 56_000 },
       history: {
         historyLimit: 60,
         retained,

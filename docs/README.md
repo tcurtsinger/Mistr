@@ -22,7 +22,7 @@ The merged National path is:
 fixed NOAA MRMS host -> strict chronological history -> exact u16/value-aware levels -> PackedGrid v1 -> shared two-credit IPC -> all-frame common GPU residency -> quality-locked playback/scrub -> coverage-aware GPU receipt
 ```
 
-It paints the newest observation first, backfills up to 19 strictly older observations, then polls for strictly newer inventory — including while playback runs. Under the native-residency owner decision (2026-08-04), every retained observation is GPU-resident at the exact full-resolution 7,000 x 3,500 grid: there is one version of the data, no coarser presentation ever paints, and pan, zoom, play, scrub, and follow-newest are all the same native-resolution pixels with zero restaging. Playback is motion-first and never stops for a camera change. GPU uploads share a measured 4 ms per-frame budget; the complete loop costs about 1 GiB of GPU memory, sized for the supported desktop floor rather than a minimal device.
+It paints the newest observation first, backfills up to 19 strictly older observations, then polls for strictly newer inventory — including while playback runs, and every 30 seconds while it backfills. Under the native-residency owner decision (2026-08-04), every retained observation is GPU-resident at the exact full-resolution 7,000 x 3,500 grid: there is one version of the data, no coarser presentation ever paints, and pan, zoom, play, scrub, and follow-newest are all the same native-resolution pixels with zero restaging. Playback is motion-first and never stops for a camera change. GPU uploads share a measured 4 ms per-frame budget; the complete loop costs about 1 GiB of GPU memory, sized for the supported desktop floor rather than a minimal device.
 
 ## Alpha direction
 

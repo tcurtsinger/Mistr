@@ -304,20 +304,41 @@ impl LiveSweepSession {
         &mut self,
         timeout: Duration,
     ) -> Result<SafeSweepCandidate, LivePipelineError> {
-        let deadline = Instant::now() + timeout;
+        self.wait_for_safe_sweep_discovered_within(timeout, timeout)
+            .await
+    }
+
+    /// Waits at most `discovery` for the target volume's first chunks to be
+    /// listed, then up to `timeout` overall to assemble and decode its safe
+    /// sweep. A short discovery wait probes for a newer scan without ever
+    /// cutting off one that has started arriving.
+    pub async fn wait_for_safe_sweep_discovered_within(
+        &mut self,
+        discovery: Duration,
+        timeout: Duration,
+    ) -> Result<SafeSweepCandidate, LivePipelineError> {
+        let started = Instant::now();
+        let discovery_deadline = started + discovery.min(timeout);
+        let deadline = started + timeout;
         loop {
             self.token.ensure_current()?;
-            if Instant::now() >= deadline {
-                return Err(LivePipelineError::Timeout {
-                    stage: "safe_lowest_sweep",
-                });
+            let discovered = self.selected_started_at.is_some();
+            if let Some(stage) =
+                safe_sweep_wait_expired(Instant::now(), discovered, discovery_deadline, deadline)
+            {
+                return Err(LivePipelineError::Timeout { stage });
             }
             if let Some(candidate) = self.poll_chunks_once(true).await? {
                 return Ok(candidate);
             }
+            let limit = if self.selected_started_at.is_some() {
+                deadline
+            } else {
+                discovery_deadline
+            };
             sleep(
                 self.poll_interval
-                    .min(deadline.saturating_duration_since(Instant::now())),
+                    .min(limit.saturating_duration_since(Instant::now())),
             )
             .await;
         }
@@ -626,9 +647,51 @@ fn subtract_counters(
     }
 }
 
+/// Which deadline a safe-sweep wait has passed, if any. The discovery
+/// deadline applies only until the target volume's first chunks are listed.
+fn safe_sweep_wait_expired(
+    now: Instant,
+    discovered: bool,
+    discovery_deadline: Instant,
+    deadline: Instant,
+) -> Option<&'static str> {
+    if now >= deadline {
+        Some("safe_lowest_sweep")
+    } else if !discovered && now >= discovery_deadline {
+        Some("volume_discovery")
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn discovery_deadline_stops_only_an_undiscovered_volume() {
+        let start = Instant::now();
+        let discovery = start + Duration::from_secs(3);
+        let deadline = start + Duration::from_secs(60);
+        let after_discovery = start + Duration::from_secs(10);
+        assert_eq!(
+            safe_sweep_wait_expired(start, false, discovery, deadline),
+            None
+        );
+        assert_eq!(
+            safe_sweep_wait_expired(after_discovery, false, discovery, deadline),
+            Some("volume_discovery")
+        );
+        // Once the volume's chunks are listed, only the complete timeout applies.
+        assert_eq!(
+            safe_sweep_wait_expired(after_discovery, true, discovery, deadline),
+            None
+        );
+        assert_eq!(
+            safe_sweep_wait_expired(deadline, true, discovery, deadline),
+            Some("safe_lowest_sweep")
+        );
+    }
 
     #[test]
     fn site_switch_invalidates_old_generation_before_publication() {

@@ -463,6 +463,8 @@ export class PackedSweepTransferClient {
     timeoutSeconds = 180,
     historyCursor?: LiveSweepCursor,
     historyDirection: LiveHistoryDirection = "after",
+    /** A short wait for the sweep to appear; the timeout still bounds the transfer. */
+    waitSeconds?: number,
   ): Promise<PackedSweepLease> {
     if (!/^[A-Z0-9]{4}$/.test(site)) {
       throw new TypeError("site must be exactly four uppercase ASCII letters/digits");
@@ -489,6 +491,12 @@ export class PackedSweepTransferClient {
     if (!historyCursor && historyDirection === "before") {
       throw new RangeError("before history direction requires a live history cursor");
     }
+    if (
+      waitSeconds !== undefined
+      && (!Number.isInteger(waitSeconds) || waitSeconds < 1 || waitSeconds > timeoutSeconds)
+    ) {
+      throw new RangeError("waitSeconds must be an integer between 1 and timeoutSeconds");
+    }
     return this.requestFromCommand(
       "request_phase5_live_sweep",
       0,
@@ -498,6 +506,7 @@ export class PackedSweepTransferClient {
         site,
         freshOnly,
         timeoutSeconds,
+        ...(waitSeconds === undefined ? {} : { waitSeconds }),
         ...(historyCursor
           ? {
               historyCursor: {
