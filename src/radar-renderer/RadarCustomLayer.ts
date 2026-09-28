@@ -615,7 +615,9 @@ export class RadarCustomLayer implements CustomLayerInterface {
     const frame = this.requireSelectedFrame();
     const model = frame.model;
     const started = performance.now();
-    const state = captureGlState(gl);
+    // MapLibre marks its GL state dirty after every custom layer and restores it,
+    // so this draw sets only what it needs instead of saving and restoring state
+    // through blocking getParameter queries every frame.
     let retryInNative = false;
     try {
       gl.disable(gl.DEPTH_TEST);
@@ -688,7 +690,6 @@ export class RadarCustomLayer implements CustomLayerInterface {
       if (this.handleDrawFailure(error, retryInNative)) return;
       throw error;
     } finally {
-      restoreGlState(gl, state);
       const elapsed = performance.now() - started;
       this.drawCpuSamples.push(elapsed);
       if (this.drawCpuSamples.length > 120) this.drawCpuSamples.shift();
@@ -1861,75 +1862,6 @@ export class RadarRendererError extends Error {
     super(message);
     this.name = "RadarRendererError";
   }
-}
-
-interface CapturedGlState {
-  activeTexture: number;
-  textureBindings: Array<WebGLTexture | null>;
-  program: WebGLProgram | null;
-  vao: WebGLVertexArrayObject | null;
-  blend: boolean;
-  depth: boolean;
-  stencil: boolean;
-  cull: boolean;
-  blendSrcRgb: number;
-  blendDstRgb: number;
-  blendSrcAlpha: number;
-  blendDstAlpha: number;
-  blendEquationRgb: number;
-  blendEquationAlpha: number;
-}
-
-function captureGlState(gl: WebGL2RenderingContext): CapturedGlState {
-  const activeTexture = gl.getParameter(gl.ACTIVE_TEXTURE) as number;
-  const textureBindings: Array<WebGLTexture | null> = [];
-  for (let unit = 0; unit < 5; unit += 1) {
-    gl.activeTexture(gl.TEXTURE0 + unit);
-    textureBindings.push(gl.getParameter(gl.TEXTURE_BINDING_2D) as WebGLTexture | null);
-  }
-  gl.activeTexture(activeTexture);
-  return {
-    activeTexture,
-    textureBindings,
-    program: gl.getParameter(gl.CURRENT_PROGRAM) as WebGLProgram | null,
-    vao: gl.getParameter(gl.VERTEX_ARRAY_BINDING) as WebGLVertexArrayObject | null,
-    blend: gl.isEnabled(gl.BLEND),
-    depth: gl.isEnabled(gl.DEPTH_TEST),
-    stencil: gl.isEnabled(gl.STENCIL_TEST),
-    cull: gl.isEnabled(gl.CULL_FACE),
-    blendSrcRgb: gl.getParameter(gl.BLEND_SRC_RGB) as number,
-    blendDstRgb: gl.getParameter(gl.BLEND_DST_RGB) as number,
-    blendSrcAlpha: gl.getParameter(gl.BLEND_SRC_ALPHA) as number,
-    blendDstAlpha: gl.getParameter(gl.BLEND_DST_ALPHA) as number,
-    blendEquationRgb: gl.getParameter(gl.BLEND_EQUATION_RGB) as number,
-    blendEquationAlpha: gl.getParameter(gl.BLEND_EQUATION_ALPHA) as number,
-  };
-}
-
-function restoreGlState(gl: WebGL2RenderingContext, state: CapturedGlState) {
-  for (let unit = 0; unit < state.textureBindings.length; unit += 1) {
-    gl.activeTexture(gl.TEXTURE0 + unit);
-    gl.bindTexture(gl.TEXTURE_2D, state.textureBindings[unit]);
-  }
-  gl.activeTexture(state.activeTexture);
-  gl.bindVertexArray(state.vao);
-  gl.useProgram(state.program);
-  gl.blendEquationSeparate(state.blendEquationRgb, state.blendEquationAlpha);
-  gl.blendFuncSeparate(
-    state.blendSrcRgb,
-    state.blendDstRgb,
-    state.blendSrcAlpha,
-    state.blendDstAlpha,
-  );
-  restoreCapability(gl, gl.BLEND, state.blend);
-  restoreCapability(gl, gl.DEPTH_TEST, state.depth);
-  restoreCapability(gl, gl.STENCIL_TEST, state.stencil);
-  restoreCapability(gl, gl.CULL_FACE, state.cull);
-}
-
-function restoreCapability(gl: WebGL2RenderingContext, capability: number, enabled: boolean) {
-  if (enabled) gl.enable(capability);
-  else gl.disable(capability);
 }
 
 function bindTexture(
