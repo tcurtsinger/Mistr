@@ -224,6 +224,8 @@ describe("radar chrome model", () => {
     expect(userFacingRadarError("playback")).toContain("last completed scan");
     expect(userFacingRadarError("live_retrying", "KTLX")).toContain("while Mistr retries");
     expect(userFacingRadarError("live_unavailable", "KINX")).toContain("choose the site again");
+    expect(userFacingRadarError("auto_unavailable", "KGJX"))
+      .toBe("KGJX radar is unavailable, so National radar stays displayed.");
     expect(() => userFacingRadarError("live_unavailable", "bad")).toThrow("supported NEXRAD site");
   });
 

@@ -255,6 +255,8 @@ export function App() {
   const [selectedSite, setSelectedSite] = useState(restoreLastSite());
   const [requestedSite, setRequestedSite] = useState<string | null>(null);
   const [siteRequestError, setSiteRequestError] = useState<string | null>(null);
+  // Site an automatic switch could not load; National stays displayed.
+  const [autoSiteError, setAutoSiteError] = useState<string | null>(null);
   const [nationalRequestError, setNationalRequestError] = useState<string | null>(null);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
   const [siteSelectionReady, setSiteSelectionReady] = useState(false);
@@ -1281,6 +1283,13 @@ export function App() {
       let prefetchInFlight: { site: string; promise: Promise<void> } | null = null;
       let prefetchSession = 0;
       const autoSiteFailures = new Map<string, number>();
+      let autoErrorSite: string | undefined;
+      let lastAutoFailure: { site: string; message: string; atUnixMs: number } | null = null;
+      const clearAutoSiteError = () => {
+        if (autoErrorSite === undefined) return;
+        autoErrorSite = undefined;
+        setAutoSiteError(null);
+      };
       let lastAutoDecision: { target: AutoSource; preload?: string; atUnixMs: number } | null = null;
 
       const prefetchIsUsable = (sweep: PrefetchedSiteSweep | null, site: string) => Boolean(
@@ -1370,6 +1379,10 @@ export function App() {
         }, RADAR_SITES);
         lastAutoDecision = { ...decision, atUnixMs: Date.now() };
         if (decision.preferenceSpent) preferredSite = undefined;
+        // The notice only applies while the view still calls for that Site.
+        if (decision.target.kind !== "site" || decision.target.siteIcao !== autoErrorSite) {
+          clearAutoSiteError();
+        }
         if (sameAutoSource(decision.target, visible)) {
           if (decision.preload) void prefetchSite(decision.preload);
           return;
@@ -1388,10 +1401,19 @@ export function App() {
         const failedAt = autoSiteFailures.get(target);
         if (failedAt !== undefined && Date.now() - failedAt < AUTO_SITE_RETRY_MS) return;
         autoSwitchInFlight = true;
-        void startSiteSession(target).then(() => settleAutoSwitch(true), (error: unknown) => {
+        void startSiteSession(target).then(() => {
+          clearAutoSiteError();
+          settleAutoSwitch(true);
+        }, (error: unknown) => {
           if (!isRadarSourceSuperseded(error)) {
             autoSiteFailures.set(target, Date.now());
-            setSiteRequestError(error instanceof Error ? error.message : String(error));
+            lastAutoFailure = {
+              site: target,
+              message: error instanceof Error ? error.message : String(error),
+              atUnixMs: Date.now(),
+            };
+            autoErrorSite = target;
+            setAutoSiteError(target);
           }
           settleAutoSwitch(false);
         });
@@ -1437,6 +1459,7 @@ export function App() {
             : null,
           prefetchInFlight: prefetchInFlight?.site ?? null,
           siteOpacity: layer?.getOpacity() ?? null,
+          lastFailure: lastAutoFailure,
         }),
         prefetch: (site) => prefetchSite(normalizeRadarSite(site)),
       };
@@ -3237,7 +3260,9 @@ export function App() {
             ? siteRequestError === RADAR_ENGINE_PREPARING_ERROR
               ? userFacingRadarError("initialization")
               : userFacingRadarError("live_unavailable", selectedSite)
-            : null;
+            : autoSiteError
+              ? userFacingRadarError("auto_unavailable", autoSiteError)
+              : null;
   const preparingFailed = displayedAtUnixMs === undefined && Boolean(radarUnavailableError);
   const preparingLabel = displayedAtUnixMs === undefined
     ? preparingFailed
