@@ -1410,6 +1410,12 @@ export function App() {
         evaluateAfterNextMove() {
           evaluateOnNextMove = true;
         },
+        evaluateIfSettled() {
+          // A flight to where the camera already is may never emit moveend.
+          if (instance.isMoving()) return;
+          evaluateOnNextMove = false;
+          evaluateAutoSource();
+        },
       };
       globalThis.__MISTR_AUTO_SOURCE__ = {
         evaluate: evaluateAutoSource,
@@ -3317,6 +3323,7 @@ export function App() {
     const painted = radarSessionCoordinatorRef.current?.snapshot().painted;
     if (auto && instance && location && painted?.source.kind === "national") {
       auto.prefetch(normalized);
+      auto.evaluateIfSettled();
       return;
     }
     void session.start(normalized).then(
@@ -3359,6 +3366,7 @@ export function App() {
     if (auto && instance) {
       auto.evaluateAfterNextMove();
       flyToNational(instance);
+      auto.evaluateIfSettled();
       return;
     }
     void session.start().then(
@@ -3376,10 +3384,11 @@ export function App() {
     autoSourceRef.current?.evaluateAfterNextMove();
     if (paintedRadarSource.kind === "national") {
       flyToNational(instance);
-      return;
+    } else {
+      const location = radarSiteById(paintedRadarSource.siteIcao);
+      if (location) flyToSite(instance, location);
     }
-    const location = radarSiteById(paintedRadarSource.siteIcao);
-    if (location) flyToSite(instance, location);
+    autoSourceRef.current?.evaluateIfSettled();
   };
 
   const selectDisplayMode = (mode: RadarDisplayMode) => {
@@ -3504,6 +3513,7 @@ interface AutoSourceHandle {
   setPreferredSite(site: string | undefined): void;
   prefetch(site: string): void;
   evaluateAfterNextMove(): void;
+  evaluateIfSettled(): void;
 }
 
 interface PrefetchedSiteSweep {
