@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { RADAR_SITES } from "../data/radarSites";
-import { decideAutoSource, sameAutoSource } from "./autoSourcePolicy";
+import { decideAutoSource, nationalCovers, sameAutoSource } from "./autoSourcePolicy";
 
 const KTLX = { longitude: -97.2778, latitude: 35.3331 };
 const OKC_METRO = { longitude: -97.52, latitude: 35.47 };
@@ -83,6 +83,24 @@ describe("decideAutoSource", () => {
       { zoom: 10, center: KTLX, visible: ktlx, preferredSite: "KTLX" },
       RADAR_SITES,
     )).toEqual({ target: ktlx });
+  });
+
+  it("keeps and enters Sites at regional zooms where National has no grid", () => {
+    for (const id of ["PAHG", "PHKI", "PGUA", "TJUA"]) {
+      const site = RADAR_SITES.find((candidate) => candidate.id === id)!;
+      const center = { longitude: site.longitude, latitude: site.latitude };
+      const shown = { kind: "site", siteIcao: id } as const;
+      expect(nationalCovers(center)).toBe(false);
+      expect(decideAutoSource({ zoom: 8.4, center, visible: shown }, RADAR_SITES).target).toEqual(shown);
+      expect(decideAutoSource({ zoom: 5.6, center, visible: shown }, RADAR_SITES).target).toEqual(shown);
+      expect(decideAutoSource({ zoom: 5.4, center, visible: shown }, RADAR_SITES).target).toEqual(national);
+      expect(decideAutoSource({ zoom: 6.2, center, visible: national }, RADAR_SITES).target).toEqual(shown);
+      expect(decideAutoSource({ zoom: 5.7, center, visible: national }, RADAR_SITES))
+        .toEqual({ target: national, preload: id });
+    }
+    // Inside the grid the regular zooms still apply.
+    expect(nationalCovers(KTLX)).toBe(true);
+    expect(decideAutoSource({ zoom: 8.4, center: KTLX, visible: ktlx }, RADAR_SITES).target).toEqual(national);
   });
 
   it("compares sources by kind and site", () => {
