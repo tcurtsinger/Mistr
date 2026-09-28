@@ -398,6 +398,20 @@ async function observePlaybackChrome(durationMs) {
       return value?{left:value.left,top:value.top,width:value.width,height:value.height}:null;
     };
     const samples=[];
+    // Exact point lookups can settle within one polling interval, so also
+    // record every readout change as it happens.
+    const observed=[];
+    const readout=()=>{
+      const sample=document.querySelector('.sample-readout');
+      return {
+        sampleText:sample?.textContent?.trim()??'',
+        sampleState:sample?.dataset.inspectionState??null,
+        sampleBusy:sample?.getAttribute('aria-busy')??null,
+      };
+    };
+    const observer=new MutationObserver(()=>observed.push(readout()));
+    const bar=document.querySelector('.playback-bar');
+    if(bar) observer.observe(bar,{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:['data-inspection-state','aria-busy']});
     const deadline=performance.now()+${durationMs};
     while(performance.now()<deadline){
       const report=window.__MISTR_NATIONAL_PHASE4__.report();
@@ -428,7 +442,9 @@ async function observePlaybackChrome(durationMs) {
         Math.abs(sample[key].height-baseline.height),
       ]));
     };
-    const pending=samples.filter(sample=>sample.sampleState==='pending');
+    observer.disconnect();
+    const readouts=[...samples,...observed];
+    const pending=readouts.filter(sample=>sample.sampleState==='pending');
     return {
       innerWidth,
       innerHeight,
@@ -444,7 +460,8 @@ async function observePlaybackChrome(durationMs) {
       timelineMaxRectDelta:maxRectDelta('timeline'),
       telemetryMaxRectDelta:maxRectDelta('telemetry'),
       sampleReadoutMaxRectDelta:maxRectDelta('sampleReadout'),
-      distinctSampleTexts:[...new Set(samples.map(sample=>sample.sampleText))],
+      observedReadoutChangeCount:observed.length,
+      distinctSampleTexts:[...new Set(readouts.map(sample=>sample.sampleText))],
       distinctAnnouncements:[...new Set(samples.map(sample=>sample.announcement))],
     };
   })()`), true, durationMs + 30_000);
