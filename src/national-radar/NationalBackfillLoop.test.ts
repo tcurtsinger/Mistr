@@ -2,6 +2,17 @@ import { describe, expect, it, vi } from "vitest";
 import { runNationalBackfillLoop } from "./NationalBackfillLoop";
 
 describe("runNationalBackfillLoop", () => {
+  it("returns partial after repeated failure so the caller can start live polling", async () => {
+    const prepare = vi.fn(async () => { throw new Error("unavailable"); });
+    const waitBeforeRetry = vi.fn(async () => {});
+    expect(await runNationalBackfillLoop({
+      shouldContinue: () => true, prepare, commit: async () => {},
+      reachedLimit: () => false, isSuperseded: () => false,
+      onFailure: () => {}, waitBeforeRetry,
+    })).toBe("partial");
+    expect(prepare).toHaveBeenCalledTimes(3);
+    expect(waitBeforeRetry).toHaveBeenCalledTimes(2);
+  });
   it("retries an unconsumed predecessor and resets bounded backoff after success", async () => {
     const firstFailure = new Error("temporary predecessor download failure");
     const secondFailure = new Error("temporary predecessor upload failure");

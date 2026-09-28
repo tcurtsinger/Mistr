@@ -1,4 +1,6 @@
 import { assertChunkMatchesManifest, type PackedGridManifest } from "../packed-grid/packedGrid";
+import { consumePipelinedLeases } from "../packed-grid/transferPipeline";
+import { GRID_TRANSFER_BATCH_SIZE } from "../packed-grid/chunkBatch";
 import type {
   NationalHistoryObservation,
   PackedSweepTransferClient,
@@ -33,7 +35,7 @@ type HistoryTransferClient = Pick<
   | "prepareNationalHistoryPresentation"
   | "requestNationalHistoryManifest"
   | "requestNationalHistoryChunk"
->;
+> & Partial<Pick<PackedSweepTransferClient, "requestNationalHistoryChunkBatch">>;
 
 type HistoryGridLayer = Pick<
   NationalGridLayer,
@@ -81,7 +83,7 @@ export class NationalHistoryWorkingSetController {
   stageHistoryOverview(
     observation: NationalHistoryObservation,
     timelineObservationIds: readonly string[],
-    selectedObservationId: string,
+    selectedObservationId: string | (() => string),
     ownershipCheck: () => void,
     beforeCommit?: () => void | Promise<void>,
   ): Promise<NationalHistoryWorkingSetResult> {
@@ -92,7 +94,7 @@ export class NationalHistoryWorkingSetController {
       ownershipCheck,
       async () => this.layer.commitHistoryStaging(
         timelineObservationIds,
-        selectedObservationId,
+        typeof selectedObservationId === "function" ? selectedObservationId() : selectedObservationId,
         4,
         true,
       ),
@@ -251,23 +253,31 @@ export class NationalHistoryWorkingSetController {
     let chunkWireBytes = 0;
     let receipt: NationalPaintReceipt | undefined;
     try {
-      for (const descriptor of descriptors) {
+      const upload = async (chunk: Parameters<HistoryGridLayer["uploadStagedChunk"]>[0]) => {
+        assertChunkMatchesManifest(manifest, chunk);
         ownershipCheck();
-        const lease = await this.client.requestNationalHistoryChunk(
-          observation,
-          descriptor.index,
-          presentationFactor,
-        );
-        try {
-          assertChunkMatchesManifest(manifest, lease.packed);
-          ownershipCheck();
-          await this.layer.uploadStagedChunk(lease.packed);
-          chunkWireBytes += lease.wireBytes;
-          ownershipCheck();
-        } finally {
-          await lease.release();
+        await this.layer.uploadStagedChunk(chunk);
+        ownershipCheck();
+      };
+      if (this.client.requestNationalHistoryChunkBatch) {
+        const batches = [];
+        for (let i = 0; i < descriptors.length; i += GRID_TRANSFER_BATCH_SIZE) {
+          batches.push(descriptors.slice(i, i + GRID_TRANSFER_BATCH_SIZE).map(descriptor => descriptor.index));
         }
-      }
+        await consumePipelinedLeases(batches, async indices => {
+          ownershipCheck();
+          return this.client.requestNationalHistoryChunkBatch!(observation, indices, presentationFactor);
+        }, async lease => {
+          for (const chunk of lease.packed.chunks) await upload(chunk);
+          chunkWireBytes += lease.wireBytes;
+        });
+      } else await consumePipelinedLeases(descriptors, async descriptor => {
+          ownershipCheck();
+          return this.client.requestNationalHistoryChunk(observation, descriptor.index, presentationFactor);
+        }, async lease => {
+          await upload(lease.packed);
+          chunkWireBytes += lease.wireBytes;
+        });
       ownershipCheck();
       await beforeCommit?.();
       ownershipCheck();

@@ -88,7 +88,7 @@ describe("National Phase 4 packaged acceptance", () => {
 });
 
 function validReport() {
-  const retained = Array.from({ length: 20 }, (_, index) => ({
+  const retained = Array.from({ length: 60 }, (_, index) => ({
     generation: 8,
     objectKey: `object-${index}`,
     observationTimeUnixMs: 1_785_000_000_000 + index * 120_000,
@@ -105,11 +105,11 @@ function validReport() {
     detailedObservationIds: [],
     selectedObservationId: ids.at(-1),
     presentationFactor: 1,
-    residentChunkCount: 7_840,
-    gpuResourceBytes: 1_029_000_000,
-    peakGpuResourceBytes: 1_080_000_000,
-    uploadCount: 7_840,
-    uploadBytes: 1_029_000_000,
+    residentChunkCount: 23_520,
+    gpuResourceBytes: 2_987_000_000,
+    peakGpuResourceBytes: 3_040_000_000,
+    uploadCount: 23_520,
+    uploadBytes: 2_987_000_000,
     maximumUploadSliceMs: 1.3,
     contextEpoch: 1,
   };
@@ -163,7 +163,7 @@ function validReport() {
     },
     history: {
       history: {
-        historyLimit: 20,
+        historyLimit: 60,
         retained,
         staged: null,
         mutationReversible: false,
@@ -172,7 +172,7 @@ function validReport() {
         backendTargetBytes: 180_000_000,
       },
       renderer,
-      playback: { residentCount: 20, selectedObservationId: ids.at(-1) },
+      playback: { residentCount: 60, selectedObservationId: ids.at(-1) },
     },
     transitions: {
       requestedTransitions: 1_000,
@@ -180,7 +180,7 @@ function validReport() {
       activityDelta: activity,
       rendererBefore: renderer,
       rendererAfter: renderer,
-      receipts: Array.from({ length: 1_000 }, (_, index) => receipt(ids[index % 20])),
+      receipts: Array.from({ length: 1_000 }, (_, index) => receipt(ids[index % 60])),
     },
     scrub: {
       oldest: { receipt: receipt(ids[0]), activityDelta: activity },
@@ -201,8 +201,8 @@ function validReport() {
         presentationFactor: 1,
         playbackQualityFactor: 4,
         detailedObservationIds: [],
-        gpuResourceBytes: 1_029_000_000,
-        peakGpuResourceBytes: 1_080_000_000,
+        gpuResourceBytes: 2_987_000_000,
+        peakGpuResourceBytes: 3_040_000_000,
       },
       activityBefore: { ...activity },
       activityAfter: { ...activity },

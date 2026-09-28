@@ -373,7 +373,7 @@ export function RadarChrome({
 
       {radarNotice ? (
         <p
-          className={`radar-notice radar-notice--${radarNotice.kind}`}
+          className="sr-only radar-notice"
           role={radarNotice.kind === "error" ? "alert" : "status"}
         >
           {radarNotice.message}
@@ -644,7 +644,7 @@ function PanelHeader({ eyebrow, supporting }: { eyebrow: string; supporting: str
   );
 }
 
-function formatScanTimestamp(unixMs: number | undefined) {
+export function formatScanTimestamp(unixMs: number | undefined) {
   if (unixMs === undefined) {
     return { date: "---- -- --", time: "--:--:--", zone: "", accessible: "waiting" };
   }
@@ -655,10 +655,10 @@ function formatScanTimestamp(unixMs: number | undefined) {
     date.getDate().toString().padStart(2, "0"),
   ].join("-");
   const timeText = [
-    date.getHours().toString().padStart(2, "0"),
+    (date.getHours() % 12 || 12).toString().padStart(2, "0"),
     date.getMinutes().toString().padStart(2, "0"),
     date.getSeconds().toString().padStart(2, "0"),
-  ].join(":");
+  ].join(":") + (date.getHours() < 12 ? " AM" : " PM");
   const zone = new Intl.DateTimeFormat("en-US", { timeZoneName: "short" })
     .formatToParts(date)
     .find((part) => part.type === "timeZoneName")?.value ?? "";

@@ -1616,8 +1616,8 @@ function deleteFrameResources(
 }
 
 export function validateResidentModels(models: readonly RadarSweepCpuModel[]): void {
-  if (models.length < 1 || models.length > 20) {
-    throw new RadarRendererError("a resident loop must contain between 1 and 20 frames");
+  if (models.length < 1 || models.length > 60) {
+    throw new RadarRendererError("a resident loop must contain between 1 and 60 frames");
   }
   const primary = models[0];
   const generation = generationNumber(primary);

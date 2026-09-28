@@ -49,7 +49,7 @@ try {
   );
   await evaluate("window.__MISTR_NATIONAL_PHASE4__.play()", true, 60_000);
   await waitForReport(
-    "report.playback?.playing===true && report.history?.retained?.length>=4 && report.history.retained.length<20",
+    "report.playback?.playing===true && report.history?.retained?.length>=4 && report.history.retained.length<60",
     60_000,
   );
   let partialPlaybackChrome = await observePlaybackChrome(1_500);
@@ -322,7 +322,7 @@ async function observePartialHistoryControls() {
     while(performance.now()<deadline){
       const report=window.__MISTR_NATIONAL_PHASE4__.report();
       const retainedCount=report?.history?.retained?.length??0;
-      if(retainedCount>=20){
+      if(retainedCount>=60){
         return {
           partialSampleCount,
           buttonFoundSampleCount,
@@ -361,7 +361,7 @@ async function observePartialHistoryControls() {
       }
       await new Promise(resolve=>setTimeout(resolve,20));
     }
-    throw new Error('National history did not reach 20 observations while controls were observed');
+    throw new Error('National history did not reach 60 observations while controls were observed');
   })()`), true, 660_000);
 }
 
@@ -408,7 +408,7 @@ async function observePlaybackChrome(durationMs) {
       innerHeight,
       sampleCount:samples.length,
       playingSampleCount:samples.filter(sample=>sample.playing).length,
-      partialHistorySampleCount:samples.filter(sample=>sample.retainedCount>=2&&sample.retainedCount<20).length,
+      partialHistorySampleCount:samples.filter(sample=>sample.retainedCount>=2&&sample.retainedCount<60).length,
       loadingNoticeSampleCount:samples.filter(sample=>sample.loadingNotice).length,
       buttonDisabledSampleCount:samples.filter(sample=>sample.buttonDisabled!==false).length,
       falseOutsideCoverageSampleCount:samples.filter(sample=>sample.sampleText==='OUTSIDE RADAR COVERAGE').length,

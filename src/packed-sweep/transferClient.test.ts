@@ -42,6 +42,51 @@ function snapshot(generation: number, heldCredits = 0, session = 1): TransferSna
 }
 
 describe("PackedSweepTransferClient", () => {
+  it("leases National batches, rejects invalid requests, and acknowledges parse failures", async () => {
+    let requests = 0;
+    let releases = 0;
+    let corrupt = false;
+    const invoke: InvokeFunction = async <T>(command: string, args?: Record<string, unknown>) => {
+      if (command === "open_phase2_transfer_session") return snapshot(0) as T;
+      if (command === "begin_phase2_generation") return snapshot(7) as T;
+      if (command === "release_phase2_transfer_credit") { releases++; return snapshot(7) as T; }
+      if (command === "request_national_history_chunk_batch") {
+        requests++;
+        expect(args?.chunkIndices).toEqual([0]);
+        expect(args?.presentationFactor).toBe(4);
+        if (corrupt) return new ArrayBuffer(0) as T;
+        const chunk = fixtureBuffer(NATIONAL_CHUNK_PATH);
+        const batch = new ArrayBuffer(12 + chunk.byteLength);
+        const view = new DataView(batch);
+        view.setUint32(0, 0x4d474231);
+        view.setUint32(4, 1);
+        view.setUint32(8, chunk.byteLength);
+        new Uint8Array(batch, 12).set(new Uint8Array(chunk));
+        return batch as T;
+      }
+      throw new Error(`unexpected command ${command}`);
+    };
+    const client = new PackedSweepTransferClient(invoke);
+    await client.open();
+    await client.begin(7);
+    const observation = {
+      generation: 7, objectKey: "CONUS/MergedBaseReflectivityQC_00.50/20260803/MRMS_MergedBaseReflectivityQC_00.50_20260803-162812.grib2.gz",
+      observationTimeUnixMs: 1_785_775_692_000, contentSha256: "ab".repeat(32),
+      compressedBytes: 1000, overviewChunkCount: 28, overviewGpuBytes: 3_100_000,
+    };
+    for (const indices of [[], [0, 0], [-1], Array.from({ length: 17 }, (_, i) => i)]) {
+      await expect(client.requestNationalHistoryChunkBatch(observation, indices, 4)).rejects.toThrow("indices");
+    }
+    expect(requests).toBe(0);
+    const lease = await client.requestNationalHistoryChunkBatch(observation, [0], 4);
+    expect(lease.packed.chunks).toHaveLength(1);
+    await lease.release();
+    await lease.release();
+    expect(releases).toBe(1);
+    corrupt = true;
+    await expect(client.requestNationalHistoryChunkBatch(observation, [0], 4)).rejects.toThrow();
+    expect(releases).toBe(2);
+  });
   it("releases every fulfilled parallel lease when a sibling request fails", async () => {
     const released: number[] = [];
     const failure = new Error("second request failed");

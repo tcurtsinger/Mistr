@@ -15,7 +15,7 @@ class FakeNationalLayer {
   selectFactors: number[] = [];
   commonResidencyReady = true;
 
-  constructor(private readonly observations: readonly NationalHistoryObservation[]) {
+  constructor(public observations: readonly NationalHistoryObservation[]) {
     this.selected = observationId(observations.at(-1)!);
   }
 
@@ -97,6 +97,55 @@ class FakeNationalLayer {
 
 describe("NationalPlaybackController", () => {
   afterEach(() => vi.useRealTimers());
+
+  it("accepts the 21st through 60th committed frame with the shipping defaults", () => {
+    const observations = frames(60);
+    const layer = new FakeNationalLayer(observations.slice(-20));
+    const controller = new NationalPlaybackController(layer, observations.slice(-20));
+    for (let count = 21; count <= 60; count++) {
+      layer.observations = observations.slice(-count);
+      controller.acceptHistory(observations.slice(-count), layer.receipt());
+      expect(controller.snapshot().residentCount).toBe(count);
+    }
+    expect(() => new NationalPlaybackController(layer, frames(61))).toThrow("1 to 60");
+    controller.dispose();
+  });
+
+  it("plays intermediate frames despite history commits arriving faster than frame dwell", async () => {
+    vi.useFakeTimers();
+    const observations = frames(6);
+    const layer = new FakeNationalLayer(observations);
+    const controller = new NationalPlaybackController(layer, observations, {
+      dwellMs: 100, latestDwellMs: 100,
+    });
+    controller.establishInitialPaint(layer.receipt());
+    await controller.play();
+    const visited = new Set<string>();
+    for (let i = 0; i < 25; i++) {
+      await vi.advanceTimersByTimeAsync(25);
+      const wasPlaying = await controller.pauseAndWait(false);
+      controller.acceptHistory(observations, layer.receipt());
+      controller.resumeAfterMutation(wasPlaying);
+      await vi.advanceTimersByTimeAsync(0);
+      visited.add(layer.selected);
+    }
+    expect([...visited]).toEqual(expect.arrayContaining(observations.map(observationId)));
+    controller.dispose();
+  });
+
+  it("does not resume a mutation pause after an explicit operator pause", async () => {
+    vi.useFakeTimers();
+    const observations = frames(3);
+    const layer = new FakeNationalLayer(observations);
+    const controller = new NationalPlaybackController(layer, observations);
+    await controller.play();
+    const wasPlaying = await controller.pauseAndWait(false);
+    controller.pause();
+    controller.resumeAfterMutation(wasPlaying);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(controller.snapshot().playing).toBe(false);
+    controller.dispose();
+  });
 
   it("uses the complete all-frame factor-4 fallback when no finer viewport is ready", async () => {
     vi.useFakeTimers();

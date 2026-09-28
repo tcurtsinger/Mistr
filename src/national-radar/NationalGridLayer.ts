@@ -19,11 +19,11 @@ import { nationalObservationIdentity } from "./model";
 const PALETTE_WIDTH = 1_024;
 // Native-residency owner decision (2026-08-04): all retained observations
 // stay GPU-resident at the exact full-resolution grid (~49 MiB per frame,
-// ~1 GiB for the 20-frame loop plus one staged replacement). Sized for the
+// ~2.8 GiB for the 60-frame loop plus one staged replacement). Sized for the
 // supported desktop floor — a discrete GPU with several GiB of memory — not
 // a minimal device.
-export const NATIONAL_GPU_TARGET_BYTES = 1280 * 1024 * 1024;
-export const NATIONAL_GPU_HARD_CEILING_BYTES = 1536 * 1024 * 1024;
+export const NATIONAL_GPU_TARGET_BYTES = 3328 * 1024 * 1024;
+export const NATIONAL_GPU_HARD_CEILING_BYTES = 3584 * 1024 * 1024;
 const PALETTE_MIN_DBZ = -25;
 const PALETTE_MAX_DBZ = 70;
 const DEFAULT_UPLOAD_BUDGET_MS = 4;
@@ -616,7 +616,7 @@ export class NationalGridLayer implements CustomLayerInterface {
     if (transientGpuBytes > NATIONAL_GPU_HARD_CEILING_BYTES) {
       this.restoreResidencyState(previous);
       this.staging = staging;
-      throw new Error("National prefetched detail exceeds the 256 MiB hard ceiling");
+      throw new Error("National prefetched detail exceeds the National GPU memory ceiling");
     }
     if (this.gl && !this.gl.isContextLost()) {
       for (const retired of uniquePresentations(retireOnSuccess)) {
@@ -1098,7 +1098,7 @@ export class NationalGridLayer implements CustomLayerInterface {
       this.restoreResidencyState(previous);
       this.pendingResidencyMutation = null;
       this.staging = staging;
-      throw new Error("National resident working set exceeds the 256 MiB hard ceiling");
+      throw new Error("National resident working set exceeds the National GPU memory ceiling");
     }
     this.peakGpuResourceBytes = Math.max(this.peakGpuResourceBytes, this.currentGpuBytes());
     this.map?.triggerRepaint();
@@ -1596,8 +1596,8 @@ function validateResidentTimeline(
   timelineObservationIds: readonly string[],
   selectedObservationId: string,
 ) {
-  if (timelineObservationIds.length < 1 || timelineObservationIds.length > 20) {
-    throw new Error("National resident timeline must contain 1 to 20 observations");
+  if (timelineObservationIds.length < 1 || timelineObservationIds.length > 60) {
+    throw new Error("National resident timeline must contain 1 to 60 observations");
   }
   const unique = new Set(timelineObservationIds);
   if (unique.size !== timelineObservationIds.length || !unique.has(selectedObservationId)) {

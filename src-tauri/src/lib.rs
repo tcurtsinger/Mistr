@@ -63,6 +63,7 @@ pub fn run() {
             national_history::prepare_national_history_presentation,
             national_history::request_national_history_manifest,
             national_history::request_national_history_chunk,
+            national_history::request_national_history_chunk_batch,
             national_history::lookup_national_history_point,
             national_history::find_national_history_peak_point,
             national_history::national_history_snapshot,

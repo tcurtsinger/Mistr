@@ -1,4 +1,4 @@
-export type NationalBackfillLoopResult = "complete" | "superseded";
+export type NationalBackfillLoopResult = "complete" | "partial" | "superseded";
 
 export interface NationalBackfillLoopOptions<Candidate> {
   shouldContinue(): boolean;
@@ -34,8 +34,11 @@ export async function runNationalBackfillLoop<Candidate>(
       if (options.reachedLimit()) return "complete";
     } catch (error) {
       if (options.isSuperseded(error)) return "superseded";
-      retryAttempt = Math.min(retryAttempt + 1, maximumRetryAttempt);
+      retryAttempt += 1;
       options.onFailure(error, retryAttempt);
+      // A permanently unavailable predecessor must not block fresh scans forever.
+      // The mutation owner settles/rolls back a failed commit before returning here.
+      if (retryAttempt >= maximumRetryAttempt) return "partial";
       try {
         await options.waitBeforeRetry(retryAttempt);
       } catch (waitError) {

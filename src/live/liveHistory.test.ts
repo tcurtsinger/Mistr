@@ -31,7 +31,7 @@ describe("bounded live history", () => {
     });
   });
 
-  it("evicts only the oldest observation at the twenty-frame bound", () => {
+  it("evicts only the oldest observation at the sixty-frame bound", () => {
     let history = beginLiveHistory(model(1), 7);
     for (let index = 2; index <= MAX_LIVE_HISTORY_FRAMES; index += 1) {
       history = appendLiveHistory(history, model(index)).frames;
@@ -41,7 +41,7 @@ describe("bounded live history", () => {
     expect(update.frames).toHaveLength(MAX_LIVE_HISTORY_FRAMES);
     expect(update.evictedObservationIds).toEqual([observationId(1)]);
     expect(update.frames[0].observationId).toBe(observationId(2));
-    expect(update.frames.at(-1)?.observationId).toBe(observationId(21));
+    expect(update.frames.at(-1)?.observationId).toBe(observationId(MAX_LIVE_HISTORY_FRAMES + 1));
   });
 
   it("rejects out-of-order and cross-site observations", () => {

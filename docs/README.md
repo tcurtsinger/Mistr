@@ -1,5 +1,7 @@
 # Mistr
 
+> **Current core update (2026-09-10):** [Radar core optimization](31_RADAR_CORE_OPTIMIZATION.md) raises capacity to 60 frames and adds bounded batched transfers. Its native runtime performance gate is still pending; the phase validation described below predates this change.
+
 **Status:** Mistr is the product. The selected-site Windows Alpha is implemented and packaged-validated. National Phases 1 through 4 are merged, including the explicit National/Site control, exact interrogation, 20-observation National history, polling, resident playback/scrubbing, quality locking, detail refinement, and all-frame recovery. A focused post-merge correction prepares sharp all-frame regional detail before playback rather than always dropping to the coarse country overview.
 
 Mistr is a focused desktop radar instrument for selected-site storm inspection. Its Alpha product contract lives in [PRODUCT.md](../PRODUCT.md), and its implemented interface rules live in [DESIGN.md](../DESIGN.md).
