@@ -168,8 +168,8 @@ const RADAR_DISPLAY_MODE_STORAGE_KEY = "mistr.radarDisplayMode";
 const RADAR_ENGINE_PREPARING_ERROR = "Radar engine is still preparing the resident loop";
 const LIVE_POLL_RETRY_MS = 15_000;
 
-// Only one source is resident today, so starting one lane still cancels the
-// other, exactly as the former single global generation did.
+// Starting a source from scratch cancels the other lane. Site requests use
+// beginSiteLane instead, so a resident National survives them.
 async function beginExclusiveLane(
   activeClient: PackedSweepTransferClient,
   lane: TransferLane,
@@ -1872,6 +1872,8 @@ export function App() {
         latestNationalPhase3 = report;
         setNationalPhase3(report);
         nationalResident = false;
+        // Remove the Site first: its teardown resets the shared history status.
+        removeSiteAfterNationalPaint();
         if (latestNationalHistory) setNationalHistory(latestNationalHistory);
         setTimelineFrames(nationalObservations.map((observation) => ({
           observationId: nationalObservationId(observation),
@@ -1896,7 +1898,6 @@ export function App() {
         interrogationObservationRef.current = null;
         inspectionRequestRef.current = null;
         nationalInspectionLookupQueue.cancelPending();
-        removeSiteAfterNationalPaint();
         nationalPlaybackController?.acceptHistory(nationalObservations, report.workingSet.receipt);
         focusNational(instance);
       };
@@ -3056,17 +3057,14 @@ export function App() {
   };
 
   const selectDisplayMode = (mode: RadarDisplayMode) => {
-    if (paintedRadarSource.kind === "national") {
-      displayModeRef.current = mode;
-      nationalLayerRef.current?.setDisplayMode(mode);
-      setDisplayMode(mode);
-      storeRadarDisplayMode(mode);
-      return;
-    }
-    const layer = radarLayerRef.current;
-    if (!layer) return;
+    const siteLayer = radarLayerRef.current;
+    const nationalLayer = nationalLayerRef.current;
+    if (!siteLayer && !nationalLayer) return;
+    // Both layers can be resident at once. Each carries the chosen mode, so a
+    // hidden layer can never reverse-sync an older mode back into the UI.
     displayModeRef.current = mode;
-    layer.setDisplayMode(mode);
+    siteLayer?.setDisplayMode(mode);
+    nationalLayer?.setDisplayMode(mode);
     setDisplayMode(mode);
     storeRadarDisplayMode(mode);
   };
