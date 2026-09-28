@@ -351,6 +351,7 @@ export function RadarChrome({
         </div>
         <span aria-hidden="true" className="instrument-divider" />
         <div className="telemetry-readouts">
+          <RadarStatusMark notice={radarNotice} />
           <output
             aria-label={frameAge.accessibleLabel}
             className={`frame-age frame-age--${frameAge.kind}`}
@@ -390,6 +391,47 @@ export function RadarChrome({
             : `${playbackStatus}. ${sample.accessibleLabel}`}
       </p>
     </div>
+  );
+}
+
+/**
+ * Occupies a fixed slot beside the frame age so a notice is visible without a
+ * banner over the map; the message itself appears on hover or focus.
+ */
+function RadarStatusMark({ notice }: { notice: RadarChromeProps["radarNotice"] }) {
+  const tooltipId = useId();
+  const [tooltipVisible, setTooltipVisible] = useState(false);
+  const hasNotice = notice !== undefined;
+
+  useEffect(() => {
+    if (!hasNotice) setTooltipVisible(false);
+  }, [hasNotice]);
+
+  if (!notice) return <span aria-hidden="true" className="radar-status-anchor" />;
+  return (
+    <span
+      className="radar-status-anchor"
+      onPointerEnter={() => setTooltipVisible(true)}
+      onPointerLeave={() => setTooltipVisible(false)}
+    >
+      <span
+        aria-describedby={tooltipVisible ? tooltipId : undefined}
+        aria-label={notice.kind === "error" ? "Radar problem" : "Radar status"}
+        className={`radar-status radar-status--${notice.kind}`}
+        onBlur={() => setTooltipVisible(false)}
+        onFocus={() => setTooltipVisible(true)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") setTooltipVisible(false);
+        }}
+        role="img"
+        tabIndex={0}
+      />
+      {tooltipVisible ? (
+        <span className="context-tooltip context-tooltip--above" id={tooltipId} role="tooltip">
+          {notice.message}
+        </span>
+      ) : null}
+    </span>
   );
 }
 

@@ -5,6 +5,7 @@ import {
   frameAgePresentation,
   inspectionReadoutPresentation,
   liveFailureLabel,
+  nationalHistoryStatus,
   userFacingRadarError,
   normalizeRadarSite,
   normalizeRadarDisplayMode,
@@ -253,5 +254,12 @@ describe("radar chrome model", () => {
 
   it("clamps future-clock skew to zero age", () => {
     expect(frameAgePresentation(101_000, 100_000, true).label).toBe("00:00");
+  });
+
+  it("reports National history as loading only while backfill is running", () => {
+    expect(nationalHistoryStatus(12, 60, 5, true)).toBe("loading");
+    expect(nationalHistoryStatus(12, 60, 5, false)).toBe("partial");
+    expect(nationalHistoryStatus(12, 60, 0, true)).toBe("partial");
+    expect(nationalHistoryStatus(60, 60, 5, true)).toBe("full");
   });
 });

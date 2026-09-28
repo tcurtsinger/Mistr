@@ -130,6 +130,7 @@ import { colorForReflectivity } from "./radar-renderer/palette";
 import { RadarChrome } from "./ui/RadarChrome";
 import {
   frameAgePresentation,
+  nationalHistoryStatus,
   userFacingRadarError,
   normalizeRadarDisplayMode,
   normalizeRadarSite,
@@ -312,6 +313,7 @@ export function App() {
     > | null = null;
     let nationalHistorySession = 0;
     let nationalBackfillStartCount = 0;
+    let activeNationalBackfillSession: number | null = null;
     let nationalMrmsSession: NationalMrmsSession<NationalPhase3Report> | null = null;
     let lastNationalRestorationAfterSiteFailure: Promise<NationalPhase3Report> | null = null;
     let failNextSiteFromNationalForDiagnostics = false;
@@ -1578,11 +1580,12 @@ export function App() {
           observationId: nationalObservationId(observation),
           observedAtUnixMs: observation.observationTimeUnixMs,
         })));
-        setLiveHistoryStatus(
-          history.retained.length >= history.historyLimit
-            ? "full"
-            : history.pendingBackfillCount > 0 ? "loading" : "partial",
-        );
+        setLiveHistoryStatus(nationalHistoryStatus(
+          history.retained.length,
+          history.historyLimit,
+          history.pendingBackfillCount,
+          activeNationalBackfillSession !== null,
+        ));
         nationalPlaybackController?.acceptHistory(nationalObservations, receipt);
         nationalPlaybackController?.resumeAfterMutation(resumePlayback);
       };
@@ -1729,6 +1732,7 @@ export function App() {
         nationalBackfillStartCount += 1;
         const historySession = nationalHistorySession + 1;
         nationalHistorySession = historySession;
+        activeNationalBackfillSession = historySession;
         setLiveHistoryStatus("loading");
         try {
           const result = await runNationalBackfillLoop({
@@ -1762,6 +1766,8 @@ export function App() {
               }
               nationalHistoryOwnershipCheck(generation, historySession);
             },
+          }).finally(() => {
+            if (activeNationalBackfillSession === historySession) activeNationalBackfillSession = null;
           });
           if (result === "superseded") return;
           nationalHistoryOwnershipCheck(generation, historySession);

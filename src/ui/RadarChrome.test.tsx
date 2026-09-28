@@ -21,6 +21,24 @@ describe("compact radar chrome", () => {
   });
 
   it.each([
+    ["error", "Radar problem"],
+    ["info", "Radar status"],
+  ] as const)("marks a %s notice beside the frame age without showing its text", (kind, label) => {
+    const html = renderToStaticMarkup(<RadarChrome {...props} radarNotice={{ kind, message: "Background retry" }} />);
+    expect(html).toContain(`class="radar-status radar-status--${kind}"`);
+    expect(html).toContain(`aria-label="${label}"`);
+    expect(html).toContain('tabindex="0"');
+    expect(html).not.toContain('role="tooltip"');
+    expect(html.split("Background retry")).toHaveLength(2);
+  });
+
+  it("keeps an empty status slot when there is no notice", () => {
+    const html = renderToStaticMarkup(<RadarChrome {...props} />);
+    expect(html).toContain('<span aria-hidden="true" class="radar-status-anchor"></span>');
+    expect(html).not.toContain("radar-status--");
+  });
+
+  it.each([
     [0, "12:05:09 AM"], [1, "01:05:09 AM"], [11, "11:05:09 AM"],
     [12, "12:05:09 PM"], [15, "03:05:09 PM"], [23, "11:05:09 PM"],
   ])("formats local hour %i in 12-hour time", (hour, expected) => {
