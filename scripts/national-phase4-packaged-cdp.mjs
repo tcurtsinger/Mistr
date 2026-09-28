@@ -256,6 +256,12 @@ try {
     600_000,
   );
 
+  const siteInspection = await evaluate(
+    serialized("window.__MISTR_NATIONAL_PHASE4__.proveSiteInspectionFollowsScan('KTLX')"),
+    true,
+    300_000,
+  );
+
   await evaluate(serialized("window.__MISTR_NATIONAL_PHASE4__.startSite('KTLX')"), true, 300_000);
   await delay(500);
   const restoredSite = {
@@ -283,6 +289,7 @@ try {
     residentHandoff,
     zoomHandoff,
     timeCarry,
+    siteInspection,
     restoredSite,
   };
   report.failures = validateNationalPhase4Acceptance(report);

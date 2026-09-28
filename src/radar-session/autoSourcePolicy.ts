@@ -11,6 +11,28 @@ export const AUTO_SITE_PRELOAD_ZOOM = 8;
 export const AUTO_SITE_ENTER_RANGE_M = 200_000;
 /** A displayed Site is kept while the view center stays this close to it. */
 export const AUTO_SITE_KEEP_RANGE_M = 230_000;
+/**
+ * Outside the National grid (Alaska, Hawaii, Guam, Puerto Rico) National
+ * shows nothing, so a Site is entered and kept down to regional zooms. The
+ * floor keeps a continental view, which may include the grid, on National.
+ */
+export const AUTO_SITE_OFFSHORE_ENTER_ZOOM = 6;
+export const AUTO_SITE_OFFSHORE_EXIT_ZOOM = 5.5;
+
+/** The MRMS CONUS grid National draws (cell centers, `mrms.rs`). */
+export const NATIONAL_GRID_BOUNDS = {
+  west: -129.995,
+  east: -60.005,
+  south: 20.005,
+  north: 54.995,
+} as const;
+
+export function nationalCovers(point: LngLatPoint): boolean {
+  return point.longitude >= NATIONAL_GRID_BOUNDS.west
+    && point.longitude <= NATIONAL_GRID_BOUNDS.east
+    && point.latitude >= NATIONAL_GRID_BOUNDS.south
+    && point.latitude <= NATIONAL_GRID_BOUNDS.north;
+}
 
 export type AutoSource =
   | { readonly kind: "national" }
@@ -43,6 +65,10 @@ export function decideAutoSource(
   sites: readonly RadarSiteOption[],
 ): AutoSourceDecision {
   const { zoom, center, visible } = input;
+  const covered = nationalCovers(center);
+  const enterZoom = covered ? AUTO_SITE_ENTER_ZOOM : AUTO_SITE_OFFSHORE_ENTER_ZOOM;
+  const exitZoom = covered ? AUTO_SITE_EXIT_ZOOM : AUTO_SITE_OFFSHORE_EXIT_ZOOM;
+  const preloadZoom = covered ? AUTO_SITE_PRELOAD_ZOOM : AUTO_SITE_OFFSHORE_EXIT_ZOOM;
   const preferred = input.preferredSite
     ? sites.find((site) => site.id === input.preferredSite)
     : undefined;
@@ -52,19 +78,19 @@ export function decideAutoSource(
   const spent = input.preferredSite && !preferenceHolds ? { preferenceSpent: true as const } : {};
   if (visible.kind === "site") {
     // A picked Site replaces the displayed one by way of National.
-    if (preferenceHolds && preferred!.id !== visible.siteIcao && zoom >= AUTO_SITE_ENTER_ZOOM) {
+    if (preferenceHolds && preferred!.id !== visible.siteIcao && zoom >= enterZoom) {
       return { target: NATIONAL };
     }
     const current = sites.find((site) => site.id === visible.siteIcao);
     const stays = current
-      && zoom >= AUTO_SITE_EXIT_ZOOM
+      && zoom >= exitZoom
       && distanceM(center, current) <= AUTO_SITE_KEEP_RANGE_M;
     return { target: stays ? visible : NATIONAL, ...spent };
   }
   const candidate = preferenceHolds ? preferred!.id : nearestCoveringSite(center, sites);
   if (!candidate) return { target: NATIONAL, ...spent };
-  if (zoom >= AUTO_SITE_ENTER_ZOOM) return { target: { kind: "site", siteIcao: candidate }, ...spent };
-  if (zoom >= AUTO_SITE_PRELOAD_ZOOM) return { target: NATIONAL, preload: candidate, ...spent };
+  if (zoom >= enterZoom) return { target: { kind: "site", siteIcao: candidate }, ...spent };
+  if (zoom >= preloadZoom) return { target: NATIONAL, preload: candidate, ...spent };
   return { target: NATIONAL, ...spent };
 }
 

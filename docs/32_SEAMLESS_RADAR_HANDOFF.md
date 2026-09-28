@@ -66,6 +66,8 @@ The Site layer gains a 320 MiB GPU ceiling (a 60-frame loop is about 152 MiB, ab
 | Site shown, zoom ≥ 8.5 and center within 230 km of it | Stay on the Site |
 | Site shown, otherwise | Return to National |
 
+Outside the National grid (130°W–60°W, 20°N–55°N: Alaska, Hawaii, Guam, Puerto Rico), National draws nothing, so the same rules use zoom 6 to enter, 5.5 to keep, and 5.5 to preload. The floor keeps a continental view on National.
+
 Moving between Sites always passes through National, so only one Site layer exists. A switch that succeeds re-checks the same camera, so one pan into another Site's coverage runs both legs. A pick stops applying once the center leaves its 230 km range. Site coordinates live in `src/data/radar-sites.json`: 150 from nexrad-model's registry (a Rust test keeps them in sync) and 5 from api.weather.gov.
 
 Only camera moves the operator makes are evaluated (MapLibre events with an `originalEvent`), plus the landing of an explicit picker or recenter flight. A move made while any switch is running is evaluated once it ends. Programmatic cameras, including every packaged harness camera, never switch sources.
@@ -76,7 +78,7 @@ Only camera moves the operator makes are evaluated (MapLibre events with an `ori
 - **Fade in:** the Site's first frame paints at `u_opacity = 0`, then fades to 1 over 300 ms (instant under reduced motion). Only then does the coordinator accept it, so the timeline follows a fully visible frame. National keeps playing underneath until it becomes resident.
 - **Fade out:** National paints underneath first (a reveal, or a fresh acquisition), then the Site fades to 0 and is removed.
 - **Layer order:** National is always inserted, and re-inserted after context loss, below the Site stack, so only the upper layer fades.
-- **Guards:** one automatic switch runs at a time; a Site that just failed is not retried automatically for a minute.
+- **Guards:** one automatic switch runs at a time; a Site that just failed is retried automatically after a minute if the camera still calls for it, and at once when it is picked. A Site showing only the bundled archive scan counts as not yet shown, so it still starts live radar.
 
 ### Camera
 
