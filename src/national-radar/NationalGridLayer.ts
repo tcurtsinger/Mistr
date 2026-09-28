@@ -203,7 +203,8 @@ export interface NationalGridRendererSnapshot {
 
 export interface NationalGridLayerOptions {
   displayMode?: RadarDisplayMode;
-  recoveryBeforeLayerId?: string;
+  /** Layer to re-insert before after context loss; resolved at restore time. */
+  recoveryBeforeLayerId?: string | (() => string | undefined);
   uploadBudgetMs?: number;
   onSnapshot?(snapshot: NationalGridRendererSnapshot): void;
 }
@@ -1488,7 +1489,8 @@ export class NationalGridLayer implements CustomLayerInterface {
     if (!map || !this.recovering) return;
     try {
       if (!map.getLayer(this.id)) {
-        const preferred = this.options.recoveryBeforeLayerId;
+        const option = this.options.recoveryBeforeLayerId;
+        const preferred = typeof option === "function" ? option() : option;
         const beforeId = preferred && map.getLayer(preferred)
           ? preferred
           : map.getStyle().layers?.find((layer) => layer.type === "symbol")?.id;

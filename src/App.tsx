@@ -1350,9 +1350,15 @@ export function App() {
 
       const ensureNationalLayer = () => {
         if (nationalLayer && nationalWorkingSet) return;
+        // National always sits below the Site stack so a Site can fade over it.
+        const nationalBeforeLayerId = () => (
+          instance.getLayer(RANGE_LAYER_ID)
+            ? RANGE_LAYER_ID
+            : radarContextAnchorLayerId(instance.getStyle().layers ?? [])
+        );
         nationalLayer = new NationalGridLayer({
           displayMode: displayModeRef.current,
-          recoveryBeforeLayerId: radarContextAnchorLayerId(instance.getStyle().layers ?? []),
+          recoveryBeforeLayerId: nationalBeforeLayerId,
           onSnapshot(renderer) {
             setPlaybackError((current) => playbackErrorAfterRendererStatus(current, renderer.status));
             if (renderer.displayMode !== displayModeRef.current) {
@@ -1373,8 +1379,7 @@ export function App() {
           activeClientForNational(),
           nationalLayer,
         );
-        const beforeId = radarContextAnchorLayerId(instance.getStyle().layers ?? []);
-        addLayer(instance, nationalLayer, beforeId);
+        addLayer(instance, nationalLayer, nationalBeforeLayerId());
         nationalLayerRef.current = nationalLayer;
         nationalWorkingSetRef.current = nationalWorkingSet;
       };
