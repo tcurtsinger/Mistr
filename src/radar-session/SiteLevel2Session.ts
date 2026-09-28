@@ -28,6 +28,8 @@ export type SiteLevel2AcquireAndPaint<T> = (
 
 export interface SiteLevel2StartOptions {
   readonly persistOnPaint?: boolean;
+  /** Reuse the generation of a Site scan already fetched ahead of the switch. */
+  readonly residentGeneration?: number;
 }
 
 /**
@@ -71,7 +73,7 @@ export class SiteLevel2Session<T> {
     const transition = this.coordinator.beginTransition(
       source,
       this.nextGeneration(),
-      { persistOnPaint: options.persistOnPaint },
+      { persistOnPaint: options.persistOnPaint, residentGeneration: options.residentGeneration },
     );
     try {
       const result = await acquireAndPaint(source.siteIcao, transition.generation);

@@ -170,6 +170,15 @@ try {
   );
   const detailScreenshot = await captureScreenshot();
 
+  // Hold background acquisition off for the measurement, as the scrub
+  // evidence does: a newer MRMS frame arriving is product behavior, not
+  // work done by sharp playback.
+  await evaluate(
+    "window.__MISTR_NATIONAL_PHASE4__.beginResidentEvidence()",
+    true,
+    300_000,
+  );
+  residentEvidenceHeld = true;
   await evaluate("window.__MISTR_NATIONAL_PHASE4__.play()", true, 300_000);
   await waitForReport(
     "report.playback?.playing===true && report.renderer?.presentationFactor===1",
@@ -202,6 +211,8 @@ try {
     true,
     60_000,
   );
+  await evaluate("window.__MISTR_NATIONAL_PHASE4__.endResidentEvidence()");
+  residentEvidenceHeld = false;
   const activePlayback = {
     ...activePlaybackDuring,
     activityBefore: playbackActivityBefore,
@@ -233,6 +244,12 @@ try {
     300_000,
   );
 
+  const zoomHandoff = await evaluate(
+    serialized("window.__MISTR_NATIONAL_PHASE4__.proveZoomHandoff('KTLX')"),
+    true,
+    300_000,
+  );
+
   await evaluate(serialized("window.__MISTR_NATIONAL_PHASE4__.startSite('KTLX')"), true, 300_000);
   await delay(500);
   const restoredSite = {
@@ -258,6 +275,7 @@ try {
     transferSnapshot,
     failedSiteRecovery,
     residentHandoff,
+    zoomHandoff,
     restoredSite,
   };
   report.failures = validateNationalPhase4Acceptance(report);
@@ -380,6 +398,20 @@ async function observePlaybackChrome(durationMs) {
       return value?{left:value.left,top:value.top,width:value.width,height:value.height}:null;
     };
     const samples=[];
+    // Exact point lookups can settle within one polling interval, so also
+    // record every readout change as it happens.
+    const observed=[];
+    const readout=()=>{
+      const sample=document.querySelector('.sample-readout');
+      return {
+        sampleText:sample?.textContent?.trim()??'',
+        sampleState:sample?.dataset.inspectionState??null,
+        sampleBusy:sample?.getAttribute('aria-busy')??null,
+      };
+    };
+    const observer=new MutationObserver(()=>observed.push(readout()));
+    const bar=document.querySelector('.playback-bar');
+    if(bar) observer.observe(bar,{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:['data-inspection-state','aria-busy']});
     const deadline=performance.now()+${durationMs};
     while(performance.now()<deadline){
       const report=window.__MISTR_NATIONAL_PHASE4__.report();
@@ -410,7 +442,9 @@ async function observePlaybackChrome(durationMs) {
         Math.abs(sample[key].height-baseline.height),
       ]));
     };
-    const pending=samples.filter(sample=>sample.sampleState==='pending');
+    observer.disconnect();
+    const readouts=[...samples,...observed];
+    const pending=readouts.filter(sample=>sample.sampleState==='pending');
     return {
       innerWidth,
       innerHeight,
@@ -426,7 +460,8 @@ async function observePlaybackChrome(durationMs) {
       timelineMaxRectDelta:maxRectDelta('timeline'),
       telemetryMaxRectDelta:maxRectDelta('telemetry'),
       sampleReadoutMaxRectDelta:maxRectDelta('sampleReadout'),
-      distinctSampleTexts:[...new Set(samples.map(sample=>sample.sampleText))],
+      observedReadoutChangeCount:observed.length,
+      distinctSampleTexts:[...new Set(readouts.map(sample=>sample.sampleText))],
       distinctAnnouncements:[...new Set(samples.map(sample=>sample.announcement))],
     };
   })()`), true, durationMs + 30_000);

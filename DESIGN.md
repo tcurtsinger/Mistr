@@ -173,7 +173,7 @@ A 10px status mark beside the frame age shows that a notice exists without a
 banner: a hollow Scan Cyan ring for information, a solid Danger dot for a
 problem. Hovering or focusing it reveals the notice text above the playback bar.
 
-- **Top changes where and how radar is drawn:** explicit National/Site source selection, Site station selection, source-aware recenter, and the real `Smooth`/`Native` spatial display choice; other controls appear only after they become real capabilities.
+- **Top changes where and how radar is drawn:** explicit National/Site source selection, Site station selection, source-aware recenter, and the real `Smooth`/`Native` spatial display choice; other controls appear only after they become real capabilities. *(Owner decision, 2026-09-28: zoom decides the source — picking a Site flies to it at zoom 9.5, picking National zooms out to the country, and zooming across ~9 cross-fades between them. See [docs/32](docs/32_SEAMLESS_RADAR_HANDOFF.md).)*
 - **Sides stay clear:** no application menu, placeholder alert control, or control chain competes with radar.
 - **Bottom controls when:** playback, measured time, numeric age, and inspection value.
 

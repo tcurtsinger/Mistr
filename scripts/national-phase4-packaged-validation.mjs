@@ -157,6 +157,7 @@ export function validateNationalPhase4Acceptance(report) {
     || failedSite?.renderer?.contextEpoch !== failedSite?.rendererBeforeFailure?.contextEpoch
   ) failures.push("failed Site transition keeps the active National session");
   failures.push(...validateResidentHandoff(report.residentHandoff));
+  failures.push(...validateZoomHandoff(report.zoomHandoff));
   const site = report.restoredSite;
   if (
     site?.sourceState?.painted?.source?.kind !== "site"
@@ -206,9 +207,64 @@ export function validateResidentHandoff(handoff) {
     "bulkIpcBytes",
   ].every((field) => Number.isSafeInteger(before[field]) && after[field] === before[field]);
   if (!quiet) failures.push("National reveal performs no acquisition, decode, or bulk transfer");
-  if (!(handoff?.reveal?.revealMs >= 0 && handoff.reveal.revealMs <= 250)) {
-    failures.push("National reveal completes within 250 ms");
+  // The switch deliberately includes the Site fade-out; the reveal itself stays within 250 ms.
+  const fadeMs = handoff?.reveal?.fadeMs ?? 0;
+  if (!(handoff?.reveal?.revealMs >= 0 && fadeMs >= 0 && handoff.reveal.revealMs <= 250 + fadeMs)) {
+    failures.push("National reveal completes within 250 ms plus the fade");
   }
+  return failures;
+}
+
+function sameCamera(left, right) {
+  return Boolean(left && right)
+    && Math.abs(left.longitude - right.longitude) < 1e-6
+    && Math.abs(left.latitude - right.latitude) < 1e-6
+    && Math.abs(left.zoom - right.zoom) < 1e-6;
+}
+
+// Zooming in past the threshold fades the preloaded Site in over resident
+// National; zooming out fades back to that same National history. Neither
+// switch moves the camera.
+export function validateZoomHandoff(handoff) {
+  const failures = [];
+  const site = handoff?.site;
+  const preloaded = handoff?.preloaded;
+  const afterSite = handoff?.afterSite;
+  const fadeMs = handoff?.fadeMs ?? 0;
+  if (
+    !site
+    || preloaded?.site !== site
+    || afterSite?.sourceState?.painted?.source?.kind !== "site"
+    || afterSite?.sourceState?.painted?.source?.siteIcao !== site
+    || afterSite?.sourceState?.painted?.generation !== preloaded?.generation
+    || afterSite?.siteOpacity !== 1
+    || afterSite?.nationalRenderer?.visibility !== "resident"
+    || !sameCamera(afterSite?.camera, afterSite?.cameraSet)
+    || !(handoff?.siteSwitchMs >= 0 && handoff.siteSwitchMs <= 1_500 + fadeMs)
+  ) failures.push("zooming in fades the preloaded Site in without moving the camera");
+  const hop = handoff?.afterHop;
+  const hopSources = hop?.sources ?? [];
+  if (
+    !hop?.site
+    || hop.site === site
+    || hop?.sourceState?.painted?.source?.kind !== "site"
+    || hop?.sourceState?.painted?.source?.siteIcao !== hop.site
+    || hop?.sourceState?.transition
+    || hopSources.join(">") !== `${site}>national>${hop.site}`
+    || hop?.siteOpacity !== 1
+    || hop?.nationalRenderer?.visibility !== "resident"
+    || !sameCamera(hop?.camera, hop?.cameraSet)
+    || !(hop?.switchMs >= 0)
+  ) failures.push("panning into another Site's coverage fades through National to that Site");
+  const afterNational = handoff?.afterNational;
+  if (
+    afterNational?.sourceState?.painted?.source?.kind !== "national"
+    || afterNational?.sourceState?.painted?.generation !== handoff?.nationalGenerationBefore
+    || afterNational?.siteLayerPresent !== false
+    || afterNational?.nationalRenderer?.visibility !== "visible"
+    || !sameCamera(afterNational?.camera, afterNational?.cameraSet)
+    || !(handoff?.nationalSwitchMs >= 0 && handoff.nationalSwitchMs <= 750 + fadeMs)
+  ) failures.push("zooming out fades back to the resident National without moving the camera");
   return failures;
 }
 

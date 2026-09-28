@@ -798,6 +798,47 @@ fn retain_newest<V: PartialOrd + Clone>(
 mod tests {
     use super::*;
 
+    #[test]
+    fn radar_site_catalog_locations_match_the_nexrad_registry() {
+        #[derive(Deserialize)]
+        struct LocatedSite {
+            id: String,
+            latitude: f64,
+            longitude: f64,
+        }
+        #[derive(Deserialize)]
+        struct LocatedCatalog {
+            sites: Vec<LocatedSite>,
+        }
+        // Absent from nexrad-model's registry; sourced from api.weather.gov.
+        const NWS_SOURCED: [&str; 5] = ["KBHX", "KDOX", "KHDC", "KLGX", "PAPD"];
+        let catalog: LocatedCatalog = serde_json::from_str(RADAR_SITE_CATALOG_JSON).unwrap();
+        assert_eq!(catalog.sites.len(), 155);
+        for site in &catalog.sites {
+            assert!(
+                (-90.0..=90.0).contains(&site.latitude)
+                    && (-180.0..=180.0).contains(&site.longitude),
+                "{} has an invalid location",
+                site.id
+            );
+            match nexrad_model::meta::registry::site_by_id(&site.id) {
+                Some(entry) => {
+                    assert!(
+                        (f64::from(entry.latitude) - site.latitude).abs() < 1e-3
+                            && (f64::from(entry.longitude) - site.longitude).abs() < 1e-3,
+                        "{} location drifted from the nexrad-model registry",
+                        site.id
+                    );
+                }
+                None => assert!(
+                    NWS_SOURCED.contains(&site.id.as_str()),
+                    "{} has no registry location and no recorded source",
+                    site.id
+                ),
+            }
+        }
+    }
+
     const S3_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
   <IsTruncated>false</IsTruncated>

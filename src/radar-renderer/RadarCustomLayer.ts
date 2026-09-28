@@ -38,6 +38,7 @@ uniform int u_radial_count;
 uniform int u_azimuth_lookup_size;
 uniform int u_smooth_display;
 uniform vec4 u_range_folded_color;
+uniform float u_opacity;
 in vec2 v_mercator;
 out vec4 frag_color;
 
@@ -151,7 +152,7 @@ void main() {
   uint status = texelFetch(u_statuses, ivec2(gateIndex, radialIndex), 0).r;
   if (status == uint(1)) discard;
   if (status == uint(2)) {
-    frag_color = u_range_folded_color;
+    frag_color = u_range_folded_color * u_opacity;
     return;
   }
   if (u_smooth_display == 1) {
@@ -185,11 +186,14 @@ void main() {
       gateCoordinate
     );
     if (frag_color.a <= 0.0) discard;
+    // Premultiplied colors fade correctly by scaling every channel.
+    frag_color *= u_opacity;
     return;
   }
   uint rawCode = texelFetch(u_raw_codes, ivec2(gateIndex, radialIndex), 0).r;
   frag_color = texelFetch(u_palette, ivec2(int(rawCode), 0), 0);
   if (frag_color.a <= 0.0) discard;
+  frag_color *= u_opacity;
 }`;
 
 export interface RadarRendererCapabilities {
@@ -303,6 +307,8 @@ export interface RadarCustomLayerOptions {
   onSnapshot(snapshot: RadarRendererSnapshot): void;
   recoveryBeforeLayerId?: string;
   displayMode?: RadarDisplayMode;
+  /** Initial opacity; a Site that will fade in starts at 0. */
+  opacity?: number;
 }
 
 interface Uniforms {
@@ -320,6 +326,7 @@ interface Uniforms {
   smoothDisplay: WebGLUniformLocation;
   radialMetadata: WebGLUniformLocation;
   rangeFoldedColor: WebGLUniformLocation;
+  opacity: WebGLUniformLocation;
 }
 
 interface RadarFrameResources {
@@ -396,6 +403,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
   private selectionSequence = 1;
   private selectedAt = 0;
   private displayMode: RadarDisplayMode;
+  private opacity: number;
   private presentationEnabled = true;
   private peakGpuResourceBytes = 0;
   private frameUploadCount = 0;
@@ -426,6 +434,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
     this.models = models;
     this.selectedObservationId = models[0].observationId;
     this.displayMode = validateRadarDisplayMode(options.displayMode ?? "smooth");
+    this.opacity = validateRadarOpacity(options.opacity ?? 1);
   }
 
   private models: RadarSweepCpuModel[];
@@ -442,6 +451,21 @@ export class RadarCustomLayer implements CustomLayerInterface {
 
   getDisplayMode(): RadarDisplayMode {
     return this.displayMode;
+  }
+
+  /**
+   * Cross-fade control. Like the display mode it changes only shading, so it
+   * neither invalidates nor replaces the authoritative paint receipt.
+   */
+  setOpacity(opacity: number): void {
+    const next = validateRadarOpacity(opacity);
+    if (next === this.opacity) return;
+    this.opacity = next;
+    this.map?.triggerRepaint();
+  }
+
+  getOpacity(): number {
+    return this.opacity;
   }
 
   setDisplayMode(displayMode: RadarDisplayMode): void {
@@ -625,6 +649,7 @@ export class RadarCustomLayer implements CustomLayerInterface {
       gl.uniform1i(this.uniforms.lookupSize, model.azimuthLookup.length);
       const smoothDisplay = shouldSmoothRadarDisplay(this.displayMode, model.product);
       gl.uniform1i(this.uniforms.smoothDisplay, smoothDisplay ? 1 : 0);
+      gl.uniform1f(this.uniforms.opacity, this.opacity);
       const alpha = RANGE_FOLDED_COLOR[3] / 255;
       gl.uniform4f(
         this.uniforms.rangeFoldedColor,
@@ -2031,7 +2056,15 @@ function resolveUniforms(gl: WebGL2RenderingContext, program: WebGLProgram): Uni
     smoothDisplay: requireUniform(gl, program, "u_smooth_display"),
     radialMetadata: requireUniform(gl, program, "u_radial_metadata"),
     rangeFoldedColor: requireUniform(gl, program, "u_range_folded_color"),
+    opacity: requireUniform(gl, program, "u_opacity"),
   };
+}
+
+function validateRadarOpacity(value: number): number {
+  if (!Number.isFinite(value) || value < 0 || value > 1) {
+    throw new RadarRendererError("radar opacity must be between 0 and 1");
+  }
+  return value;
 }
 
 function validateRadarDisplayMode(value: string): RadarDisplayMode {
