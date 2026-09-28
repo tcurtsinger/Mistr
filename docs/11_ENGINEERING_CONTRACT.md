@@ -200,6 +200,8 @@ No “verify” command may omit Rust or silently skip packaged tests while repo
 
 ## 9. CI and local hardware responsibilities
 
+> **Owner decision (2026-09-28):** the hosted CI workflow is removed. Mistr is a single-developer app, and `npm run verify` on the development machine is the gate. The list below is what `verify` covers, less the dependency audit, which is no longer automated.
+
 CI should run:
 
 - Formatting, lint, types.
