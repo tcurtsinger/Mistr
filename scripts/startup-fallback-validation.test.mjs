@@ -26,14 +26,23 @@ describe("startup-fallback gate", () => {
     expect(validateStartupFallbackCase("missing", liveSite(false))).toEqual([]);
   });
 
-  it("accepts National without the startup scan", () => {
-    expect(validateStartupFallbackCase("corrupt", {
-      startupFallback: { painted: false, elapsedMs: 30, error: "fixture hash mismatch" },
+  it("accepts live KTLX after a corrupt startup scan", () => {
+    expect(validateStartupFallbackCase("corrupt", liveSite(false))).toEqual([]);
+  });
+
+  it("accepts a National launch that skips the startup scan", () => {
+    const national = {
+      startupFallback: { painted: false, elapsedMs: 0, skipped: "launch is not KTLX" },
       painted: "national",
       transition: false,
       nationalRenderer: "painted",
       alert: null,
-    })).toEqual([]);
+    };
+    expect(validateStartupFallbackCase("national", national)).toEqual([]);
+    const decoded = { ...national, startupFallback: { painted: true, elapsedMs: 1_100 } };
+    expect(validateStartupFallbackCase("national", decoded)).toContain(
+      "a launch that is not KTLX skips the startup scan",
+    );
   });
 
   it("rejects a launch stuck on the archive or without live radar", () => {
@@ -46,9 +55,14 @@ describe("startup-fallback gate", () => {
     ]);
   });
 
-  it("rejects a skipped scan that records no reason", () => {
+  it("accepts a reload mid-download that reaches live KTLX again", () => {
+    expect(validateStartupFallbackCase("reload", { ...liveSite(true), reloaded: true })).toEqual([]);
+    expect(validateStartupFallbackCase("reload", liveSite(true))).toContain("the page reloaded mid-download");
+  });
+
+  it("rejects a failed scan that records no reason", () => {
     const silent = liveSite(false);
     delete silent.startupFallback.error;
-    expect(validateStartupFallbackCase("missing", silent)).toContain("a skipped startup scan records why");
+    expect(validateStartupFallbackCase("missing", silent)).toContain("a failed startup scan records why");
   });
 });

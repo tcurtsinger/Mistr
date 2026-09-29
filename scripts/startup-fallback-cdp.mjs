@@ -36,7 +36,6 @@ try {
     await evaluate(`localStorage.setItem("mistr.camera", ${JSON.stringify(JSON.stringify(camera))}); true`);
     process.exit(0);
   }
-  const started = Date.now();
   const sample = () => evaluate(`(() => {
     const source = window.__MISTR_NATIONAL_PHASE4__?.sourceState?.();
     const painted = source?.painted?.source;
@@ -54,27 +53,42 @@ try {
       preparing: document.querySelector(".playback-bar")?.innerText?.includes("LOADING") ?? false,
     };
   })()`);
-  let state = null;
-  const painted = [];
-  while (Date.now() - started < 120_000) {
-    try {
-      state = await sample();
-    } catch {
-      // The reloaded document is still rebuilding its diagnostics.
+  const settle = async () => {
+    const started = Date.now();
+    let state = null;
+    const painted = [];
+    while (Date.now() - started < 120_000) {
+      try {
+        state = await sample();
+      } catch {
+        // The reloaded document is still rebuilding its diagnostics.
+        await delay(250);
+        continue;
+      }
+      if (state.painted && painted.at(-1) !== state.painted) painted.push(state.painted);
+      const settled = !state.transition && state.startupFallback && (
+        (state.painted === "national" && state.nationalRenderer === "painted")
+        || (state.painted && state.painted !== "national" && state.liveSite === state.painted
+          && state.liveSourceKind === "nexrad_level2_chunks"
+          && state.siteRenderer === "painted" && state.sitePlaybackReady)
+      );
+      if (settled) break;
       await delay(250);
-      continue;
     }
-    if (state.painted && painted.at(-1) !== state.painted) painted.push(state.painted);
-    const settled = !state.transition && state.startupFallback && (
-      (state.painted === "national" && state.nationalRenderer === "painted")
-      || (state.painted && state.painted !== "national" && state.liveSite === state.painted
-        && state.liveSourceKind === "nexrad_level2_chunks"
-        && state.siteRenderer === "painted" && state.sitePlaybackReady)
-    );
-    if (settled) break;
-    await delay(250);
+    return { ...state, paintedSequence: painted, settledMs: Date.now() - started };
+  };
+  let result;
+  if (label === "reload") {
+    // A reload while the first document is downloading its history must
+    // still reach live radar, not have its first requests refused.
+    const beforeReload = await settle();
+    await delay(2_000);
+    await evaluate("setTimeout(() => location.reload(), 0); true");
+    await delay(500);
+    result = { case: label, ...(await settle()), reloaded: true, beforeReload };
+  } else {
+    result = { case: label, ...(await settle()) };
   }
-  const result = { case: label, ...state, paintedSequence: painted, settledMs: Date.now() - started };
   result.failures = validateStartupFallbackCase(label, result);
   await writeFile(resolve(output, `${label}.json`), `${JSON.stringify(result, null, 2)}\n`);
   console.log(JSON.stringify(result, null, 2));

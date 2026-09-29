@@ -4,8 +4,9 @@ param(
 )
 
 # The bundled startup scan is a bridge, not a prerequisite. Launches the
-# packaged app with the scan bundled, missing, and corrupt, and checks each
-# launch still reaches current radar for its restored camera.
+# packaged app into KTLX with the scan bundled, missing, and corrupt, and
+# into National, which does not want the KTLX scan, and checks each launch
+# reaches current radar for its restored camera.
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $executable = Join-Path $root "src-tauri\target\release\mistr.exe"
@@ -30,7 +31,9 @@ try {
     $cases = @(
         @{ Name = "bundled"; Cache = $null; Camera = @("-97.2778", "35.3331", "9.5") },
         @{ Name = "missing"; Cache = $missing; Camera = @("-97.2778", "35.3331", "9.5") },
-        @{ Name = "corrupt"; Cache = $corrupt; Camera = @("-98.5", "39.5", "4.5") }
+        @{ Name = "corrupt"; Cache = $corrupt; Camera = @("-97.2778", "35.3331", "9.5") },
+        @{ Name = "national"; Cache = $null; Camera = @("-98.5", "39.5", "4.5") },
+        @{ Name = "reload"; Cache = $null; Camera = @("-97.2778", "35.3331", "9.5") }
     )
     $previousArguments = $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS
     $previousCache = $env:MISTR_PHASE4_FIXTURE_CACHE_DIR
@@ -66,7 +69,7 @@ try {
         Write-Output "FAIL: $($failed -join ', ')"
         exit 1
     }
-    Write-Output "PASS: startup reaches current radar with the startup scan bundled, missing, and corrupt"
+    Write-Output "PASS: startup reaches current radar with the startup scan bundled, missing, corrupt, not wanted, and after a reload"
 }
 finally {
     Pop-Location

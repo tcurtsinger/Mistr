@@ -1,10 +1,12 @@
 // Startup-fallback gate: the bundled startup scan is a bridge, not a
-// prerequisite. With it present it paints first; missing or corrupt, the
-// launch still reaches current radar for the restored camera.
+// prerequisite. A KTLX launch paints it first when it is present, and still
+// reaches live KTLX when it is missing or corrupt. Other launches skip it.
 const EXPECTED = {
   bundled: { fallbackPainted: true, painted: "KTLX" },
   missing: { fallbackPainted: false, painted: "KTLX" },
-  corrupt: { fallbackPainted: false, painted: "national" },
+  corrupt: { fallbackPainted: false, painted: "KTLX" },
+  national: { fallbackPainted: false, skipped: true, painted: "national" },
+  reload: { fallbackPainted: true, painted: "KTLX", reloaded: true },
 };
 
 export function validateStartupFallbackCase(label, result) {
@@ -17,7 +19,11 @@ export function validateStartupFallbackCase(label, result) {
       ? "the bundled startup scan paints first"
       : "a missing or corrupt startup scan is skipped");
   }
-  if (!expected.fallbackPainted && !fallback?.error) failures.push("a skipped startup scan records why");
+  if (expected.skipped) {
+    if (!fallback?.skipped || fallback?.error) failures.push("a launch that is not KTLX skips the startup scan");
+  } else if (!expected.fallbackPainted && !fallback?.error) {
+    failures.push("a failed startup scan records why");
+  }
   if (result?.transition || result?.painted !== expected.painted) {
     failures.push(`the launch reaches current ${expected.painted === "national" ? "National" : "Site"} radar`);
   }
@@ -32,6 +38,7 @@ export function validateStartupFallbackCase(label, result) {
       failures.push("the Site renderer and playback are ready");
     }
   }
+  if (expected.reloaded && result?.reloaded !== true) failures.push("the page reloaded mid-download");
   if (result?.alert) failures.push(`the launch reports: ${result.alert}`);
   return failures;
 }

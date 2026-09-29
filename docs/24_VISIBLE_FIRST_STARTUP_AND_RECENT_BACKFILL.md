@@ -84,9 +84,9 @@ Until this change, a missing, truncated, or undecodable bundled scan failed the 
 | missing | absent (`os error 2`) | KTLX, zoom 9.5 | scan skipped, live KTLX |
 | corrupt | 255 bytes | country view | scan skipped (size mismatch), National |
 
-The scan still runs before current radar starts, so it delays live acquisition by about 1.1 s on this workstation. Starting both at once would need the startup acquisition to share the Site lane with the scan request; that and the predecoded scan below are the remaining startup optimizations.
+The scan runs before current radar starts, delaying it by about 1.1 s, so only a KTLX launch uses it (2026-09-29): any other launch would paint KTLX in the wrong place. National and other Site launches skip it (`skipped` in `startupFallback()`). For a KTLX launch, starting both at once would need the startup acquisition to share the Site lane with the scan request; that and the predecoded scan below are the remaining startup optimizations.
 
-A page reload (not a launch) can still fail startup: the previous document's native downloads stay charged against the transfer credits for about a second while they unwind, and the new document's first requests are refused. Launches are unaffected.
+A page reload used to fail startup: the previous document's native downloads stay charged against the transfer credits for about a second while they unwind, and the new document's first requests were refused. Startup now waits (at most 10 s) until nothing is in flight; a launch finds nothing and does not wait. The gate's `national` and `reload` cases cover both.
 
 ## Deferred optimization
 

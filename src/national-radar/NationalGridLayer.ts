@@ -20,7 +20,7 @@ const PALETTE_WIDTH = 1_024;
 // Native-residency owner decision (2026-08-04): all retained observations
 // stay GPU-resident at the exact full-resolution grid (~49 MiB per frame,
 // ~2.8 GiB for the 60-frame loop plus one staged replacement). Sized for the
-// supported desktop floor — a discrete GPU with several GiB of memory — not
+// supported desktop floor â€” a discrete GPU with several GiB of memory â€” not
 // a minimal device.
 export const NATIONAL_GPU_TARGET_BYTES = 3328 * 1024 * 1024;
 export const NATIONAL_GPU_HARD_CEILING_BYTES = 3584 * 1024 * 1024;
@@ -193,6 +193,10 @@ export interface NationalGridRendererSnapshot {
   gpuResourceBytes: number;
   peakGpuResourceBytes: number;
   uploadCount: number;
+  /** Animation frames uploads waited for the GPU to finish earlier uploads. */
+  uploadGpuWaitFrames?: number;
+  /** Fences given up on after UPLOAD_FENCE_PATIENCE_FRAMES. */
+  uploadFenceGiveUps?: number;
   uploadBytes: number;
   maximumUploadSliceMs: number;
   paintReceipt?: NationalPaintReceipt;
@@ -344,6 +348,8 @@ export class NationalGridLayer implements CustomLayerInterface {
   onAdd(map: MapLibreMap, gl: WebGL2RenderingContext): void {
     this.map = map;
     this.gl = gl;
+    // A re-added layer may be on a restored context; earlier fences are gone.
+    this.uploadFrameBudget.discardFences();
     this.attachContextListeners(map);
     if (this.styleListenerAttached) {
       map.off("styledata", this.tryReaddAfterContextRestore);
@@ -491,6 +497,9 @@ export class NationalGridLayer implements CustomLayerInterface {
       throw new Error("National renderer already owns an uncommitted presentation");
     }
     assertCoverageMatchesManifest(manifest, coverage);
+    // One error read per presentation, not per upload slice: staged errors
+    // are attributed to this presentation when it commits.
+    clearPriorWebGlErrors(this.gl);
     this.gpuBytesBeforeStaging = this.currentGpuBytes();
     this.staging = {
       manifest,
@@ -950,6 +959,8 @@ export class NationalGridLayer implements CustomLayerInterface {
       gpuResourceBytes: this.currentGpuBytes(),
       peakGpuResourceBytes: this.peakGpuResourceBytes,
       uploadCount: this.uploadCount,
+      uploadGpuWaitFrames: this.uploadFrameBudget.gpuWaitFrames,
+      uploadFenceGiveUps: this.uploadFrameBudget.fenceGiveUps,
       uploadBytes: this.uploadBytes,
       maximumUploadSliceMs: this.maximumUploadSliceMs,
       paintReceipt: this.paintReceipt,
@@ -1179,6 +1190,10 @@ export class NationalGridLayer implements CustomLayerInterface {
     if (required.some((descriptor) => !staging.chunks.has(descriptor.index))) {
       throw new Error("National renderer cannot commit incomplete viewport coverage");
     }
+    const error = this.gl.getError();
+    if (error !== this.gl.NO_ERROR) {
+      throw new Error(`National chunk texture allocation or upload failed (GL ${error})`);
+    }
     staging.stagingDurationMs = performance.now() - staging.stagingStartedAt;
     return staging;
   }
@@ -1371,6 +1386,7 @@ export class NationalGridLayer implements CustomLayerInterface {
     ]);
     this.clearReceipts();
     void (async () => {
+      clearPriorWebGlErrors(gl);
       for (const presentation of presentations) {
         for (const resource of presentation.chunks.values()) {
           if (resource.texture) continue;
@@ -1395,7 +1411,12 @@ export class NationalGridLayer implements CustomLayerInterface {
           this.map?.triggerRepaint();
         }
       }
-      if (token === this.rehydrationToken) this.map?.triggerRepaint();
+      if (token !== this.rehydrationToken) return;
+      const error = gl.getError();
+      if (error !== gl.NO_ERROR && !gl.isContextLost()) {
+        throw new Error(`National recovery chunk upload failed (GL ${error})`);
+      }
+      this.map?.triggerRepaint();
     })().catch((error) => {
       if (token === this.rehydrationToken) this.fail(error);
     });
@@ -1498,6 +1519,8 @@ export class NationalGridLayer implements CustomLayerInterface {
   }
 
   private readonly handleContextLost = () => {
+    // Fences from the lost context are invalid in the restored one.
+    this.uploadFrameBudget.discardFences();
     this.beginRecovery();
     this.emit();
   };
@@ -1784,10 +1807,35 @@ const MINIMUM_UPLOAD_ROWS_PER_SLICE = 32;
 // A single non-preemptible upload call must never become a long task even if
 // the throughput estimate is badly wrong.
 const UPLOAD_SLICE_LONG_TASK_CEILING_MS = 50;
+// Upload work is issued at most this many animation frames ahead of the GPU.
+// Each frame's uploads end with a fence whose status is polled, never waited
+// on, so the queue stays bounded without blocking round trips: a per-slice
+// getError blocked on the GPU process, often for a whole vsync, and could
+// hold one frame's upload for a minute. Fence status reaches WebGL several
+// frames after the GPU finishes; with 2 in flight the first National frame
+// waited about 1 s on already-finished work, with 6 it never waited.
+export const UPLOAD_FRAMES_IN_FLIGHT = 6;
+// Past this many frames waiting on one fence, pacing gives up on it rather
+// than stall uploads behind a fence the driver never signals.
+const UPLOAD_FENCE_PATIENCE_FRAMES = 120;
+
+type UploadFenceGl = Pick<
+  WebGL2RenderingContext,
+  | "fenceSync"
+  | "clientWaitSync"
+  | "deleteSync"
+  | "isContextLost"
+  | "SYNC_GPU_COMMANDS_COMPLETE"
+  | "TIMEOUT_EXPIRED"
+>;
 
 export class UploadFrameBudget {
   private spentMs: number;
   private estimatedMsPerRow: number;
+  private fenceGl: UploadFenceGl | null = null;
+  private readonly framesInFlight: WebGLSync[] = [];
+  gpuWaitFrames = 0;
+  fenceGiveUps = 0;
 
   constructor(private readonly budgetMs: number) {
     if (!Number.isFinite(budgetMs) || budgetMs <= 0) {
@@ -1799,12 +1847,65 @@ export class UploadFrameBudget {
     this.estimatedMsPerRow = budgetMs / MINIMUM_UPLOAD_ROWS_PER_SLICE;
   }
 
-  /** Yield to the next animation frame when the current one cannot fit a minimum slice. */
-  async yieldIfSpent(): Promise<void> {
+  /**
+   * Yield to the next animation frame when the current one cannot fit a
+   * minimum slice, then wait (frame by frame) until the GPU has finished all
+   * but the last UPLOAD_FRAMES_IN_FLIGHT frames of upload work.
+   */
+  async yieldIfSpent(gl?: UploadFenceGl): Promise<void> {
     const minimumSliceMs = this.estimatedMsPerRow * MINIMUM_UPLOAD_ROWS_PER_SLICE;
     if (this.spentMs + minimumSliceMs <= this.budgetMs) return;
+    if (gl) this.fenceFrame(gl);
     await nextAnimationFrame();
     this.spentMs = 0;
+    if (gl) await this.waitForGpu(gl);
+  }
+
+  private fenceFrame(gl: UploadFenceGl): void {
+    if (this.fenceGl !== gl) this.dropFences();
+    this.fenceGl = gl;
+    // A forced first yield has issued no upload work to fence.
+    if (!Number.isFinite(this.spentMs) || this.spentMs === 0) return;
+    const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+    if (sync) this.framesInFlight.push(sync);
+  }
+
+  private async waitForGpu(gl: UploadFenceGl): Promise<void> {
+    let waited = 0;
+    while (this.framesInFlight.length > UPLOAD_FRAMES_IN_FLIGHT) {
+      if (this.fenceGl !== gl || gl.isContextLost() || waited >= UPLOAD_FENCE_PATIENCE_FRAMES) {
+        if (waited >= UPLOAD_FENCE_PATIENCE_FRAMES) this.fenceGiveUps += 1;
+        this.dropFences();
+        return;
+      }
+      const oldest = this.framesInFlight[0];
+      // A zero timeout polls: WebGL updates fence status between tasks.
+      if (gl.clientWaitSync(oldest, 0, 0) !== gl.TIMEOUT_EXPIRED) {
+        gl.deleteSync(oldest);
+        this.framesInFlight.shift();
+        continue;
+      }
+      waited += 1;
+      this.gpuWaitFrames += 1;
+      await nextAnimationFrame();
+    }
+  }
+
+  private dropFences(): void {
+    const gl = this.fenceGl;
+    for (const sync of this.framesInFlight.splice(0)) {
+      if (gl && !gl.isContextLost()) gl.deleteSync(sync);
+    }
+  }
+
+  /**
+   * Forget fences without deleting them: after a context loss they belong to
+   * the lost context, and touching them in the restored one is an
+   * INVALID_OPERATION.
+   */
+  discardFences(): void {
+    this.framesInFlight.length = 0;
+    this.fenceGl = null;
   }
 
   rowsForSlice(remainingRows: number): number {
@@ -1838,7 +1939,9 @@ async function uploadRawTextureTimeSliced(
   shouldContinue: () => boolean,
   diagnosticLabel: string,
 ): Promise<{ texture: WebGLTexture; maximumSliceMs: number }> {
-  await budget.yieldIfSpent();
+  // No getError here: allocation or upload errors are read once, when the
+  // staged presentation commits or recovery completes.
+  await budget.yieldIfSpent(gl);
   if (!shouldContinue()) throw new Error(`${diagnosticLabel} was cancelled`);
   const allocationStarted = performance.now();
   const texture = gl.createTexture();
@@ -1847,7 +1950,6 @@ async function uploadRawTextureTimeSliced(
   let nextRow = 0;
   try {
     withBoundRawTexture(gl, texture, () => {
-      clearPriorWebGlErrors(gl);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -1863,21 +1965,18 @@ async function uploadRawTextureTimeSliced(
         gl.UNSIGNED_SHORT,
         null,
       );
-      const error = gl.getError();
-      if (error !== gl.NO_ERROR) throw new Error(`National chunk texture allocation failed (GL ${error})`);
     });
     const allocationElapsed = performance.now() - allocationStarted;
     assertSliceUnderLongTaskCeiling(allocationElapsed, `${diagnosticLabel} allocation`);
     budget.recordFixedCost(allocationElapsed);
     maximumSliceMs = allocationElapsed;
     while (nextRow < chunk.descriptor.haloHeight) {
-      await budget.yieldIfSpent();
+      await budget.yieldIfSpent(gl);
       if (!shouldContinue()) throw new Error(`${diagnosticLabel} was cancelled`);
       const rowCount = budget.rowsForSlice(chunk.descriptor.haloHeight - nextRow);
       const started = performance.now();
       const sliceFirstRow = nextRow;
       withBoundRawTexture(gl, texture, () => {
-        clearPriorWebGlErrors(gl);
         const firstValue = sliceFirstRow * chunk.descriptor.haloWidth;
         const values = chunk.rawCodes.subarray(
           firstValue,
@@ -1894,8 +1993,6 @@ async function uploadRawTextureTimeSliced(
           gl.UNSIGNED_SHORT,
           values,
         );
-        const error = gl.getError();
-        if (error !== gl.NO_ERROR) throw new Error(`National chunk texture upload failed (GL ${error})`);
       });
       const elapsed = performance.now() - started;
       assertSliceUnderLongTaskCeiling(elapsed, diagnosticLabel);

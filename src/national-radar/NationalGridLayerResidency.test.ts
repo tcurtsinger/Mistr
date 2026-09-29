@@ -27,6 +27,7 @@ function fakeGl() {
     stateQueries: 0,
     failNextAllocation: false,
     pendingError: 0,
+    errorReads: 0,
   };
   const gl = new Proxy({}, {
     get(_target, property) {
@@ -49,6 +50,7 @@ function fakeGl() {
           };
         case "getError":
           return () => {
+            state.errorReads += 1;
             const error = state.pendingError;
             state.pendingError = 0;
             return error;
@@ -236,14 +238,18 @@ describe("National resident visibility", () => {
     expect(state.stateQueries).toBe(queriesBefore);
   });
 
-  it("still fails a chunk upload when its texture cannot be allocated", async () => {
+  it("fails a staged presentation whose texture could not be allocated", async () => {
     const { layer, state } = await paintedLayer();
     const manifest = parsePackedGridManifest(Uint8Array.from(readFileSync(MANIFEST)).buffer);
     const chunk = await parsePackedGridChunk(Uint8Array.from(readFileSync(CHUNK)).buffer);
     const coverage = viewportCoverage(manifest, { west: -129.99, east: -129.9, south: 54.9, north: 54.99 }, 1);
     layer.beginStaging(manifest, coverage);
     state.failNextAllocation = true;
-    await expect(layer.uploadStagedChunk(chunk)).rejects.toThrow("allocation failed (GL 1285)");
+    // Uploads never block on getError; the error is read at commit.
+    const errorReadsBefore = state.errorReads;
+    await layer.uploadStagedChunk(chunk);
+    expect(state.errorReads).toBe(errorReadsBefore);
+    expect(() => layer.commitStaging()).toThrow("allocation or upload failed (GL 1285)");
   });
 
   it("refuses frame selection while hidden", async () => {
