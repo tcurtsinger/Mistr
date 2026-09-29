@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import type { CustomRenderMethodInput, Map as MapLibreMap } from "maplibre-gl";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parsePackedGridChunk, parsePackedGridManifest } from "../packed-grid/packedGrid";
-import { viewportCoverage } from "./coverage";
+import { completeDomainCoverage, viewportCoverage } from "./coverage";
 import { NationalGridLayer } from "./NationalGridLayer";
 
 const MANIFEST = new URL("../../fixtures/expected/national-phase2/packed-grid-v1-manifest.bin", import.meta.url);
@@ -135,6 +135,28 @@ describe("National resident visibility", () => {
     expect(snapshot.paintReceipt).toBeUndefined();
     expect(snapshot.residentReceipt).toMatchObject({ presented: false });
     await expect(layer.waitForAuthoritativeReceipt(receipt, 1_000)).resolves.toMatchObject({ presented: false });
+  });
+
+  it("paints a clear sky whose every chunk draws nothing", async () => {
+    const { gl, state } = fakeGl();
+    const layer = new NationalGridLayer();
+    layer.onAdd(fakeMap(), gl);
+    const manifest = parsePackedGridManifest(Uint8Array.from(readFileSync(MANIFEST)).buffer);
+    const clear = {
+      ...manifest,
+      chunks: manifest.chunks.map((chunk) => ({ ...chunk, drawsNothing: true })),
+    };
+    const coverage = completeDomainCoverage(clear, 1);
+    expect(coverage.requiredChunkIndices).toEqual([]);
+
+    layer.beginStaging(clear, coverage);
+    const committed = layer.commitStaging();
+    layer.render(gl, RENDER_INPUT);
+    layer.render(gl, RENDER_INPUT);
+
+    await expect(committed).resolves.toMatchObject({ presented: true, requiredChunkCount: 0 });
+    expect(state.draws).toBe(0);
+    expect(layer.getSnapshot()).toMatchObject({ status: "painted", residentChunkCount: 0, coverageComplete: true });
   });
 
   it("reveals only after a real draw completes", async () => {

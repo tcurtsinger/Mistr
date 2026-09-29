@@ -214,6 +214,34 @@ aborted.
 
 GPU staging, about 260 to 310 ms per frame, is now the whole per-frame
 cost. It is not the upload budget; the next step is finding what paces it.
+
+### Chunks that draw nothing are skipped (2026-09-29)
+
+Timing each part of staging from outside the app (wrapping `fetch` and the
+WebGL upload calls over CDP) showed the upload calls themselves take about
+3 ms per frame. The rest is the backend-to-page transfer: 25 batches of
+2 MB, each about 12 ms before its response arrives, about 180 MB/s through
+the WebView2 IPC channel, for 49.7 MB per frame.
+
+Most of those bytes described nothing. Across 60 frames (13:32 to 15:30 UTC),
+240 to 258 of the 392 native chunks (61 to 66%) had no measured cell, halo
+included, and only 6.4% of cells held a value. The packed grid now marks such
+chunks ([Packed Grid v1](27_PACKED_GRID_V1.md)), and National coverage leaves
+them out, so they are never transferred, kept by the page, or uploaded. The
+picture is unchanged: every fragment such a chunk covers would discard.
+
+| | Before | After |
+|---|---:|---:|
+| 20 frames | 6.6 to 6.8 s | 3.9 to 4.4 s |
+| 60 frames | 18.4 to 19.9 s | 9.9 to 10.6 s |
+| GPU staging per frame (p50) | 270 to 280 ms | 113 to 124 ms |
+| Chunks uploaded for 60 frames | 23,520 | 8,416 |
+| GPU memory for 60 frames | 2,985 MB | 1,104 MB |
+
+The saving depends on the weather: widespread precipitation leaves fewer
+empty chunks, although areas outside radar coverage are always empty. The
+backend still retains every chunk's bytes; dropping the empty ones would
+save about the same share of its memory.
 The load bench also records every animation-frame interval while history
 loads (`loadFramePacing`); set `MISTR_BENCH_NO_PROFILE=1` so the sampling
 profiler does not skew it.

@@ -33,6 +33,7 @@ function fixture(): { manifest: PackedGridManifest; chunks: PackedGridChunk[] } 
         haloHeight,
         encodedLength: 176 + haloWidth * haloHeight * 2,
         payloadSha256: index.toString(16).padStart(2, "0").repeat(32),
+        drawsNothing: false,
       };
       descriptors.push(descriptor);
       chunks.push({

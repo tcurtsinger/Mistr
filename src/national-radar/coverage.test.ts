@@ -37,6 +37,7 @@ function manifest(): PackedGridManifest {
         haloHeight,
         encodedLength: 176 + haloWidth * haloHeight * 2,
         payloadSha256: "00".repeat(32),
+        drawsNothing: false,
       });
     }
   }
@@ -103,9 +104,26 @@ describe("National viewport coverage", () => {
       ...coverage,
       requiredChunkIndices: [0, 0],
     })).toThrow(/unique/);
-    expect(() => assertCoverageMatchesManifest(source, {
-      ...coverage,
-      requiredChunkIndices: [],
-    })).toThrow(/at least one/);
+  });
+
+  it("leaves out chunks that draw nothing, down to none at all", () => {
+    const source = manifest();
+    const empty = new Set([0, 1, 9, 27]);
+    const marked = {
+      ...source,
+      chunks: source.chunks.map((chunk) => ({ ...chunk, drawsNothing: empty.has(chunk.index) })),
+    };
+    const complete = completeDomainCoverage(marked, 1);
+    expect(complete.requiredChunkIndices).toHaveLength(24);
+    expect(complete.requiredChunkIndices.some((index) => empty.has(index))).toBe(false);
+    const northwest = viewportCoverage(marked, { west: -130, south: 45, east: -110, north: 55 }, 2);
+    expect(viewportCoverage(source, { west: -130, south: 45, east: -110, north: 55 }, 2).requiredChunkIndices)
+      .toContain(0);
+    expect(northwest.requiredChunkIndices).not.toContain(0);
+
+    const clear = { ...source, chunks: source.chunks.map((chunk) => ({ ...chunk, drawsNothing: true })) };
+    const clearCoverage = completeDomainCoverage(clear, 3);
+    expect(clearCoverage.requiredChunkIndices).toEqual([]);
+    expect(assertCoverageMatchesManifest(clear, clearCoverage)).toEqual([]);
   });
 });

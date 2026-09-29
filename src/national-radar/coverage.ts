@@ -28,7 +28,10 @@ export function completeDomainCoverage(
     south: manifest.lastLatitudeDegrees - manifest.latitudeStepDegrees / 2,
     east: manifest.lastLongitudeDegrees + manifest.longitudeStepDegrees / 2,
     north: manifest.firstLatitudeDegrees + manifest.latitudeStepDegrees / 2,
-    requiredChunkIndices: manifest.chunks.map((chunk) => chunk.index),
+    // A chunk that draws nothing is complete without being transferred.
+    requiredChunkIndices: manifest.chunks
+      .filter((chunk) => !chunk.drawsNothing)
+      .map((chunk) => chunk.index),
   };
 }
 
@@ -49,7 +52,7 @@ export function viewportCoverage(
   const requiredChunkIndices = clipped.west > clipped.east || clipped.south > clipped.north
     ? []
     : manifest.chunks
-      .filter((chunk) => chunkIntersectsBounds(manifest, chunk, clipped))
+      .filter((chunk) => !chunk.drawsNothing && chunkIntersectsBounds(manifest, chunk, clipped))
       .map((chunk) => chunk.index);
   return {
     version,
@@ -65,9 +68,7 @@ export function assertCoverageMatchesManifest(
 ): readonly PackedGridChunkDescriptor[] {
   assertCoverageVersion(coverage.version);
   assertBounds(coverage);
-  if (coverage.requiredChunkIndices.length < 1) {
-    throw new Error("National coverage requires at least one chunk");
-  }
+  // No required chunk is valid: a clear sky draws nothing.
   const seen = new Set<number>();
   return coverage.requiredChunkIndices.map((index) => {
     if (!Number.isSafeInteger(index) || index < 0 || seen.has(index)) {
