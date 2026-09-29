@@ -35,8 +35,23 @@ const evaluate = async (expression) => {
 };
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 // MISTR_BENCH_NO_PROFILE=1 keeps the sampling profiler from skewing
-// load-time frame pacing.
+// load-time frame pacing. MISTR_BENCH_REFRESH_HZ sets the display refresh
+// rate; otherwise it is estimated from the sampled frame intervals.
 const profileLoad = process.env.MISTR_BENCH_NO_PROFILE !== "1";
+const refreshHz = Number(process.env.MISTR_BENCH_REFRESH_HZ) || null;
+// The page is attached as soon as it exists, while its first document may
+// still be creating its execution context.
+async function evaluateWhenReady(expression, timeoutMs = 30_000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      return await evaluate(expression);
+    } catch (error) {
+      if (Date.now() > deadline) throw error;
+      await sleep(25);
+    }
+  }
+}
 
 function summarizeProfile(profile) {
   const byId = new Map(profile.nodes.map((node) => [node.id, node]));
@@ -85,7 +100,7 @@ const nationalCamera = `localStorage.setItem("mistr.camera", JSON.stringify({ lo
 
 if (label === "--prime") {
   // Stores a country view so the next launch opens National and is measurable.
-  await evaluate(`${nationalCamera}; true`);
+  await evaluateWhenReady(`${nationalCamera}; true`);
   cdp.close();
   process.exit(0);
 }
@@ -95,10 +110,12 @@ try {
   await cdp.call("Profiler.enable");
   await cdp.call("Profiler.setSamplingInterval", { interval: 500 });
   // The app was just launched on National; keep the next launch there too.
-  await evaluate(`${nationalCamera}; true`);
-  await evaluate(`(() => {
-    globalThis.__bench = { longTasks: [], frames: {}, loadFrameMs: [] };
-    // Frame pacing while history loads: every animation-frame interval.
+  await evaluateWhenReady(`${nationalCamera}; true`);
+  await evaluateWhenReady(`(() => {
+    globalThis.__bench = { longTasks: [], frames: {}, loadFrameMs: [], longFrames: [] };
+    // Frame pacing while history loads: every animation-frame interval from
+    // attachment on (pacingFromMs after navigation start)...
+    __bench.pacingFromMs = Math.round(performance.now());
     let lastFrame;
     const pace = (time) => {
       if (lastFrame !== undefined) __bench.loadFrameMs.push(time - lastFrame);
@@ -107,6 +124,15 @@ try {
       if (count < 60 && performance.now() < 240000) requestAnimationFrame(pace);
     };
     requestAnimationFrame(pace);
+    // ...and, from navigation start, every animation frame of 50 ms or more,
+    // which the browser buffers before any observer attaches.
+    if (PerformanceObserver.supportedEntryTypes?.includes("long-animation-frame")) {
+      new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) __bench.longFrames.push([entry.startTime, entry.duration]);
+      }).observe({ type: "long-animation-frame", buffered: true });
+    } else {
+      __bench.longFrames = null;
+    }
     new PerformanceObserver((list) => { for (const entry of list.getEntries()) __bench.longTasks.push(Math.round(entry.duration)); })
       .observe({ type: "longtask", buffered: true });
     const benchTimer = setInterval(() => {
@@ -134,9 +160,18 @@ try {
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
     const report = __MISTR_NATIONAL_PHASE4__.report();
-    const pick = (n) => __bench.frames[n] ?? null;
-    // Network-independent: how long each frame's GPU staging took (stage -> pause).
     const trace = __MISTR_NATIONAL_PHASE4__.loadTrace?.() ?? [];
+    // When the nth frame was retained, from the app's load trace: exact, and
+    // it covers the first frame, which can paint before attachment. The
+    // polled times are a fallback for a trace that has wrapped.
+    const retainedAt = (n) => {
+      const entry = n === 1
+        ? trace.find((step) => step.step === "current:painted")
+        : trace.find((step) => step.step === "commit:published" && String(step.detail) === String(n));
+      return entry ? Math.round(entry.atUnixMs - performance.timeOrigin) : null;
+    };
+    const pick = (n) => retainedAt(n) ?? __bench.frames[n] ?? null;
+    // Network-independent: how long each frame's GPU staging took (stage -> pause).
     const staging = [];
     for (let index = 0; index < trace.length; index += 1) {
       if (trace[index].step !== "commit:stage") continue;
@@ -146,16 +181,30 @@ try {
     staging.sort((a, b) => a - b);
     const paced = [...__bench.loadFrameMs].sort((a, b) => a - b);
     const q = (p) => paced.length ? Math.round(paced[Math.min(paced.length - 1, Math.floor(paced.length * p))] * 10) / 10 : null;
+    // Frames cannot arrive faster than the display refreshes and a miss only
+    // lengthens an interval, so the 10th percentile is the refresh interval.
+    const refreshMs = ${refreshHz ? `${1000 / refreshHz}` : "paced.length ? paced[Math.floor(paced.length * 0.1)] : null"};
+    const loadEndMs = pick(60) ?? performance.now();
+    const longFrames = __bench.longFrames?.filter(([start]) => start <= loadEndMs) ?? null;
     return {
       loadFramePacing: {
+        fromMs: __bench.pacingFromMs,
         frames: paced.length,
+        refreshMs: refreshMs === null ? null : Math.round(refreshMs * 100) / 100,
+        refreshSource: ${refreshHz ? `"MISTR_BENCH_REFRESH_HZ"` : `"estimated"`},
         p50: q(0.5),
         p95: q(0.95),
         p99: q(0.99),
         max: paced.length ? Math.round(paced.at(-1) * 10) / 10 : null,
-        // At 120 Hz a refresh is 8.3 ms: over 12.5 ms means at least one was missed.
-        missedRefresh: paced.filter((ms) => ms > 12.5).length,
+        // Over one and a half refresh intervals: at least one refresh was missed.
+        missedRefresh: refreshMs === null ? null : paced.filter((ms) => ms > refreshMs * 1.5).length,
         over33ms: paced.filter((ms) => ms > 33.4).length,
+      },
+      // From navigation start, including before attachment.
+      longAnimationFrames: longFrames === null ? null : {
+        fromMs: 0,
+        count: longFrames.length,
+        maxMs: Math.round(Math.max(0, ...longFrames.map(([, duration]) => duration))),
       },
       frameAtMs: { 1: pick(1), 2: pick(2), 20: pick(20), 40: pick(40), 60: pick(60) },
       stagingMsPerFrame: staging.length
@@ -193,6 +242,7 @@ try {
     label,
     frameAtMs: load.frameAtMs,
     loadFramePacing: load.loadFramePacing,
+    longAnimationFrames: load.longAnimationFrames,
     longTasks: load.longTasks,
     uploads: load.uploadCount,
     stagingMsPerFrame: load.stagingMsPerFrame,

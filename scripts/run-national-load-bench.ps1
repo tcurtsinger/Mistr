@@ -16,11 +16,12 @@ for ($run = 0; $run -le $Runs; $run++) {
     $process = Start-Process -FilePath $executable -WorkingDirectory $root -PassThru
     $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = $previousArguments
     try {
+        # The bench attaches as soon as the page exists, so frame pacing covers
+        # as much of the load as possible.
         for ($i = 0; $i -lt 100; $i++) {
             try { Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:$Port/json/list" -TimeoutSec 1 | Out-Null; break }
             catch { Start-Sleep -Milliseconds 100 }
         }
-        Start-Sleep -Seconds 2
         $runLabel = if ($run -eq 0) { "--prime" } else { "$Label-$run" }
         node (Join-Path $PSScriptRoot "national-load-bench.mjs") $runLabel
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
