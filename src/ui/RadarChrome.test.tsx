@@ -49,6 +49,14 @@ describe("compact radar chrome", () => {
     expect(result.accessible).toContain(expected);
   });
 
+  it("names no displayed source before any radar has painted", () => {
+    const html = renderToStaticMarkup(<RadarChrome {...props} paintedSourceKind="none" requestedSite="KTLX"
+      requestedSourceKind="site" />);
+    expect(html).toContain("Choose radar source. No radar is displayed yet. Updating KTLX.");
+    expect(html).not.toContain("KTLX Site is displayed");
+    expect(html).toContain('data-painted-source="none"');
+  });
+
   it("uses AM/PM in the scan readout and accessible timeline text for either source", () => {
     for (const source of ["national", "site"] as const) {
       const html = renderToStaticMarkup(<RadarChrome {...props} paintedSourceKind={source}

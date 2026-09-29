@@ -72,6 +72,22 @@ These workstation measurements are diagnostic evidence, not a universal latency 
 - Phase 4 must still lazy-load its complete archive before performance scenarios.
 - Phase 5 and Phase 6 must continue to pass their existing cancellation, paint-receipt, N0S, and context-recovery gates.
 
+## The startup scan is optional (2026-09-28)
+
+Until this change, a missing, truncated, or undecodable bundled scan failed the whole startup: the Site layer, playback controller, and source sessions were all built on that first paint, so current radar never started. Now the scan is attempted once; if it fails, the reason is logged and exposed as `__MISTR_PHASE4__.startupFallback()`, the partial layer is removed, the chrome shows `LOADING CURRENT RADAR`, and startup continues to the source the restored camera calls for. With no Site painted, a Site switch builds its own layer and fades it in, the same path used from National.
+
+`npm run test:startup-fallback:packaged` launches the packaged app three times, each after a separate launch stores its camera:
+
+| Case | Startup scan | Camera | Result |
+|---|---|---|---|
+| bundled | present | KTLX, zoom 9.5 | scan painted in 1.14 s, then live KTLX |
+| missing | absent (`os error 2`) | KTLX, zoom 9.5 | scan skipped, live KTLX |
+| corrupt | 255 bytes | country view | scan skipped (size mismatch), National |
+
+The scan still runs before current radar starts, so it delays live acquisition by about 1.1 s on this workstation. Starting both at once would need the startup acquisition to share the Site lane with the scan request; that and the predecoded scan below are the remaining startup optimizations.
+
+A page reload (not a launch) can still fail startup: the previous document's native downloads stay charged against the transfer credits for about a second while they unwind, and the new document's first requests are refused. Launches are unaffected.
+
 ## Deferred optimization
 
 The bundled startup observation is still decoded from raw Level II data. A future performance-only change may bundle a hash-pinned predecoded packed sweep, provided provenance, wire validation, public-repository policy, and installer evidence remain equivalent. That optimization is not required to correct the demonstrated blocking dependencies.

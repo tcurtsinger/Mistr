@@ -173,6 +173,7 @@ export function playbackPresentation(
 
 export function radarInitializationLabel(stage: string | undefined): string {
   if (stage === "LOADING NEWEST SAFE SCAN") return "LOADING SAFE RADAR";
+  if (stage === "LOADING CURRENT RADAR") return "LOADING CURRENT RADAR";
   const progress = stage?.match(/^DECODING OBSERVATION (\d+)\/(\d+)$/);
   if (progress) return `LOADING HISTORY ${progress[1]}/${progress[2]}`;
   if (stage === "OPENING RESIDENT LOOP") return "OPENING RADAR HISTORY";
