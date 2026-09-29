@@ -1413,8 +1413,8 @@ fn phase4_fixture_path(
     }
     let bundled_path = resource_root.join("fixtures").join(relative);
     if !bundled_path.is_file() {
-        // Installers carry only the newest scan, the startup fallback. The
-        // rest of the archive loop is read from a repository checkout.
+        // Installers carry no archives; the loop is read from a repository
+        // checkout.
         return Err(TransferError::new(
             "fixture_not_bundled",
             format!(
@@ -2015,16 +2015,12 @@ mod tests {
     }
 
     #[test]
-    fn installers_bundle_only_the_startup_fallback_scan() {
+    fn installers_bundle_no_radar_archives() {
+        // Startup paints current radar; the archive loop is diagnostics only
+        // and is read from a repository checkout.
         let config: serde_json::Value =
             serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
-        let resources = config["bundle"]["resources"].as_object().unwrap();
-        let source = format!("../fixtures/cache/{PHASE3_FIXTURE_NAME}");
-        assert_eq!(resources.keys().collect::<Vec<_>>(), vec![&source]);
-        assert_eq!(
-            resources[&source],
-            format!("fixtures/cache/{PHASE3_FIXTURE_NAME}")
-        );
+        assert!(config["bundle"].get("resources").is_none());
     }
 
     #[test]

@@ -28,9 +28,6 @@
   "bundle": {
     "active": true,
     "targets": ["nsis", "msi"],
-    "resources": {
-      "../fixtures/cache/KTLX20240520_230512_V06": "fixtures/cache/KTLX20240520_230512_V06"
-    },
     "icon": ["icons/icon.ico"],
     "shortDescription": "High-resolution NEXRAD radar for desktop",
     "longDescription": "A focused desktop radar instrument with decoded NEXRAD data, GPU-resident playback, and an interactive MapLibre map."

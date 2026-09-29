@@ -173,7 +173,6 @@ const DIAGNOSTIC_LAYER_IDS = {
 };
 const DEFAULT_CENTER: [number, number] = [-97.27776, 35.333363];
 const LAST_SITE_STORAGE_KEY = "mistr.lastRadarSite";
-const RADAR_SOURCE_STORAGE_KEY = "mistr.radarSource";
 const RADAR_DISPLAY_MODE_STORAGE_KEY = "mistr.radarDisplayMode";
 const RADAR_ENGINE_PREPARING_ERROR = "Radar engine is still preparing the resident loop";
 const LIVE_POLL_RETRY_MS = 15_000;
@@ -220,7 +219,7 @@ export function App() {
   if (!radarSessionCoordinatorRef.current) {
     radarSessionCoordinatorRef.current = new RadarSessionCoordinator({
       persistPaintedSource(source) {
-        storeRadarSource(source);
+        storePaintedSite(source);
       },
     });
   }
@@ -388,8 +387,6 @@ export function App() {
     let unsubscribeAutoSourceFlush: (() => void) | null = null;
     let autoSiteRetryTimer: ReturnType<typeof globalThis.setTimeout> | null = null;
     let latestReport: Phase4Report | null = null;
-    // The bundled first paint: painted, or why it was skipped.
-    let startupFallback: StartupFallbackOutcome | null = null;
     let activeScenario: Promise<Phase4ScenarioReport> | null = null;
     let startupAcquisition: Promise<void> | null = null;
     let prepareArchiveForDiagnostics: (() => Promise<RadarPaintReceipt>) | null = null;
@@ -665,7 +662,7 @@ export function App() {
         throw new Error(`Phase 4 requires its explicit ${PHASE4_FRAME_COUNT}-fixture KTLX set`);
       }
       const archiveModels: RadarSweepCpuModel[] = [];
-      // Fixtures already in archiveModels; the startup scan is one only when it painted.
+      // Fixtures already decoded into archiveModels.
       const loadedArchiveFixtureIds = new Set<string>();
       const decodeArchiveFixture = async (fixtureId: string) => {
         if (!client) throw new Error("archive transfer client is unavailable");
@@ -680,76 +677,9 @@ export function App() {
           await lease.release();
         }
       };
-      // Paint one known-safe bundled observation first. Loading all twenty raw
-      // archives before the first paint made development startup take roughly
-      // a minute and delayed live radar for work the normal product path does
-      // not need. The full loop is hydrated only for its packaged diagnostics.
-      // The scan is only a bridge: when it is missing or will not decode or
-      // paint, startup goes straight on to current radar.
-      const fallbackStarted = performance.now();
-      let fallbackPainted: { model: RadarSweepCpuModel; receipt: RadarPaintReceipt } | null = null;
-      // The scan is KTLX. Any other launch would paint it in the wrong place
-      // and hold current radar back by its decode, about a second.
-      const launchSource = startupSourceRef.current;
-      const fallbackWanted = launchSource.kind === "site" && launchSource.siteIcao === "KTLX";
-      if (!fallbackWanted) {
-        startupFallback = { painted: false, elapsedMs: 0, skipped: "launch is not KTLX" };
-        setPhase4({ kind: "running", stage: "LOADING CURRENT RADAR" });
-      } else try {
-        setPhase4({ kind: "running", stage: "LOADING NEWEST SAFE SCAN" });
-        const newestArchiveModel = await decodeArchiveFixture(fixtureIds[fixtureIds.length - 1]);
-        archiveModels.push(newestArchiveModel);
-        loadedArchiveFixtureIds.add(fixtureIds[fixtureIds.length - 1]);
-        modelsById.set(newestArchiveModel.observationId, newestArchiveModel);
-        const diagnosticModel = newestArchiveModel;
-        radarModelRef.current = diagnosticModel;
-        setTimelineFrames([timelineFrame(diagnosticModel)]);
-        const alignment = createAlignmentReport(diagnosticModel);
-        latestReport = {
-          frames: summarizeFrames([diagnosticModel]),
-          alignment,
-          coexistence: emptyLayerCoexistenceReport(),
-        };
-        layer = new RadarCustomLayer([diagnosticModel], {
-          displayMode,
-          recoveryBeforeLayerId: ANCHOR_LAYER_ID,
-          onSnapshot(renderer) {
-            handleSiteRendererSnapshot(renderer, controller);
-          },
-        });
-        radarLayerRef.current = layer;
-        const beforeId = radarContextAnchorLayerId(instance.getStyle().layers ?? []);
-        installDiagnosticLayers(instance, diagnosticModel, alignment, layer, beforeId);
-        publish({ coexistence: currentLayerCoexistenceReport(instance) });
-        controller = new ResidentPlaybackController(layer, [diagnosticModel], {
-          onState(playback) {
-            publish({ playback, renderer: layer?.getSnapshot() });
-          },
-        });
-        playbackControllerRef.current = controller;
-        const receipt = await controller.establishInitialPaint();
-        const model = modelsById.get(receipt.observationId);
-        if (!model) throw new Error("newest painted archive frame is unknown");
-        fallbackPainted = { model, receipt };
-      } catch (error) {
-        if (cancelled) throw error;
-        const message = error instanceof Error ? error.message : String(error);
-        console.warn(`Mistr skipped the bundled startup scan: ${message}`);
-        startupFallback = { painted: false, elapsedMs: performance.now() - fallbackStarted, error: message };
-        controller?.dispose();
-        removeDiagnosticLayers(instance, layer);
-        if (playbackControllerRef.current === controller) playbackControllerRef.current = null;
-        if (radarLayerRef.current === layer) radarLayerRef.current = null;
-        controller = null;
-        layer = null;
-        latestReport = null;
-        radarModelRef.current = null;
-        archiveModels.length = 0;
-        loadedArchiveFixtureIds.clear();
-        modelsById.clear();
-        setTimelineFrames([]);
-        setPhase4({ kind: "running", stage: "LOADING CURRENT RADAR" });
-      }
+      // Startup paints nothing of its own: the first paint is current radar for
+      // the restored camera. The bundled KTLX archive loop is diagnostics only.
+      setPhase4({ kind: "running", stage: "LOADING CURRENT RADAR" });
 
       const hydrateArchiveLoop = async () => {
         if (archiveModels.length === PHASE4_FRAME_COUNT) return archiveModels;
@@ -778,23 +708,6 @@ export function App() {
         }
         return archiveModels;
       };
-      if (fallbackPainted && layer && controller) {
-        const { model: initialModel, receipt: newestReceipt } = fallbackPainted;
-        startupFallback = { painted: true, elapsedMs: performance.now() - fallbackStarted };
-        radarModelRef.current = initialModel;
-        setPaintedSourceKind(initialModel.sourceKind);
-        radarSessionCoordinatorRef.current!.establishPaintedSource(
-          radarPaintIdentity(initialModel, newestReceipt),
-        );
-        liveDisplay = initialLiveDisplay(frameTruth(initialModel, newestReceipt));
-        publishPhase5({ display: liveDisplay });
-        const activityAtResidency = await client.phase4ActivitySnapshot();
-        publish({
-          renderer: layer.getSnapshot(),
-          playback: controller.snapshot(),
-          activityAtResidency,
-        });
-      }
       clickHandler = (event) => {
         setDismissPanelsSignal((value) => value + 1);
         const point = {
@@ -843,7 +756,6 @@ export function App() {
       setInterrogation(null);
       setInspectionState("idle");
       globalThis.__MISTR_PHASE4__ = {
-        startupFallback: () => startupFallback,
         report: () => ({
           ...latestReport!,
           renderer: layer?.getSnapshot(),
@@ -877,8 +789,18 @@ export function App() {
             }
           }
         },
-        prepareArchive: () => prepareArchiveForDiagnostics?.()
-          ?? Promise.reject(new Error("archive diagnostic preparation is unavailable")),
+        // Gates may call this as soon as the API appears, before the source
+        // sessions it needs exist.
+        async prepareArchive() {
+          const started = performance.now();
+          while (!prepareArchiveForDiagnostics) {
+            if (cancelled || performance.now() - started > 60_000) {
+              throw new Error("archive diagnostic preparation is unavailable");
+            }
+            await waitMilliseconds(50);
+          }
+          return prepareArchiveForDiagnostics();
+        },
         settleMap: (timeoutMs) => waitForMapIdle(instance, timeoutMs),
         layerOrder: () => currentLayerCoexistenceReport(instance).actualDiagnosticOrder,
       };
@@ -2936,21 +2858,16 @@ export function App() {
         },
       };
       prepareArchiveForDiagnostics = async () => {
-        if (!layer || !controller || !client) {
-          throw new Error("archive diagnostic preparation is unavailable");
-        }
+        if (!client) throw new Error("archive diagnostic preparation is unavailable");
         // Packaged gates reuse the normal WebView profile. Supersede and await
-        // any persisted-site startup request before restoring the measured
-        // archive loop, so live publication cannot overlap gate measurements.
-        if (nationalResident) teardownNational();
+        // the startup request for the restored camera before showing the
+        // measured archive loop, so live publication cannot overlap gate
+        // measurements. The launch shows current radar, so the loop may need
+        // its own Site layer, and National, shown or resident, gives way.
         livePollingSession += 1;
-        const minimumGeneration = Math.max(
-          transferGeneration + 1,
-          layer.getSnapshot().generation + 1,
-        );
         const transition = radarSessionCoordinatorRef.current!.beginTransition(
           siteRadarSource("KTLX"),
-          minimumGeneration,
+          nextSiteGeneration(),
           { persistOnPaint: false },
         );
         const generation = transition.generation;
@@ -2958,13 +2875,50 @@ export function App() {
         try {
           await beginExclusiveLane(client, "site", generation);
           await startupAcquisition?.catch(() => {});
+          if (nationalLayer) teardownNational();
 
           const hydratedArchive = await hydrateArchiveLoop();
           const preparedArchiveModels = hydratedArchive.map((model) => ({
             ...model,
             generation: BigInt(generation),
           }));
-          const receipt = await controller.replaceResidentFrames(preparedArchiveModels);
+          let receipt: RadarPaintReceipt;
+          if (layer && controller) {
+            receipt = await controller.replaceResidentFrames(preparedArchiveModels);
+          } else {
+            const newest = preparedArchiveModels[preparedArchiveModels.length - 1];
+            const alignment = createAlignmentReport(newest);
+            latestReport ??= {
+              frames: summarizeFrames(preparedArchiveModels),
+              alignment,
+              coexistence: emptyLayerCoexistenceReport(),
+            };
+            const createdLayer = new RadarCustomLayer(preparedArchiveModels, {
+              displayMode: displayModeRef.current,
+              recoveryBeforeLayerId: ANCHOR_LAYER_ID,
+              onSnapshot(renderer) {
+                handleSiteRendererSnapshot(renderer, controller);
+              },
+            });
+            layer = createdLayer;
+            radarLayerRef.current = createdLayer;
+            installDiagnosticLayers(
+              instance,
+              newest,
+              alignment,
+              createdLayer,
+              radarContextAnchorLayerId(instance.getStyle().layers ?? []),
+            );
+            controller = new ResidentPlaybackController(createdLayer, preparedArchiveModels, {
+              onState(playback) {
+                publish({ playback, renderer: layer?.getSnapshot() });
+              },
+            });
+            playbackControllerRef.current = controller;
+            receipt = await controller.establishInitialPaint();
+          }
+          const activeLayer = layer!;
+          const activeController = controller!;
           const paintedModel = preparedArchiveModels.find(
             (model) => model.observationId === receipt.observationId,
           );
@@ -2995,8 +2949,8 @@ export function App() {
           publishPhase5({ display: liveDisplay });
           publish({
             frames: summarizeFrames(preparedArchiveModels),
-            renderer: layer.getSnapshot(),
-            playback: controller.snapshot(),
+            renderer: activeLayer.getSnapshot(),
+            playback: activeController.snapshot(),
             activityAtResidency: await client.phase4ActivitySnapshot(),
           });
           return receipt;
@@ -4524,14 +4478,6 @@ function nationalHistoryContainsFinalizedObservation(
     ));
 }
 
-/** The bundled first paint: painted, failed (`error`), or not wanted (`skipped`). */
-interface StartupFallbackOutcome {
-  painted: boolean;
-  elapsedMs: number;
-  error?: string;
-  skipped?: string;
-}
-
 /**
  * After a page reload the previous document's downloads are cancelled but
  * stay charged against the transfer credits until they unwind, usually
@@ -4589,11 +4535,11 @@ function storeLastSite(site: string): void {
 /**
  * A launch opens the source the restored camera calls for, not whatever
  * source was last shown: zoom decides the source. Without a stored camera
- * (a fresh profile) the stored source, or KTLX, sets both.
+ * (a fresh profile) it opens National over the whole country.
  */
 function restoreStartupSource(): RadarSourceKey {
   const camera = restoreCamera();
-  if (!camera) return restoreRadarSource();
+  if (!camera) return { kind: "national", domain: "conus" };
   const [longitude, latitude] = camera.center;
   const target = launchAutoSource({ zoom: camera.zoom, center: { longitude, latitude } }, RADAR_SITES);
   return target.kind === "national"
@@ -4601,26 +4547,9 @@ function restoreStartupSource(): RadarSourceKey {
     : siteRadarSource(target.siteIcao);
 }
 
-function restoreRadarSource(): RadarSourceKey {
-  try {
-    return globalThis.localStorage?.getItem(RADAR_SOURCE_STORAGE_KEY) === "national"
-      ? { kind: "national", domain: "conus" }
-      : siteRadarSource(restoreLastSite());
-  } catch {
-    return siteRadarSource("KTLX");
-  }
-}
-
-function storeRadarSource(source: RadarSourceKey): void {
-  try {
-    globalThis.localStorage?.setItem(
-      RADAR_SOURCE_STORAGE_KEY,
-      source.kind === "national" ? "national" : "site",
-    );
-    if (source.kind === "site") storeLastSite(source.siteIcao);
-  } catch {
-    // Storage failure cannot invalidate a source that has already painted.
-  }
+function storePaintedSite(source: RadarSourceKey): void {
+  // The last Site names the picker's site before anything paints.
+  if (source.kind === "site") storeLastSite(source.siteIcao);
 }
 
 function restoreRadarDisplayMode(): RadarDisplayMode {
@@ -5082,7 +5011,6 @@ function formatMs(milliseconds: number) {
 
 declare global {
   var __MISTR_PHASE4__: undefined | {
-    startupFallback(): StartupFallbackOutcome | null;
     report(): Phase4Report;
     runScenario(transitionCount?: number): Promise<Phase4ScenarioReport>;
     prepareArchive(): Promise<RadarPaintReceipt>;
