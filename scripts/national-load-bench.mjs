@@ -34,11 +34,8 @@ const evaluate = async (expression) => {
   return reply.result.result.value;
 };
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-// MISTR_BENCH_UPLOAD_BUDGET_MS (at --prime) sets the next launch's upload
-// budget; MISTR_BENCH_NO_PROFILE=1 keeps the sampling profiler from skewing
+// MISTR_BENCH_NO_PROFILE=1 keeps the sampling profiler from skewing
 // load-time frame pacing.
-const budgetKey = "mistr.debug.uploadBudgetMs";
-const primeBudget = process.env.MISTR_BENCH_UPLOAD_BUDGET_MS;
 const profileLoad = process.env.MISTR_BENCH_NO_PROFILE !== "1";
 
 function summarizeProfile(profile) {
@@ -88,9 +85,7 @@ const nationalCamera = `localStorage.setItem("mistr.camera", JSON.stringify({ lo
 
 if (label === "--prime") {
   // Stores a country view so the next launch opens National and is measurable.
-  await evaluate(`${nationalCamera}; ${primeBudget
-    ? `localStorage.setItem(${JSON.stringify(budgetKey)}, ${JSON.stringify(primeBudget)})`
-    : `localStorage.removeItem(${JSON.stringify(budgetKey)})`}; true`);
+  await evaluate(`${nationalCamera}; true`);
   cdp.close();
   process.exit(0);
 }
@@ -121,7 +116,6 @@ try {
     }, 50);
     return true;
   })()`);
-  const uploadBudgetMs = await evaluate(`localStorage.getItem(${JSON.stringify(budgetKey)})`);
   await sleep(3_000);
   let loadProfile = null;
   if (profileLoad) {
@@ -193,11 +187,10 @@ try {
   const renderProfile = summarizeProfile((await cdp.call("Profiler.stop")).result.profile);
   await evaluate(`__MISTR_NATIONAL_PHASE4__.pause(); true`);
 
-  const result = { label, at: new Date().toISOString(), uploadBudgetMs, load, loadProfile, regionalPlayback: { frames, profile: renderProfile } };
+  const result = { label, at: new Date().toISOString(), load, loadProfile, regionalPlayback: { frames, profile: renderProfile } };
   await writeFile(new URL(`${label}.json`, outDir), `${JSON.stringify(result, null, 2)}\n`);
   console.log(JSON.stringify({
     label,
-    uploadBudgetMs,
     frameAtMs: load.frameAtMs,
     loadFramePacing: load.loadFramePacing,
     longTasks: load.longTasks,
