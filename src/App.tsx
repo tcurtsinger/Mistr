@@ -3077,6 +3077,18 @@ export function App() {
           }
         },
       };
+      // A history commit withdraws the paint receipt until its GPU fence
+      // completes, several times a second while backfill runs. Diagnostics
+      // wait that gap out rather than fail on it.
+      const authoritativeNationalReceipt = async (timeoutMs = 5_000) => {
+        const deadline = performance.now() + timeoutMs;
+        for (;;) {
+          const receipt = nationalLayer?.getSnapshot().paintReceipt;
+          if (receipt) return receipt;
+          if (performance.now() > deadline) throw new Error("National renderer has no authoritative receipt");
+          await new Promise((resolve) => globalThis.setTimeout(resolve, 16));
+        }
+      };
       globalThis.__MISTR_NATIONAL_PHASE3__ = {
         report: () => latestNationalPhase3,
         async startNational() {
@@ -3104,8 +3116,7 @@ export function App() {
         },
         async lookup(longitude, latitude) {
           if (!client || !latestNationalPhase3) throw new Error("National radar is not painted");
-          const receipt = latestNationalPhase3.renderer.paintReceipt;
-          if (!receipt) throw new Error("National renderer has no authoritative receipt");
+          const receipt = await authoritativeNationalReceipt();
           return client.lookupNationalHistoryPoint({
             generation: receipt.generation,
             observationTimeUnixMs: receipt.observationTimeUnixMs,
@@ -3117,8 +3128,7 @@ export function App() {
         },
         async peak() {
           if (!client || !latestNationalPhase3) throw new Error("National radar is not painted");
-          const receipt = latestNationalPhase3.renderer.paintReceipt;
-          if (!receipt) throw new Error("National renderer has no authoritative receipt");
+          const receipt = await authoritativeNationalReceipt();
           return client.findNationalHistoryPeakPoint({
             generation: receipt.generation,
             observationTimeUnixMs: receipt.observationTimeUnixMs,
@@ -3759,8 +3769,7 @@ export function App() {
           if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) {
             throw new TypeError("National inspection coordinates must be finite");
           }
-          const receipt = nationalLayer?.getSnapshot().paintReceipt;
-          if (!receipt) throw new Error("National renderer has no authoritative receipt");
+          const receipt = await authoritativeNationalReceipt();
           inspectionPointRef.current = { longitude, latitude };
           interrogationObservationRef.current = null;
           setInspectionState("pending");
