@@ -311,7 +311,13 @@ ingested, and the window's boundaries decode together, each on its own
 thread. Results are read in boundary order and the earliest that decodes is
 published, so the selected sweep, its safe boundary, and its attempt count
 are those trying each in turn gives; a later attempt still running then is
-left to finish unread.
+left to finish unread. The boundaries share one assembled buffer, each a
+prefix of it, and decode together only while their inputs total at most
+16 MiB (a first scan's total about 5 MB), since each decoder copies and
+decompresses its whole input; a large volume's prefixes run in smaller
+groups. A later chunk in the window that fails to download or validate
+does not cost a safe sweep an earlier boundary already holds: the queued
+boundaries decode before the failure is reported.
 
 | KTLX, zoom 9.5, 4 launches each | Before | After |
 |---|---:|---:|

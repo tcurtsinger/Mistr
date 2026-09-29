@@ -3,7 +3,7 @@
 
 use crate::acquisition::{AcquisitionCounters, AcquisitionError, PublicRadarClient};
 use crate::chunk_assembly::{
-    ChunkAssembler, ChunkAssemblyError, ChunkIngestOutcome, VolumeIdentity,
+    ChunkAssembler, ChunkAssemblyError, ChunkIngestOutcome, ChunkMetadata, VolumeIdentity,
 };
 use crate::radar::{DecodeError, DecodeOutput, RadarProduct, decode_safe_lowest_sweep};
 use chrono::Utc;
@@ -23,6 +23,11 @@ const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(1);
 // decodes; a safe sweep found mid-window leaves at most seven extra chunks
 // downloaded and decoded unused.
 const CHUNK_DOWNLOAD_WINDOW: usize = 8;
+// A window's safe decodes run together while their inputs total at most
+// this. A first scan's seven or so total about 5 MB; the prefixes of a
+// large volume run in smaller groups, since each decoder copies and
+// decompresses its whole input.
+const CONCURRENT_SAFE_DECODE_INPUT_BYTES: usize = 16 * 1024 * 1024;
 
 #[derive(Debug, Clone, Default)]
 pub struct GenerationClock {
@@ -490,37 +495,30 @@ impl LiveSweepSession {
                 .await;
                 downloaded.reverse();
             }
-            let (metadata, bytes) = downloaded
+            let ingested = downloaded
                 .pop()
-                .expect("a download for every chunk in the window")?;
-            self.token.ensure_current()?;
-            let previous_contiguous = self.assembler.contiguous_through();
-            let outcome = self
-                .assembler
-                .ingest(self.token.generation(), metadata, bytes)?;
-            self.downloaded_keys.insert(object.key.clone());
-            let contiguous_advanced = contiguous_prefix_advanced(previous_contiguous, &outcome);
-            match outcome {
-                ChunkIngestOutcome::Accepted {
-                    waiting_for_sequence,
-                    ..
-                } => {
-                    if waiting_for_sequence.is_some() {
-                        self.gap_observations = self.gap_observations.saturating_add(1);
-                    }
+                .expect("a download for every chunk in the window")
+                .map_err(LivePipelineError::from)
+                .and_then(|(metadata, bytes)| {
+                    self.ingest_listed_chunk(
+                        &object.key,
+                        metadata,
+                        bytes,
+                        attempt_safe_decode,
+                        &mut boundaries,
+                    )
+                });
+            if let Err(error) = ingested {
+                // A later chunk's failure does not cost a safe sweep that an
+                // earlier boundary in its window already holds.
+                if self.token.is_current()
+                    && let Some(candidate) = self
+                        .try_safe_sweeps(std::mem::take(&mut boundaries))
+                        .await?
+                {
+                    return Ok(Some(candidate));
                 }
-                ChunkIngestOutcome::Duplicate { .. } => {
-                    self.duplicate_observations = self.duplicate_observations.saturating_add(1);
-                }
-                ChunkIngestOutcome::Late { .. } => {}
-                // Boundaries of the superseded volume can no longer publish.
-                ChunkIngestOutcome::Rollover { .. } => boundaries.clear(),
-            }
-            if attempt_safe_decode
-                && contiguous_advanced
-                && let Some(boundary) = self.safe_decode_boundary()?
-            {
-                boundaries.push(boundary);
+                return Err(error);
             }
             let window_ingested =
                 (index + 1) % CHUNK_DOWNLOAD_WINDOW == 0 || index + 1 == candidates.len();
@@ -539,6 +537,48 @@ impl LiveSweepSession {
             self.gap_observations = self.gap_observations.saturating_add(1);
         }
         Ok(None)
+    }
+
+    /// Ingests one downloaded chunk and, when safe decodes are attempted,
+    /// captures the contiguous boundary it reaches.
+    fn ingest_listed_chunk(
+        &mut self,
+        key: &str,
+        metadata: ChunkMetadata,
+        bytes: Vec<u8>,
+        attempt_safe_decode: bool,
+        boundaries: &mut Vec<SafeDecodeBoundary>,
+    ) -> Result<(), LivePipelineError> {
+        self.token.ensure_current()?;
+        let previous_contiguous = self.assembler.contiguous_through();
+        let outcome = self
+            .assembler
+            .ingest(self.token.generation(), metadata, bytes)?;
+        self.downloaded_keys.insert(key.to_string());
+        let contiguous_advanced = contiguous_prefix_advanced(previous_contiguous, &outcome);
+        match outcome {
+            ChunkIngestOutcome::Accepted {
+                waiting_for_sequence,
+                ..
+            } => {
+                if waiting_for_sequence.is_some() {
+                    self.gap_observations = self.gap_observations.saturating_add(1);
+                }
+            }
+            ChunkIngestOutcome::Duplicate { .. } => {
+                self.duplicate_observations = self.duplicate_observations.saturating_add(1);
+            }
+            ChunkIngestOutcome::Late { .. } => {}
+            // Boundaries of the superseded volume can no longer publish.
+            ChunkIngestOutcome::Rollover { .. } => boundaries.clear(),
+        }
+        if attempt_safe_decode
+            && contiguous_advanced
+            && let Some(boundary) = self.safe_decode_boundary()?
+        {
+            boundaries.push(boundary);
+        }
+        Ok(())
     }
 
     /// The contiguous prefix just reached, captured for a safe decode.
@@ -560,7 +600,7 @@ impl LiveSweepSession {
             volume,
             through,
             last_modified_unix_ms,
-            bytes: self.assembler.assembled_contiguous()?,
+            input_bytes: self.assembler.contiguous_byte_len(),
         }))
     }
 
@@ -572,21 +612,49 @@ impl LiveSweepSession {
         &mut self,
         boundaries: Vec<SafeDecodeBoundary>,
     ) -> Result<Option<SafeSweepCandidate>, LivePipelineError> {
-        let mut attempts = Vec::with_capacity(boundaries.len());
-        for mut boundary in boundaries {
-            let bytes = std::mem::take(&mut boundary.bytes);
-            let decode = spawn_native_work("mistr-level2-safe-decode", move || {
-                let started_at_unix_ms = Utc::now().timestamp_millis();
-                let decoded = decode_safe_lowest_sweep(&bytes, RadarProduct::Reflectivity);
-                (started_at_unix_ms, decoded, Utc::now().timestamp_millis())
-            })?;
-            attempts.push((boundary, decode));
-        }
-        let Some(decoded) = earliest_safe_decode(attempts, &mut self.decoder_attempts).await?
-        else {
+        let Some(last) = boundaries.last() else {
             return Ok(None);
         };
-        self.publish_safe_sweep(decoded).map(Some)
+        // One assembled buffer serves every boundary: each is a prefix of it.
+        let assembled = Arc::new(self.assembler.assembled_through(last.through)?);
+        if boundaries
+            .iter()
+            .any(|boundary| boundary.input_bytes > assembled.len())
+        {
+            return Err(LivePipelineError::Assembly(
+                "safe decode boundary exceeds the assembled volume".into(),
+            ));
+        }
+        let groups = concurrent_decode_groups(
+            &boundaries
+                .iter()
+                .map(|boundary| boundary.input_bytes)
+                .collect::<Vec<_>>(),
+            CONCURRENT_SAFE_DECODE_INPUT_BYTES,
+        );
+        let mut boundaries = boundaries.into_iter();
+        for group in groups {
+            let mut attempts = Vec::with_capacity(group);
+            for boundary in boundaries.by_ref().take(group) {
+                let assembled = assembled.clone();
+                let input_bytes = boundary.input_bytes;
+                let decode = spawn_native_work("mistr-level2-safe-decode", move || {
+                    let started_at_unix_ms = Utc::now().timestamp_millis();
+                    let decoded = decode_safe_lowest_sweep(
+                        &assembled[..input_bytes],
+                        RadarProduct::Reflectivity,
+                    );
+                    (started_at_unix_ms, decoded, Utc::now().timestamp_millis())
+                })?;
+                attempts.push((boundary, decode));
+            }
+            if let Some(decoded) =
+                earliest_safe_decode(attempts, &mut self.decoder_attempts).await?
+            {
+                return self.publish_safe_sweep(decoded).map(Some);
+            }
+        }
+        Ok(None)
     }
 
     fn publish_safe_sweep(
@@ -631,12 +699,32 @@ impl LiveSweepSession {
     }
 }
 
-/// A contiguous prefix of the active volume and its assembled bytes.
+/// A contiguous prefix of the active volume and its assembled length.
 struct SafeDecodeBoundary {
     volume: VolumeIdentity,
     through: u16,
     last_modified_unix_ms: i64,
-    bytes: Vec<u8>,
+    input_bytes: usize,
+}
+
+/// The sizes of consecutive groups of boundaries, by their input sizes in
+/// order, that decode together: each group's inputs total at most `budget`,
+/// and a group always holds at least one boundary.
+fn concurrent_decode_groups(input_bytes: &[usize], budget: usize) -> Vec<usize> {
+    let mut groups = Vec::new();
+    let (mut size, mut total) = (0usize, 0usize);
+    for &bytes in input_bytes {
+        if size > 0 && total.saturating_add(bytes) > budget {
+            groups.push(size);
+            (size, total) = (0, 0);
+        }
+        size += 1;
+        total = total.saturating_add(bytes);
+    }
+    if size > 0 {
+        groups.push(size);
+    }
+    groups
 }
 
 /// A safe decode running on its own thread: its start time, result, and
@@ -1022,6 +1110,20 @@ mod tests {
         assert!(contiguous_prefix_advanced(6, &contiguous));
         assert!(!contiguous_prefix_advanced(7, &gap));
         assert!(!contiguous_prefix_advanced(7, &duplicate));
+    }
+
+    #[test]
+    fn concurrent_safe_decodes_share_a_bounded_input_budget() {
+        // A first scan's prefixes all decode together.
+        assert_eq!(concurrent_decode_groups(&[1, 2, 3, 4], 100), [4]);
+        // Larger ones split once the budget is reached, in order.
+        assert_eq!(
+            concurrent_decode_groups(&[10, 10, 10, 10, 10], 25),
+            [2, 2, 1]
+        );
+        // A prefix over the budget still decodes, on its own.
+        assert_eq!(concurrent_decode_groups(&[30, 5, 40], 20), [1, 1, 1]);
+        assert!(concurrent_decode_groups(&[], 20).is_empty());
     }
 
     #[tokio::test]
