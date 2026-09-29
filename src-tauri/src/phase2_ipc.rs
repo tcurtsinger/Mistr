@@ -1,5 +1,8 @@
 use crate::acquisition::PublicRadarClient;
-use crate::live_pipeline::{GenerationClock, GenerationToken, LiveSweepSession, SafeSweepEvidence};
+use crate::live_pipeline::{
+    GenerationClock, GenerationToken, LiveSweepSession, SafeSweepCandidate, SafeSweepEvidence,
+    next_volume_index, previous_volume_index,
+};
 use crate::packed_sweep::{
     PackedSweepIdentity, PackedSweepSummary, encode_packed_sweep, phase2_benchmark_sweep,
     validate_packed_sweep,
@@ -218,6 +221,190 @@ pub struct Phase5LiveTransferEvidence {
     pub packed_bytes: usize,
     pub published_at_unix_ms: i64,
     pub safe: SafeSweepEvidence,
+}
+
+// Older Site volumes kept downloading ahead of the backfill requests that ask
+// for them one at a time. Each took about 0.75 s, almost all network and
+// decode, so four in flight keep backfill well ahead of the page.
+const SITE_PREFETCH_DEPTH: usize = 4;
+
+type SitePrefetchTask = tauri::async_runtime::JoinHandle<Result<SafeSweepCandidate, TransferError>>;
+
+#[derive(Debug)]
+struct SitePrefetchEntry {
+    volume_index: u16,
+    task: SitePrefetchTask,
+}
+
+/// Predecessor volumes acquired ahead of the backfill requests for them, for
+/// one transfer session and site. The page begins a new Site generation for
+/// every request, so prefetches run under their own token, cancelled when the
+/// session or site changes, and are held decoded: each is encoded for the
+/// request that uses it. An entry is used only when its volume satisfies the
+/// request's own cursor, so a request never receives a different volume than
+/// a fresh acquisition would choose; anything else is acquired fresh.
+#[derive(Debug, Clone, Default)]
+pub struct SiteHistoryPrefetch {
+    state: Arc<Mutex<SitePrefetchState>>,
+}
+
+#[derive(Debug, Default)]
+struct SitePrefetchState {
+    owner: Option<(u64, String)>,
+    clock: GenerationClock,
+    epoch: u64,
+    token: Option<GenerationToken>,
+    entries: Vec<SitePrefetchEntry>,
+}
+
+impl SitePrefetchState {
+    /// The prefetch token for `session` and `site`, cancelling everything
+    /// prefetched for any other.
+    fn owner_token(&mut self, session: u64, site: &str) -> Option<GenerationToken> {
+        let owned = self
+            .owner
+            .as_ref()
+            .is_some_and(|(owner_session, owner_site)| {
+                *owner_session == session && owner_site == site
+            });
+        if !owned {
+            retain_site_prefetches(&mut self.entries, |_| false);
+            self.epoch += 1;
+            self.token = self.clock.begin(self.epoch).ok();
+            self.owner = Some((session, site.to_string()));
+        }
+        self.token.clone()
+    }
+}
+
+impl SiteHistoryPrefetch {
+    /// Removes and returns the prefetch of the volume before `volume_index`.
+    fn take(&self, session: u64, site: &str, volume_index: u16) -> Option<SitePrefetchTask> {
+        let mut state = self.state.lock().ok()?;
+        state.owner_token(session, site)?;
+        let target = previous_volume_index(volume_index);
+        let position = state
+            .entries
+            .iter()
+            .position(|entry| entry.volume_index == target)?;
+        Some(state.entries.remove(position).task)
+    }
+
+    /// Starts acquiring the `SITE_PREFETCH_DEPTH` volumes before `newest`,
+    /// each strictly older than it, and aborts prefetches outside that window.
+    fn schedule(&self, session: u64, site: &str, newest: &SafeSweepEvidence, timeout: Duration) {
+        let Ok(mut state) = self.state.lock() else {
+            return;
+        };
+        let Some(token) = state.owner_token(session, site) else {
+            return;
+        };
+        let mut window = Vec::with_capacity(SITE_PREFETCH_DEPTH);
+        let mut volume_index = newest.volume_index;
+        for _ in 0..SITE_PREFETCH_DEPTH {
+            volume_index = previous_volume_index(volume_index);
+            window.push(volume_index);
+        }
+        retain_site_prefetches(&mut state.entries, |entry| {
+            window.contains(&entry.volume_index)
+        });
+        for volume_index in window {
+            if state
+                .entries
+                .iter()
+                .any(|entry| entry.volume_index == volume_index)
+            {
+                continue;
+            }
+            let token = token.clone();
+            let task_site = site.to_string();
+            let before_started_at = newest.volume_started_at_unix_ms;
+            let task = tauri::async_runtime::spawn(async move {
+                let client = PublicRadarClient::new()
+                    .map_err(|error| TransferError::new("live_client_failed", error.to_string()))?;
+                // start_before targets the slot before the one it is given.
+                let live = LiveSweepSession::start_before(
+                    client,
+                    token,
+                    &task_site,
+                    next_volume_index(volume_index),
+                    before_started_at,
+                )
+                .await
+                .map_err(|error| TransferError::new("live_start_failed", error.to_string()))?;
+                acquire_live_sweep(live, timeout, timeout).await
+            });
+            state.entries.push(SitePrefetchEntry { volume_index, task });
+        }
+    }
+}
+
+fn retain_site_prefetches(
+    entries: &mut Vec<SitePrefetchEntry>,
+    keep: impl Fn(&SitePrefetchEntry) -> bool,
+) {
+    entries.retain(|entry| {
+        let kept = keep(entry);
+        if !kept {
+            entry.task.abort();
+        }
+        kept
+    });
+}
+
+/// Whether a prefetched volume is the one a request for the volume before
+/// `volume_index`, strictly older than `volume_started_at_unix_ms`, receives.
+fn prefetch_satisfies(
+    acquired: &SafeSweepEvidence,
+    site: &str,
+    volume_index: u16,
+    volume_started_at_unix_ms: i64,
+) -> bool {
+    acquired.site == site
+        && acquired.volume_index == previous_volume_index(volume_index)
+        && acquired.volume_started_at_unix_ms < volume_started_at_unix_ms
+}
+
+async fn acquire_live_sweep(
+    mut live: LiveSweepSession,
+    wait: Duration,
+    timeout: Duration,
+) -> Result<SafeSweepCandidate, TransferError> {
+    live.wait_for_safe_sweep_discovered_within(wait, timeout)
+        .await
+        .map_err(|error| TransferError::new("live_sweep_failed", error.to_string()))
+}
+
+/// Encodes an acquired sweep for publication in `generation`.
+async fn encode_live_sweep(
+    candidate: SafeSweepCandidate,
+    generation: u64,
+) -> Result<(Vec<u8>, PackedSweepSummary, SafeSweepEvidence), TransferError> {
+    let SafeSweepCandidate {
+        output,
+        mut evidence,
+    } = candidate;
+    let bytes = tauri::async_runtime::spawn_blocking(move || {
+        encode_packed_sweep(&output.sweep, PackedSweepIdentity { generation })
+            .map_err(|error| TransferError::new("wire_encode_failed", error.to_string()))
+    })
+    .await
+    .map_err(|error| TransferError::new("backend_task_failed", error.to_string()))??;
+    let summary = validate_packed_sweep(&bytes)
+        .map_err(|error| TransferError::new("wire_validation_failed", error.to_string()))?;
+    if summary.source_kind != "nexrad_level2_chunks" {
+        return Err(TransferError::new(
+            "live_source_invalid",
+            format!(
+                "live sweep encoded unexpected source {}",
+                summary.source_kind
+            ),
+        ));
+    }
+    // A prefetched sweep was acquired under the prefetch token; it is
+    // published in the requesting generation.
+    evidence.generation = generation;
+    Ok((bytes, summary, evidence))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -962,6 +1149,7 @@ pub async fn request_phase6_n0s_fixture_sweep(
 #[allow(clippy::too_many_arguments)]
 pub async fn request_phase5_live_sweep(
     state: tauri::State<'_, TransferBroker>,
+    prefetch: tauri::State<'_, SiteHistoryPrefetch>,
     session: u64,
     generation: u64,
     site: String,
@@ -984,68 +1172,57 @@ pub async fn request_phase5_live_sweep(
     let timeout = Duration::from_secs(timeout_seconds);
     let credit = InFlightCreditGuard::new(broker.clone(), session, TransferLane::Site);
     let worker_broker = broker.clone();
+    let prefetch = prefetch.inner().clone();
     let worker = tauri::async_runtime::spawn(async move {
         let token = worker_broker.live_generation_token(session, TransferLane::Site, generation)?;
-        let client = PublicRadarClient::new()
-            .map_err(|error| TransferError::new("live_client_failed", error.to_string()))?;
-        let mut live = match history_request {
-            Some(ValidatedLiveHistoryRequest::After {
-                volume_index,
-                volume_started_at_unix_ms,
-            }) => {
-                LiveSweepSession::start_after(
-                    client,
-                    token,
-                    &site,
-                    volume_index,
-                    volume_started_at_unix_ms,
-                )
-                .await
-            }
+        let prefetched = match history_request {
             Some(ValidatedLiveHistoryRequest::Before {
                 volume_index,
                 volume_started_at_unix_ms,
-            }) => {
-                LiveSweepSession::start_before(
-                    client,
-                    token,
+            }) => match prefetch.take(session, &site, volume_index) {
+                Some(task) => task.await.ok().and_then(Result::ok).filter(|candidate| {
+                    prefetch_satisfies(
+                        &candidate.evidence,
+                        &site,
+                        volume_index,
+                        volume_started_at_unix_ms,
+                    )
+                }),
+                None => None,
+            },
+            _ => None,
+        };
+        let candidate = match prefetched {
+            Some(candidate) => candidate,
+            None => {
+                acquire_requested_live_sweep(
+                    token.clone(),
                     &site,
-                    volume_index,
-                    volume_started_at_unix_ms,
+                    fresh_only,
+                    history_request,
+                    wait,
+                    timeout,
                 )
-                .await
+                .await?
             }
-            None => LiveSweepSession::start(client, token, &site, fresh_only).await,
-        }
-        .map_err(|error| TransferError::new("live_start_failed", error.to_string()))?;
-        let safe = live
-            .wait_for_safe_sweep_discovered_within(wait, timeout)
-            .await
+        };
+        token
+            .ensure_current()
             .map_err(|error| TransferError::new("live_sweep_failed", error.to_string()))?;
-        let safe_evidence = safe.evidence;
-        let bytes = tauri::async_runtime::spawn_blocking(move || {
-            encode_packed_sweep(&safe.output.sweep, PackedSweepIdentity { generation })
-                .map_err(|error| TransferError::new("wire_encode_failed", error.to_string()))
-        })
-        .await
-        .map_err(|error| TransferError::new("backend_task_failed", error.to_string()))??;
-        let summary = validate_packed_sweep(&bytes)
-            .map_err(|error| TransferError::new("wire_validation_failed", error.to_string()))?;
-        if summary.source_kind != "nexrad_level2_chunks" {
-            return Err(TransferError::new(
-                "live_source_invalid",
-                format!(
-                    "live sweep encoded unexpected source {}",
-                    summary.source_kind
-                ),
-            ));
+        // The next backfill request asks for the volume before this one.
+        if !matches!(
+            history_request,
+            Some(ValidatedLiveHistoryRequest::After { .. })
+        ) {
+            prefetch.schedule(session, &site, &candidate.evidence, timeout);
         }
+        let (bytes, summary, safe) = encode_live_sweep(candidate, generation).await?;
         let evidence = Phase5LiveTransferEvidence {
             observation_id: summary.observation_id,
             source_kind: summary.source_kind,
             packed_bytes: bytes.len(),
             published_at_unix_ms: chrono::Utc::now().timestamp_millis(),
-            safe: safe_evidence,
+            safe,
         };
         Ok::<_, TransferError>(ChargedPhase5Work {
             bytes,
@@ -1064,6 +1241,99 @@ pub async fn request_phase5_live_sweep(
         .credit
         .complete_phase5_for_publish(generation, charged.evidence)?;
     Ok(Response::new(charged.bytes))
+}
+
+async fn acquire_requested_live_sweep(
+    token: GenerationToken,
+    site: &str,
+    fresh_only: bool,
+    history_request: Option<ValidatedLiveHistoryRequest>,
+    wait: Duration,
+    timeout: Duration,
+) -> Result<SafeSweepCandidate, TransferError> {
+    let client = PublicRadarClient::new()
+        .map_err(|error| TransferError::new("live_client_failed", error.to_string()))?;
+    let live = match history_request {
+        Some(ValidatedLiveHistoryRequest::After {
+            volume_index,
+            volume_started_at_unix_ms,
+        }) => {
+            LiveSweepSession::start_after(
+                client,
+                token,
+                site,
+                volume_index,
+                volume_started_at_unix_ms,
+            )
+            .await
+        }
+        Some(ValidatedLiveHistoryRequest::Before {
+            volume_index,
+            volume_started_at_unix_ms,
+        }) => {
+            LiveSweepSession::start_before(
+                client,
+                token,
+                site,
+                volume_index,
+                volume_started_at_unix_ms,
+            )
+            .await
+        }
+        None if !fresh_only => {
+            let latest = LiveSweepSession::start(client, token.clone(), site, false)
+                .await
+                .map_err(|error| TransferError::new("live_start_failed", error.to_string()))?;
+            return acquire_newest_complete_sweep(latest, token, site, wait, timeout).await;
+        }
+        None => LiveSweepSession::start(client, token, site, fresh_only).await,
+    }
+    .map_err(|error| TransferError::new("live_start_failed", error.to_string()))?;
+    acquire_live_sweep(live, wait, timeout).await
+}
+
+// How long the fallback to the previous volume looks for it before waiting
+// on the newest volume after all.
+const PREVIOUS_VOLUME_DISCOVERY: Duration = Duration::from_secs(5);
+
+/// The newest volume's safe sweep if its chunks already hold one; otherwise
+/// the previous volume's. A volume's lowest sweep takes the radar tens of
+/// seconds to record, so a Site opened just as a volume begins showed
+/// nothing until it finished. Polling for newer scans publishes the newest
+/// volume as soon as its safe sweep completes.
+async fn acquire_newest_complete_sweep(
+    mut latest: LiveSweepSession,
+    token: GenerationToken,
+    site: &str,
+    wait: Duration,
+    timeout: Duration,
+) -> Result<SafeSweepCandidate, TransferError> {
+    if let Some(candidate) = latest
+        .safe_sweep_from_listed_chunks()
+        .await
+        .map_err(|error| TransferError::new("live_sweep_failed", error.to_string()))?
+    {
+        return Ok(candidate);
+    }
+    let Some(latest_started) = latest.selected_started_at() else {
+        return acquire_live_sweep(latest, wait, timeout).await;
+    };
+    let client = PublicRadarClient::new()
+        .map_err(|error| TransferError::new("live_client_failed", error.to_string()))?;
+    let previous = LiveSweepSession::start_before(
+        client,
+        token,
+        site,
+        latest.target_volume_index(),
+        latest_started,
+    )
+    .await
+    .map_err(|error| TransferError::new("live_start_failed", error.to_string()))?;
+    match acquire_live_sweep(previous, PREVIOUS_VOLUME_DISCOVERY.min(wait), timeout).await {
+        Ok(candidate) => Ok(candidate),
+        // No usable previous volume: wait for the newest one after all.
+        Err(_) => acquire_live_sweep(latest, wait, timeout).await,
+    }
 }
 
 /// How long to wait for the target volume to be discovered. A short wait
@@ -1581,6 +1851,77 @@ fn percentile(sorted: &[f64], fraction: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn safe_evidence(site: &str, volume_index: u16, started_at: i64) -> SafeSweepEvidence {
+        SafeSweepEvidence {
+            generation: 7,
+            site: site.into(),
+            volume_index,
+            volume_started_at_unix_ms: started_at,
+            safe_sequence: 7,
+            safe_chunk_last_modified_unix_ms: started_at,
+            discovered_at_unix_ms: started_at,
+            decode_started_at_unix_ms: started_at,
+            decode_completed_at_unix_ms: started_at,
+            decoder_attempts: 1,
+            gap_observations: 0,
+            duplicate_observations: 0,
+            acquisition_delta: crate::acquisition::AcquisitionCounters::default(),
+        }
+    }
+
+    #[test]
+    fn a_prefetched_site_volume_serves_only_the_request_it_satisfies() {
+        let prefetched = safe_evidence("KTLX", 41, 1_000);
+        assert!(prefetch_satisfies(&prefetched, "KTLX", 42, 2_000));
+        // Another slot, another site, or not strictly older than the cursor.
+        assert!(!prefetch_satisfies(&prefetched, "KTLX", 43, 2_000));
+        assert!(!prefetch_satisfies(&prefetched, "KFWS", 42, 2_000));
+        assert!(!prefetch_satisfies(&prefetched, "KTLX", 42, 1_000));
+        // The ring wraps from slot 1 back to 999.
+        assert!(prefetch_satisfies(
+            &safe_evidence("KTLX", 999, 1_000),
+            "KTLX",
+            1,
+            2_000
+        ));
+    }
+
+    #[tokio::test]
+    async fn site_prefetches_serve_one_session_and_site_and_a_change_cancels_them() {
+        let prefetch = SiteHistoryPrefetch::default();
+        assert!(prefetch.take(1, "KTLX", 42).is_none());
+        let token = {
+            let mut state = prefetch.state.lock().unwrap();
+            for volume_index in [41, 40] {
+                state.entries.push(SitePrefetchEntry {
+                    volume_index,
+                    task: tauri::async_runtime::spawn(std::future::pending::<
+                        Result<SafeSweepCandidate, TransferError>,
+                    >()),
+                });
+            }
+            state.token.clone().unwrap()
+        };
+        assert!(prefetch.take(1, "KTLX", 42).is_some());
+        assert!(prefetch.take(1, "KTLX", 42).is_none());
+        let remaining = |prefetch: &SiteHistoryPrefetch| {
+            prefetch
+                .state
+                .lock()
+                .unwrap()
+                .entries
+                .iter()
+                .map(|entry| entry.volume_index)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(remaining(&prefetch), [40]);
+        assert!(token.is_current());
+        // Another site drops the rest and stops their downloads.
+        assert!(prefetch.take(1, "KFWS", 41).is_none());
+        assert!(remaining(&prefetch).is_empty());
+        assert!(!token.is_current());
+    }
     use std::sync::{
         Barrier,
         atomic::{AtomicUsize, Ordering},

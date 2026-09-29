@@ -24,7 +24,12 @@ const LIST_RESPONSE_LIMIT: usize = 2 * 1024 * 1024;
 const PROVIDER_RESPONSE_LIMIT: usize = 8 * 1024 * 1024;
 const HTTP_TIMEOUT: Duration = Duration::from_secs(15);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
-const MAX_INITIAL_VOLUME_PROBES: u64 = 64;
+// A sampled search uses at most 64 probes for a full 999-slot ring; the rest
+// of the bound leaves room for the sequential fallback.
+const MAX_INITIAL_VOLUME_PROBES: u64 = 128;
+// Ring slots probed at once while searching for the newest volume. About 20
+// sequential listings became two rounds of concurrent ones.
+const DISCOVERY_PROBES_PER_ROUND: usize = 32;
 const RADAR_SITE_CATALOG_JSON: &str = include_str!("../../src/data/radar-sites.json");
 
 #[derive(Debug, Deserialize)]
@@ -153,7 +158,7 @@ impl PublicRadarClient {
         // sites take hundreds of requests and tens of seconds to fail.
         let volume_indices = self.list_realtime_volume_indices(site).await?;
         let discovery_probes = AtomicU64::new(0);
-        let found = rotated_max(volume_indices.len(), |offset| {
+        let found = sampled_rotated_max(volume_indices.len(), |offset| {
             let volume_index = volume_indices[offset];
             let probe_number = discovery_probes.fetch_add(1, Ordering::Relaxed) + 1;
             async move {
@@ -718,6 +723,106 @@ fn parse_iem_times(bytes: &[u8]) -> Result<Vec<i64>, AcquisitionError> {
     Ok(times)
 }
 
+/// Runs `futures` concurrently on the current task and returns their outputs
+/// in order.
+pub(crate) async fn join_all<F: Future>(futures: Vec<F>) -> Vec<F::Output> {
+    let mut futures = futures.into_iter().map(Box::pin).collect::<Vec<_>>();
+    let mut outputs = futures
+        .iter()
+        .map(|_| None)
+        .collect::<Vec<Option<F::Output>>>();
+    std::future::poll_fn(|context| {
+        let mut pending = false;
+        for (future, output) in futures.iter_mut().zip(outputs.iter_mut()) {
+            if output.is_none() {
+                match future.as_mut().poll(context) {
+                    std::task::Poll::Ready(value) => *output = Some(value),
+                    std::task::Poll::Pending => pending = true,
+                }
+            }
+        }
+        if pending {
+            std::task::Poll::Pending
+        } else {
+            std::task::Poll::Ready(())
+        }
+    })
+    .await;
+    outputs
+        .into_iter()
+        .map(|output| output.expect("every joined future completed"))
+        .collect()
+}
+
+/// The newest element of a ring whose values rise to one rotation boundary,
+/// probed in concurrent rounds: up to `DISCOVERY_PROBES_PER_ROUND` evenly
+/// spread positions, then again between the newest value and the next probed
+/// value, which is older and so lies past the boundary. An empty slot breaks
+/// that reasoning, so any empty probe falls back to the sequential search.
+async fn sampled_rotated_max<F, Fut, V>(
+    element_count: usize,
+    probe: F,
+) -> Result<Option<usize>, AcquisitionError>
+where
+    F: Fn(usize) -> Fut,
+    Fut: Future<Output = Result<Option<V>, AcquisitionError>>,
+    V: PartialOrd + Clone,
+{
+    if element_count == 0 {
+        return Ok(None);
+    }
+    let mut probed = BTreeMap::<usize, V>::new();
+    let (mut start, mut end) = (0usize, element_count - 1);
+    loop {
+        let unprobed = (start..=end)
+            .filter(|position| !probed.contains_key(position))
+            .collect::<Vec<_>>();
+        if unprobed.is_empty() {
+            break;
+        }
+        let picks = spread(&unprobed, DISCOVERY_PROBES_PER_ROUND);
+        let values = join_all(picks.iter().map(|position| probe(*position)).collect()).await;
+        for (position, value) in picks.into_iter().zip(values) {
+            match value? {
+                Some(value) => {
+                    probed.insert(position, value);
+                }
+                None => return rotated_max(element_count, probe).await,
+            }
+        }
+        let newest = newest_position(&probed).expect("every probe held a value");
+        start = newest;
+        end = probed
+            .range(newest + 1..)
+            .next()
+            .map_or(element_count - 1, |(position, _)| position - 1);
+    }
+    Ok(newest_position(&probed))
+}
+
+fn newest_position<V: PartialOrd>(probed: &BTreeMap<usize, V>) -> Option<usize> {
+    let mut newest = None::<(usize, &V)>;
+    for (position, value) in probed {
+        if newest.is_none_or(|(_, current)| value > current) {
+            newest = Some((*position, value));
+        }
+    }
+    newest.map(|(position, _)| position)
+}
+
+/// Up to `count` of `positions`, evenly spread and including both ends.
+fn spread(positions: &[usize], count: usize) -> Vec<usize> {
+    if positions.len() <= count {
+        return positions.to_vec();
+    }
+    let last = positions.len() - 1;
+    let mut picks = (0..count)
+        .map(|step| positions[step * last / (count - 1)])
+        .collect::<Vec<_>>();
+    picks.dedup();
+    picks
+}
+
 async fn rotated_max<F, Fut, V>(
     element_count: usize,
     mut probe: F,
@@ -1020,6 +1125,40 @@ mod tests {
             "dense ring used {} probes",
             probes.get()
         );
+    }
+
+    #[tokio::test]
+    async fn sampled_search_finds_the_newest_slot_in_two_concurrent_rounds() {
+        for len in [1usize, 2, 31, 32, 33, 64, 500, 999] {
+            for pivot in [0, 1, len / 3, len / 2, len.saturating_sub(2), len - 1]
+                .into_iter()
+                .filter(|pivot| *pivot < len)
+            {
+                // Values rise from the slot after the pivot around to the pivot.
+                let values = (0..len)
+                    .map(|slot| Some((slot + len - pivot - 1) % len))
+                    .collect::<Vec<_>>();
+                let probes = std::cell::Cell::new(0);
+                let found = sampled_rotated_max(len, |index| {
+                    probes.set(probes.get() + 1);
+                    std::future::ready(Ok(values[index]))
+                })
+                .await
+                .unwrap();
+                assert_eq!(found, Some(pivot), "len {len}, pivot {pivot}");
+                assert!(probes.get() <= 64, "len {len} used {} probes", probes.get());
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn sampled_search_falls_back_to_the_sequential_search_on_an_empty_slot() {
+        let values = [None, Some(2), None, None, Some(1)];
+        let found =
+            sampled_rotated_max(values.len(), |index| std::future::ready(Ok(values[index])))
+                .await
+                .unwrap();
+        assert_eq!(found, Some(1));
     }
 
     #[tokio::test]

@@ -16,6 +16,10 @@ use thiserror::Error;
 use tokio::time::{Instant, sleep};
 
 const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(1);
+// A lowest sweep usually completes within the first seven or so chunks, so
+// one window covers it in one round trip; a safe sweep found mid-window
+// leaves at most seven extra chunks downloaded and unused.
+const CHUNK_DOWNLOAD_WINDOW: usize = 8;
 
 #[derive(Debug, Clone, Default)]
 pub struct GenerationClock {
@@ -296,6 +300,20 @@ impl LiveSweepSession {
         &self.site
     }
 
+    /// The start time of the volume this session has selected, once its
+    /// chunks have been listed.
+    pub fn selected_started_at(&self) -> Option<i64> {
+        self.selected_started_at
+    }
+
+    /// One pass over the chunks listed now: the safe sweep if they already
+    /// hold one, without waiting for more to arrive.
+    pub async fn safe_sweep_from_listed_chunks(
+        &mut self,
+    ) -> Result<Option<SafeSweepCandidate>, LivePipelineError> {
+        self.poll_chunks_once(true).await
+    }
+
     pub fn target_volume_index(&self) -> u16 {
         self.target_volume_index
     }
@@ -447,20 +465,34 @@ impl LiveSweepSession {
             candidates.retain(|(_, _, candidate)| *candidate == started);
         }
         candidates.sort_by_key(|(sequence, _, _)| *sequence);
-        for (_, object, _) in candidates {
-            if self.downloaded_keys.contains(&object.key) {
-                continue;
+        candidates.retain(|(_, object, _)| !self.downloaded_keys.contains(&object.key));
+        // Chunks download a window at a time and are ingested in sequence, so
+        // a volume costs a few round trips rather than one per chunk.
+        let mut downloaded = Vec::new();
+        for (index, (_, object, _)) in candidates.iter().enumerate() {
+            if index % CHUNK_DOWNLOAD_WINDOW == 0 {
+                let window =
+                    &candidates[index..(index + CHUNK_DOWNLOAD_WINDOW).min(candidates.len())];
+                downloaded = crate::acquisition::join_all(
+                    window
+                        .iter()
+                        .map(|(_, object, _)| {
+                            self.client.download_realtime_chunk(object, &self.site)
+                        })
+                        .collect(),
+                )
+                .await;
+                downloaded.reverse();
             }
-            let (metadata, bytes) = self
-                .client
-                .download_realtime_chunk(&object, &self.site)
-                .await?;
+            let (metadata, bytes) = downloaded
+                .pop()
+                .expect("a download for every chunk in the window")?;
             self.token.ensure_current()?;
             let previous_contiguous = self.assembler.contiguous_through();
             let outcome = self
                 .assembler
                 .ingest(self.token.generation(), metadata, bytes)?;
-            self.downloaded_keys.insert(object.key);
+            self.downloaded_keys.insert(object.key.clone());
             let contiguous_advanced = contiguous_prefix_advanced(previous_contiguous, &outcome);
             match outcome {
                 ChunkIngestOutcome::Accepted {
@@ -627,11 +659,11 @@ impl SweepFingerprint {
     }
 }
 
-fn next_volume_index(index: u16) -> u16 {
+pub(crate) fn next_volume_index(index: u16) -> u16 {
     if index == 999 { 1 } else { index + 1 }
 }
 
-fn previous_volume_index(index: u16) -> u16 {
+pub(crate) fn previous_volume_index(index: u16) -> u16 {
     if index == 1 { 999 } else { index - 1 }
 }
 
