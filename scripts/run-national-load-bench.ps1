@@ -26,7 +26,11 @@ for ($run = 0; $run -le $Runs; $run++) {
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
     finally {
-        if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+        # Close the window, not the process, so the stored camera is flushed.
+        if (-not $process.HasExited) {
+            $null = $process.CloseMainWindow()
+            if (-not $process.WaitForExit(15000)) { Stop-Process -Id $process.Id -Force }
+        }
         Remove-Item Env:MISTR_CDP_PORT -ErrorAction SilentlyContinue
     }
 }

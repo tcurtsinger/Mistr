@@ -34,6 +34,9 @@ const evaluate = async (expression) => {
   return reply.result.result.value;
 };
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+// MISTR_BENCH_NO_PROFILE=1 keeps the sampling profiler from skewing
+// load-time frame pacing.
+const profileLoad = process.env.MISTR_BENCH_NO_PROFILE !== "1";
 
 function summarizeProfile(profile) {
   const byId = new Map(profile.nodes.map((node) => [node.id, node]));
@@ -94,7 +97,16 @@ try {
   // The app was just launched on National; keep the next launch there too.
   await evaluate(`${nationalCamera}; true`);
   await evaluate(`(() => {
-    globalThis.__bench = { longTasks: [], frames: {} };
+    globalThis.__bench = { longTasks: [], frames: {}, loadFrameMs: [] };
+    // Frame pacing while history loads: every animation-frame interval.
+    let lastFrame;
+    const pace = (time) => {
+      if (lastFrame !== undefined) __bench.loadFrameMs.push(time - lastFrame);
+      lastFrame = time;
+      const count = globalThis.__MISTR_NATIONAL_PHASE4__?.report?.()?.history?.retained?.length ?? 0;
+      if (count < 60 && performance.now() < 240000) requestAnimationFrame(pace);
+    };
+    requestAnimationFrame(pace);
     new PerformanceObserver((list) => { for (const entry of list.getEntries()) __bench.longTasks.push(Math.round(entry.duration)); })
       .observe({ type: "longtask", buffered: true });
     const benchTimer = setInterval(() => {
@@ -105,14 +117,17 @@ try {
     return true;
   })()`);
   await sleep(3_000);
-  const uploadsBefore = await evaluate(`__MISTR_NATIONAL_PHASE4__?.report()?.renderer?.uploadCount ?? 0`);
-  await cdp.call("Profiler.start");
-  await sleep(15_000);
-  const loadProfile = summarizeProfile((await cdp.call("Profiler.stop")).result.profile);
-  const uploadsAfter = await evaluate(`__MISTR_NATIONAL_PHASE4__?.report()?.renderer?.uploadCount ?? 0`);
-  loadProfile.chunksUploaded = uploadsAfter - uploadsBefore;
-  loadProfile.busyMsPerChunk = Math.round(loadProfile.busyMs / Math.max(1, loadProfile.chunksUploaded) * 1000) / 1000;
-  loadProfile.getErrorMsPerChunk = Math.round(loadProfile.getErrorMs / Math.max(1, loadProfile.chunksUploaded) * 1000) / 1000;
+  let loadProfile = null;
+  if (profileLoad) {
+    const uploadsBefore = await evaluate(`__MISTR_NATIONAL_PHASE4__?.report()?.renderer?.uploadCount ?? 0`);
+    await cdp.call("Profiler.start");
+    await sleep(15_000);
+    loadProfile = summarizeProfile((await cdp.call("Profiler.stop")).result.profile);
+    const uploadsAfter = await evaluate(`__MISTR_NATIONAL_PHASE4__?.report()?.renderer?.uploadCount ?? 0`);
+    loadProfile.chunksUploaded = uploadsAfter - uploadsBefore;
+    loadProfile.busyMsPerChunk = Math.round(loadProfile.busyMs / Math.max(1, loadProfile.chunksUploaded) * 1000) / 1000;
+    loadProfile.getErrorMsPerChunk = Math.round(loadProfile.getErrorMs / Math.max(1, loadProfile.chunksUploaded) * 1000) / 1000;
+  }
   const load = await evaluate(`(async () => {
     const end = performance.now() + 200000;
     while ((__MISTR_NATIONAL_PHASE4__?.report()?.history?.retained?.length ?? 0) < 60 && performance.now() < end) {
@@ -129,7 +144,19 @@ try {
       if (pause) staging.push(pause.atUnixMs - trace[index].atUnixMs);
     }
     staging.sort((a, b) => a - b);
+    const paced = [...__bench.loadFrameMs].sort((a, b) => a - b);
+    const q = (p) => paced.length ? Math.round(paced[Math.min(paced.length - 1, Math.floor(paced.length * p))] * 10) / 10 : null;
     return {
+      loadFramePacing: {
+        frames: paced.length,
+        p50: q(0.5),
+        p95: q(0.95),
+        p99: q(0.99),
+        max: paced.length ? Math.round(paced.at(-1) * 10) / 10 : null,
+        // At 120 Hz a refresh is 8.3 ms: over 12.5 ms means at least one was missed.
+        missedRefresh: paced.filter((ms) => ms > 12.5).length,
+        over33ms: paced.filter((ms) => ms > 33.4).length,
+      },
       frameAtMs: { 1: pick(1), 2: pick(2), 20: pick(20), 40: pick(40), 60: pick(60) },
       stagingMsPerFrame: staging.length
         ? { frames: staging.length, p50: staging[Math.floor(staging.length / 2)], p90: staging[Math.floor(staging.length * 0.9)] }
@@ -165,16 +192,17 @@ try {
   console.log(JSON.stringify({
     label,
     frameAtMs: load.frameAtMs,
+    loadFramePacing: load.loadFramePacing,
     longTasks: load.longTasks,
     uploads: load.uploadCount,
     stagingMsPerFrame: load.stagingMsPerFrame,
-    chunksInWindow: loadProfile.chunksUploaded,
-    busyMsPerChunk: loadProfile.busyMsPerChunk,
-    getErrorMsPerChunk: loadProfile.getErrorMsPerChunk,
-    loadBusyMs: loadProfile.busyMs,
-    loadGetErrorMs: loadProfile.getErrorMs,
-    loadTop: loadProfile.top.slice(0, 8),
-    loadCallers: loadProfile.callers,
+    chunksInWindow: loadProfile?.chunksUploaded,
+    busyMsPerChunk: loadProfile?.busyMsPerChunk,
+    getErrorMsPerChunk: loadProfile?.getErrorMsPerChunk,
+    loadBusyMs: loadProfile?.busyMs,
+    loadGetErrorMs: loadProfile?.getErrorMs,
+    loadTop: loadProfile?.top.slice(0, 8),
+    loadCallers: loadProfile?.callers,
     playback: frames,
     renderBusyMs: renderProfile.busyMs,
     renderTop: renderProfile.top.slice(0, 8),

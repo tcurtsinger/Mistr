@@ -591,18 +591,23 @@ impl NationalHistoryStore {
 pub struct NationalHistoryState {
     inner: Arc<Mutex<NationalHistoryStore>>,
     point_lookup_gate: Arc<Semaphore>,
-    // The next backfill predecessor, downloaded and decoded while the
+    // The next backfill predecessors, downloaded and decoded while the
     // frontend uploads the one just staged, so backfill is not one network
     // round trip plus one decode slower per frame than the GPU upload.
-    predecessor_prefetch: Arc<Mutex<Option<PredecessorPrefetch>>>,
+    predecessor_prefetches: Arc<Mutex<PredecessorPrefetches>>,
 }
+
+// Download plus decode takes about 300-650 ms per predecessor, and the
+// frontend stages one in about 275 ms. With one prefetch, every frame still
+// waited about 170 ms on the network; three in flight stay ahead of staging.
+const PREDECESSOR_PREFETCH_DEPTH: usize = 3;
 
 impl Default for NationalHistoryState {
     fn default() -> Self {
         Self {
             inner: Arc::new(Mutex::new(NationalHistoryStore::default())),
             point_lookup_gate: Arc::new(Semaphore::new(1)),
-            predecessor_prefetch: Arc::new(Mutex::new(None)),
+            predecessor_prefetches: Arc::new(Mutex::new(PredecessorPrefetches::default())),
         }
     }
 }
@@ -622,64 +627,120 @@ struct PrefetchedPredecessor {
     counters: MrmsAcquisitionCounters,
 }
 
-impl NationalHistoryState {
-    fn take_predecessor_prefetch(
-        &self,
-        generation: u64,
-        object_key: &str,
-    ) -> Option<tauri::async_runtime::JoinHandle<Result<PrefetchedPredecessor, TransferError>>>
-    {
-        let mut slot = self.predecessor_prefetch.lock().ok()?;
-        let prefetch = slot.take()?;
-        if prefetch.generation == generation && prefetch.object_key == object_key {
-            return Some(prefetch.task);
-        }
-        prefetch.task.abort();
-        None
+type PrefetchTask = tauri::async_runtime::JoinHandle<Result<PrefetchedPredecessor, TransferError>>;
+
+/// Predecessor downloads in flight or finished, each for one generation and
+/// object. Anything dropped from the set is aborted.
+#[derive(Debug, Default)]
+struct PredecessorPrefetches {
+    entries: Vec<PredecessorPrefetch>,
+}
+
+impl PredecessorPrefetches {
+    /// Removes and returns the prefetch of `object_key`, aborting any left
+    /// from another generation.
+    fn take(&mut self, generation: u64, object_key: &str) -> Option<PrefetchTask> {
+        self.retain(|prefetch| prefetch.generation == generation);
+        let index = self
+            .entries
+            .iter()
+            .position(|prefetch| prefetch.object_key == object_key)?;
+        Some(self.entries.remove(index).task)
     }
 
-    fn clear_predecessor_prefetch(&self) {
-        if let Ok(mut slot) = self.predecessor_prefetch.lock()
-            && let Some(prefetch) = slot.take()
-        {
-            prefetch.task.abort();
-        }
-    }
-
-    /// Starts downloading and decoding `object`, the predecessor after the
-    /// one just staged. Its network and decoder work is counted when it
-    /// completes, whether or not a later prepare uses it.
-    fn prefetch_predecessor(
-        &self,
-        object: MrmsObject,
+    /// Keeps only the prefetches of `window` in `generation`, aborting the
+    /// rest, and returns the window objects not yet prefetched, in order.
+    fn retain_window<'a>(
+        &mut self,
         generation: u64,
-        token: crate::live_pipeline::GenerationToken,
-    ) {
-        let object_key = object.key.clone();
-        let state = self.clone();
-        let task = tauri::async_runtime::spawn(async move {
-            let client = MrmsClient::new().map_err(mrms_error)?;
-            let (frame, download_ms, decode_and_level_ms) =
-                acquire_overview(&client, object, generation, &token, false).await?;
-            let counters = client.counters();
-            add_acquisition_activity(&mut *lock_store(&state)?, counters, 1);
-            Ok(PrefetchedPredecessor {
-                frame,
-                download_ms,
-                decode_and_level_ms,
-                counters,
-            })
+        window: &'a [MrmsObject],
+    ) -> Vec<&'a MrmsObject> {
+        self.retain(|prefetch| {
+            prefetch.generation == generation
+                && window
+                    .iter()
+                    .any(|object| object.key == prefetch.object_key)
         });
-        let Ok(mut slot) = self.predecessor_prefetch.lock() else {
-            task.abort();
+        window
+            .iter()
+            .filter(|object| {
+                !self
+                    .entries
+                    .iter()
+                    .any(|prefetch| prefetch.object_key == object.key)
+            })
+            .collect()
+    }
+
+    fn push(&mut self, prefetch: PredecessorPrefetch) {
+        self.entries.push(prefetch);
+    }
+
+    fn clear(&mut self) {
+        self.retain(|_| false);
+    }
+
+    fn retain(&mut self, keep: impl Fn(&PredecessorPrefetch) -> bool) {
+        self.entries.retain(|prefetch| {
+            let kept = keep(prefetch);
+            if !kept {
+                prefetch.task.abort();
+            }
+            kept
+        });
+    }
+}
+
+impl NationalHistoryState {
+    fn take_predecessor_prefetch(&self, generation: u64, object_key: &str) -> Option<PrefetchTask> {
+        self.predecessor_prefetches
+            .lock()
+            .ok()?
+            .take(generation, object_key)
+    }
+
+    fn clear_predecessor_prefetches(&self) {
+        if let Ok(mut prefetches) = self.predecessor_prefetches.lock() {
+            prefetches.clear();
+        }
+    }
+
+    /// Downloads and decodes the next backfill predecessors, `window`, in
+    /// the background, and aborts prefetches outside it. Each one's network
+    /// and decoder work is counted when it completes, whether or not a later
+    /// prepare uses it.
+    fn prefetch_predecessors(
+        &self,
+        window: &[MrmsObject],
+        generation: u64,
+        token: &crate::live_pipeline::GenerationToken,
+    ) {
+        let Ok(mut prefetches) = self.predecessor_prefetches.lock() else {
             return;
         };
-        if let Some(previous) = slot.replace(PredecessorPrefetch {
-            generation,
-            object_key,
-            task,
-        }) {
-            previous.task.abort();
+        for object in prefetches.retain_window(generation, window) {
+            let object = object.clone();
+            let object_key = object.key.clone();
+            let state = self.clone();
+            let token = token.clone();
+            let task = tauri::async_runtime::spawn(async move {
+                let client = MrmsClient::new().map_err(mrms_error)?;
+                let (frame, download_ms, decode_and_level_ms) =
+                    acquire_overview(&client, object, generation, &token, false).await?;
+                let counters = client.counters();
+                add_acquisition_activity(&mut *lock_store(&state)?, counters, 1);
+                Ok(PrefetchedPredecessor {
+                    frame,
+                    download_ms,
+                    decode_and_level_ms,
+                    counters,
+                })
+            });
+            prefetches.push(PredecessorPrefetch {
+                generation,
+                object_key,
+                task,
+            });
         }
     }
 }
@@ -771,7 +832,7 @@ pub async fn prepare_national_history_current(
     generation: u64,
 ) -> Result<NationalHistoryPrepareReport, TransferError> {
     let token = broker.live_generation_token(session, TransferLane::National, generation)?;
-    state.clear_predecessor_prefetch();
+    state.clear_predecessor_prefetches();
     let client = MrmsClient::new().map_err(mrms_error)?;
     let discovery_started = Instant::now();
     let retained_limit = lock_store(&state)?.retained_limit;
@@ -787,12 +848,19 @@ pub async fn prepare_national_history_current(
     let backfill_candidates = objects.into_iter().rev().collect::<VecDeque<_>>();
     let (frame, download_ms, decode_and_level_ms) =
         acquire_overview(&client, current, generation, &token, true).await?;
+    // Backfill starts downloading while the frontend uploads the current one.
+    let prefetch_window = backfill_candidates
+        .iter()
+        .take(PREDECESSOR_PREFETCH_DEPTH)
+        .cloned()
+        .collect::<Vec<_>>();
     {
         let mut store = lock_store(&state)?;
         store.reset(generation, backfill_candidates);
         add_acquisition_activity(&mut store, client.counters(), 1);
         store.stage(NationalHistoryMutationKind::Current, frame.clone())?;
     }
+    state.prefetch_predecessors(&prefetch_window, generation, &token);
     prepare_report(
         &state,
         NationalHistoryMutationKind::Current,
@@ -871,16 +939,20 @@ pub async fn prepare_national_history_predecessor(
         }
     };
     token.ensure_current().map_err(stale_error)?;
-    let next_candidate = {
+    let prefetch_window = {
         let mut store = lock_store(&state)?;
         store.ensure_generation(generation)?;
         store.stage(NationalHistoryMutationKind::Predecessor, frame.clone())?;
         // The staged frame is still the front candidate until it commits.
-        store.backfill_candidates.get(1).cloned()
+        store
+            .backfill_candidates
+            .iter()
+            .skip(1)
+            .take(PREDECESSOR_PREFETCH_DEPTH)
+            .cloned()
+            .collect::<Vec<_>>()
     };
-    if let Some(next) = next_candidate {
-        state.prefetch_predecessor(next, generation, token);
-    }
+    state.prefetch_predecessors(&prefetch_window, generation, &token);
     prepare_report(
         &state,
         NationalHistoryMutationKind::Predecessor,
@@ -1747,6 +1819,105 @@ mod tests {
     use crate::mrms::{MRMS_HOST, MrmsGridDefinition, MrmsRowOrientation, MrmsValueEncoding};
     use crate::packed_grid::{NumericGridLevel, PackedGridManifestSummary};
     use std::collections::BTreeMap;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    struct SetOnDrop(Arc<AtomicBool>);
+
+    impl Drop for SetOnDrop {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+
+    /// A prefetch that never finishes; `aborted` turns true once its task is
+    /// aborted and dropped.
+    fn pending_prefetch(
+        generation: u64,
+        object_key: &str,
+    ) -> (PredecessorPrefetch, Arc<AtomicBool>) {
+        let aborted = Arc::new(AtomicBool::new(false));
+        let guard = SetOnDrop(aborted.clone());
+        let task = tauri::async_runtime::spawn(async move {
+            let _guard = guard;
+            std::future::pending::<Result<PrefetchedPredecessor, TransferError>>().await
+        });
+        let prefetch = PredecessorPrefetch {
+            generation,
+            object_key: object_key.into(),
+            task,
+        };
+        (prefetch, aborted)
+    }
+
+    fn becomes_true(flag: &AtomicBool) -> bool {
+        for _ in 0..400 {
+            if flag.load(Ordering::SeqCst) {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        false
+    }
+
+    fn candidate(key: &str) -> MrmsObject {
+        MrmsObject {
+            key: key.into(),
+            observation_time_unix_ms: 0,
+            last_modified_unix_ms: 0,
+            size_bytes: 0,
+            etag: None,
+        }
+    }
+
+    #[test]
+    fn predecessor_prefetches_follow_the_backfill_window() {
+        let mut prefetches = PredecessorPrefetches::default();
+        let (staged, staged_aborted) = pending_prefetch(7, "a");
+        let (next, next_aborted) = pending_prefetch(7, "b");
+        let (stale, stale_aborted) = pending_prefetch(6, "c");
+        prefetches.push(staged);
+        prefetches.push(next);
+        prefetches.push(stale);
+
+        let window = [candidate("b"), candidate("c"), candidate("d")];
+        let missing = prefetches.retain_window(7, &window);
+
+        // "a" left the window and "c" belongs to an older generation.
+        let missing = missing
+            .iter()
+            .map(|object| object.key.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(missing, ["c", "d"]);
+        assert!(becomes_true(&staged_aborted));
+        assert!(becomes_true(&stale_aborted));
+        assert!(!next_aborted.load(Ordering::SeqCst));
+        prefetches.clear();
+        assert!(becomes_true(&next_aborted));
+    }
+
+    #[test]
+    fn taking_a_predecessor_prefetch_keeps_the_ones_behind_it() {
+        let mut prefetches = PredecessorPrefetches::default();
+        let (front, front_aborted) = pending_prefetch(7, "a");
+        let (behind, behind_aborted) = pending_prefetch(7, "b");
+        let (stale, stale_aborted) = pending_prefetch(6, "a");
+        prefetches.push(stale);
+        prefetches.push(front);
+        prefetches.push(behind);
+
+        let taken = prefetches
+            .take(7, "a")
+            .expect("the current generation's prefetch");
+        assert!(becomes_true(&stale_aborted));
+        assert!(prefetches.take(7, "z").is_none());
+        assert!(!behind_aborted.load(Ordering::SeqCst));
+        assert!(!front_aborted.load(Ordering::SeqCst));
+        assert_eq!(prefetches.entries.len(), 1);
+        taken.abort();
+        prefetches.clear();
+        assert!(becomes_true(&front_aborted));
+        assert!(becomes_true(&behind_aborted));
+    }
 
     #[test]
     fn chunk_batch_envelope_preserves_order_and_bounded_payloads() {
@@ -1845,7 +2016,7 @@ mod tests {
             let state = NationalHistoryState {
                 inner: Arc::new(Mutex::new(store)),
                 point_lookup_gate: Arc::new(Semaphore::new(1)),
-                predecessor_prefetch: Arc::new(Mutex::new(None)),
+                predecessor_prefetches: Arc::new(Mutex::new(PredecessorPrefetches::default())),
             };
             let report = retry_prepare_report(&state, kind, retried).unwrap();
             assert_eq!(report.kind, kind);
