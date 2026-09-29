@@ -229,6 +229,7 @@ function historyFixture() {
     haloHeight: 1,
     encodedLength: 178,
     payloadSha256: "cd".repeat(32),
+    drawsNothing: false,
   };
   const manifest: PackedGridManifest = {
     schemaVersion: 1,

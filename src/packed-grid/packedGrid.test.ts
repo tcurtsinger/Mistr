@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
@@ -18,6 +19,19 @@ const CHUNK_PATH = new URL(
 
 function fixture(path: URL) {
   return Uint8Array.from(readFileSync(path));
+}
+
+/** The fixture chunk with `codes` filling its payload, rehashed. */
+function chunkWithPayload(codes: (index: number) => number, flags: number) {
+  const bytes = fixture(CHUNK_PATH);
+  const view = new DataView(bytes.buffer);
+  const payloadOffset = view.getUint32(128, false);
+  for (let index = 0; payloadOffset + index * 2 < bytes.length; index += 1) {
+    view.setUint16(payloadOffset + index * 2, codes(index), false);
+  }
+  bytes.set(createHash("sha256").update(bytes.subarray(payloadOffset)).digest(), 136);
+  bytes[113] = flags;
+  return bytes;
 }
 
 describe("PackedGrid v1 cross-language wire", () => {
@@ -68,12 +82,14 @@ describe("PackedGrid v1 cross-language wire", () => {
       expect.objectContaining({ code: "invalid_descriptor_section" }),
     );
 
-    const reserved = fixture(MANIFEST_PATH);
-    const reservedView = new DataView(reserved.buffer);
-    reserved[reservedView.getUint32(152, false) + 68] = 1;
-    expect(() => parsePackedGridManifest(reserved)).toThrowError(
-      expect.objectContaining({ code: "invalid_descriptor_section" }),
-    );
+    for (const [offset, value] of [[68, 2], [69, 1]]) {
+      const reserved = fixture(MANIFEST_PATH);
+      const reservedView = new DataView(reserved.buffer);
+      reserved[reservedView.getUint32(152, false) + offset] = value;
+      expect(() => parsePackedGridManifest(reserved)).toThrowError(
+        expect.objectContaining({ code: "invalid_descriptor_section" }),
+      );
+    }
 
     const timestamp = fixture(MANIFEST_PATH);
     const timestampView = new DataView(timestamp.buffer);
@@ -93,6 +109,24 @@ describe("PackedGrid v1 cross-language wire", () => {
     const payload = fixture(CHUNK_PATH);
     payload[payload.length - 1] ^= 1;
     await expect(parsePackedGridChunk(payload)).rejects.toMatchObject({ code: "hash_mismatch" });
+  });
+
+  it("reads the draws-nothing mark only when the payload backs it", async () => {
+    const manifestBytes = fixture(MANIFEST_PATH);
+    const descriptorOffset = new DataView(manifestBytes.buffer).getUint32(152, false);
+    manifestBytes[descriptorOffset + 72 + 68] = 1;
+    const manifest = parsePackedGridManifest(manifestBytes);
+    expect(manifest.chunks.map((chunk) => chunk.drawsNothing).slice(0, 3)).toEqual([false, true, false]);
+
+    const empty = await parsePackedGridChunk(chunkWithPayload((index) => (index % 2 ? 9000 : 0), 1));
+    expect(empty.descriptor.drawsNothing).toBe(true);
+    // Unmarked promises nothing: an empty chunk may still be sent.
+    const unmarked = await parsePackedGridChunk(chunkWithPayload(() => 0, 0));
+    expect(unmarked.descriptor.drawsNothing).toBe(false);
+    await expect(parsePackedGridChunk(chunkWithPayload((index) => (index === 500 ? 10_000 : 0), 1)))
+      .rejects.toMatchObject({ code: "invalid_encoding" });
+    await expect(parsePackedGridChunk(chunkWithPayload(() => 0, 2)))
+      .rejects.toMatchObject({ code: "invalid_record_kind" });
   });
 
   it("rejects a valid chunk paired with the wrong manifest identity", async () => {

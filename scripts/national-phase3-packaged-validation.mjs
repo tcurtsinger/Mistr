@@ -1,7 +1,9 @@
 // Native-residency contract (owner decision, 2026-08-04): every retained
 // observation is one complete-domain full-resolution presentation — 392
 // chunks at factor 1. There is no coarser level, no viewport refinement, and
-// no fallback presentation in the product path.
+// no fallback presentation in the product path. Chunks marked as drawing
+// nothing (2026-09-29) are complete without transfer, so coverage, receipts,
+// and residency count only the drawable ones.
 const TARGET_BYTES = 1280 * 1024 * 1024;
 const HARD_CEILING_BYTES = 1536 * 1024 * 1024;
 const NATIVE_CHUNKS = 392;
@@ -16,13 +18,17 @@ export function validateNationalPhase3Acceptance(report) {
   const overviewWorkingSet = overview?.workingSet;
   const overviewReceipt = overviewWorkingSet?.receipt;
   const overviewRenderer = overview?.renderer;
+  const manifestChunks = overviewWorkingSet?.manifest?.chunks;
+  const drawable = Array.isArray(manifestChunks) && manifestChunks.every((chunk) => typeof chunk?.drawsNothing === "boolean")
+    ? manifestChunks.filter((chunk) => !chunk.drawsNothing).length
+    : null;
   if (!/^CONUS\/MergedBaseReflectivityQC_00\.50\/\d{8}\/MRMS_MergedBaseReflectivityQC_00\.50_\d{8}-\d{6}\.grib2\.gz$/.test(preparation?.objectKey ?? "")) failures.push("exact NOAA object identity");
   if (!/^[0-9a-f]{64}$/.test(preparation?.compressedSha256 ?? "")) failures.push("compressed content hash");
   if (!(preparation?.compressedBytes > 0 && preparation?.retainedBackendBytes >= 49_000_000)) failures.push("bounded retained exact grid");
-  if (overviewWorkingSet?.manifest?.presentationFactor !== 1 || overviewWorkingSet?.manifest?.chunks?.length !== NATIVE_CHUNKS) failures.push("complete native manifest");
-  if (overviewWorkingSet?.coverage?.kind !== "complete_domain" || overviewWorkingSet?.chunkCount !== NATIVE_CHUNKS) failures.push("complete native coverage");
-  if (overviewReceipt?.presentationFactor !== 1 || overviewReceipt?.coverageKind !== "complete_domain" || overviewReceipt?.requiredChunkCount !== NATIVE_CHUNKS) failures.push("native paint receipt");
-  if (overviewRenderer?.status !== "painted" || overviewRenderer?.coverageComplete !== true || overviewRenderer?.residentChunkCount !== NATIVE_CHUNKS) failures.push("native renderer completion");
+  if (overviewWorkingSet?.manifest?.presentationFactor !== 1 || manifestChunks?.length !== NATIVE_CHUNKS || drawable === null) failures.push("complete native manifest");
+  if (overviewWorkingSet?.coverage?.kind !== "complete_domain" || overviewWorkingSet?.chunkCount !== drawable) failures.push("complete native coverage");
+  if (overviewReceipt?.presentationFactor !== 1 || overviewReceipt?.coverageKind !== "complete_domain" || overviewReceipt?.requiredChunkCount !== drawable) failures.push("native paint receipt");
+  if (overviewRenderer?.status !== "painted" || overviewRenderer?.coverageComplete !== true || overviewRenderer?.residentChunkCount !== drawable) failures.push("native renderer completion");
   if (overviewReceipt?.generation !== preparation?.generation || overviewReceipt?.observationTimeUnixMs !== preparation?.observationTimeUnixMs || overviewReceipt?.contentSha256 !== preparation?.compressedSha256) failures.push("native identity chain");
   if (!(overviewRenderer?.gpuResourceBytes > 0 && overviewRenderer.gpuResourceBytes < TARGET_BYTES && overviewRenderer.peakGpuResourceBytes < HARD_CEILING_BYTES)) failures.push("GPU memory ceiling");
   if (!(overviewRenderer?.maximumUploadSliceMs >= 0 && overviewRenderer.maximumUploadSliceMs <= UPLOAD_SLICE_LONG_TASK_CEILING_MS)) failures.push("upload slice long-task ceiling");
@@ -36,11 +42,11 @@ export function validateNationalPhase3Acceptance(report) {
   const detail = report.detail;
   const detailReceipt = detail?.workingSet?.receipt;
   if (detail?.workingSet?.manifest?.presentationFactor !== 1 || detail?.workingSet?.coverage?.kind !== "complete_domain") failures.push("camera-independent native presentation");
-  if (detail?.workingSet?.chunkCount !== NATIVE_CHUNKS) failures.push("complete native chunk set");
-  if (detailReceipt?.presentationFactor !== 1 || detailReceipt?.coverageKind !== "complete_domain" || detailReceipt?.requiredChunkCount !== NATIVE_CHUNKS) failures.push("camera-move paint receipt stability");
+  if (detail?.workingSet?.chunkCount !== drawable) failures.push("complete native chunk set");
+  if (detailReceipt?.presentationFactor !== 1 || detailReceipt?.coverageKind !== "complete_domain" || detailReceipt?.requiredChunkCount !== drawable) failures.push("camera-move paint receipt stability");
   if (detailReceipt?.observationId !== overviewReceipt?.observationId || detailReceipt?.generation !== overviewReceipt?.generation) failures.push("refinement identity stability");
   if (
-    detail?.renderer?.residentChunkCount !== NATIVE_CHUNKS
+    detail?.renderer?.residentChunkCount !== drawable
     || detail?.renderer?.fallbackChunkCount !== 0
     || detail?.renderer?.coverageComplete !== true
   ) failures.push("single native presentation without fallback");
@@ -55,7 +61,7 @@ export function validateNationalPhase3Acceptance(report) {
   if (reset?.receipt?.observationId !== detailReceipt?.observationId || reset?.receipt?.presentationFactor !== detailReceipt?.presentationFactor || reset?.receipt?.coverageVersion !== detailReceipt?.coverageVersion) failures.push("visible-first context recovery identity");
   if (
     reset?.after?.fallbackChunkCount !== 0
-    || reset?.after?.residentChunkCount !== NATIVE_CHUNKS
+    || reset?.after?.residentChunkCount !== drawable
     || !(reset?.after?.maximumUploadSliceMs <= UPLOAD_SLICE_LONG_TASK_CEILING_MS)
   ) failures.push("time-sliced context recovery residency");
 

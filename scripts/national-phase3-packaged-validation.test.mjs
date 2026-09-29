@@ -26,6 +26,19 @@ describe("National Phase 3 packaged acceptance", () => {
     ]));
   });
 
+  it("counts only the chunks that draw something", () => {
+    const report = validReport();
+    report.overview.renderer.residentChunkCount = 392;
+    report.detail.workingSet.chunkCount = 392;
+    expect(validateNationalPhase3Acceptance(report)).toEqual(expect.arrayContaining([
+      "native renderer completion",
+      "complete native chunk set",
+    ]));
+    const unmarked = validReport();
+    unmarked.overview.workingSet.manifest.chunks = Array.from({ length: 392 }, () => ({}));
+    expect(validateNationalPhase3Acceptance(unmarked)).toContain("complete native manifest");
+  });
+
   it("rejects a long-task upload slice while tolerating cold-start pacing overshoot", () => {
     const report = validReport();
     report.overview.renderer.maximumUploadSliceMs = 12.6;
@@ -37,20 +50,24 @@ describe("National Phase 3 packaged acceptance", () => {
   });
 });
 
+// 250 of the 392 native chunks draw nothing.
+const MANIFEST_CHUNKS = Array.from({ length: 392 }, (_, index) => ({ index, drawsNothing: index < 250 }));
+const DRAWABLE = 142;
+
 function validReport() {
   const hash = "ab".repeat(32);
   const identity = { generation: 4, observationTimeUnixMs: 1_785_775_692_000, contentSha256: hash, observationId: `1785775692000:${hash}` };
-  const nativeReceipt = { ...identity, presentationFactor: 1, coverageKind: "complete_domain", coverageVersion: 1, requiredChunkCount: 392, contextEpoch: 1 };
+  const nativeReceipt = { ...identity, presentationFactor: 1, coverageKind: "complete_domain", coverageVersion: 1, requiredChunkCount: DRAWABLE, contextEpoch: 1 };
   return {
     overview: {
       preparation: { ...identity, objectKey: "CONUS/MergedBaseReflectivityQC_00.50/20260803/MRMS_MergedBaseReflectivityQC_00.50_20260803-162812.grib2.gz", compressedSha256: hash, compressedBytes: 1, retainedBackendBytes: 100_000_000, presentationFactors: [1, 2, 4] },
-      workingSet: { manifest: { presentationFactor: 1, chunks: Array(392) }, coverage: { kind: "complete_domain" }, chunkCount: 392, receipt: nativeReceipt },
-      renderer: { status: "painted", coverageComplete: true, residentChunkCount: 392, gpuResourceBytes: 49_748_952, peakGpuResourceBytes: 52_000_000, maximumUploadSliceMs: 1 },
+      workingSet: { manifest: { presentationFactor: 1, chunks: MANIFEST_CHUNKS }, coverage: { kind: "complete_domain" }, chunkCount: DRAWABLE, receipt: nativeReceipt },
+      renderer: { status: "painted", coverageComplete: true, residentChunkCount: DRAWABLE, gpuResourceBytes: 49_748_952, peakGpuResourceBytes: 52_000_000, maximumUploadSliceMs: 1 },
     },
     peak: { ...identity, status: "valid", rawCode: 10_200, valueDbz: 21 },
-    detail: { workingSet: { manifest: { presentationFactor: 1 }, coverage: { kind: "complete_domain" }, chunkCount: 392, receipt: { ...nativeReceipt } }, renderer: { residentChunkCount: 392, fallbackChunkCount: 0, coverageComplete: true } },
+    detail: { workingSet: { manifest: { presentationFactor: 1 }, coverage: { kind: "complete_domain" }, chunkCount: DRAWABLE, receipt: { ...nativeReceipt } }, renderer: { residentChunkCount: DRAWABLE, fallbackChunkCount: 0, coverageComplete: true } },
     modeEvidence: { native: { displayMode: "native", ...identity }, smooth: { displayMode: "smooth", ...identity }, pixels: { changedPixels: 100, changedRatio: 0.01 } },
-    contextReset: { before: { contextEpoch: 1 }, receipt: { ...nativeReceipt, contextEpoch: 2 }, after: { status: "painted", fallbackChunkCount: 0, residentChunkCount: 392, maximumUploadSliceMs: 1 } },
+    contextReset: { before: { contextEpoch: 1 }, receipt: { ...nativeReceipt, contextEpoch: 2 }, after: { status: "painted", fallbackChunkCount: 0, residentChunkCount: DRAWABLE, maximumUploadSliceMs: 1 } },
     sourceUi: { paintedSource: "national", requestedSource: null, accessibleName: "Choose radar source. National CONUS is displayed.", nationalChecked: "true", siteChecked: "false", supportingCopy: "NATIONAL COVERS CONUS", overflow: false, panelWithinViewport: true, reducedMotion: true, forcedColors: true, focusedChoice: "National" },
     transferSnapshot: { creditLimit: 2, heldCredits: 0, inFlightCredits: 0 },
     restoredSite: { sourceState: { painted: { source: { kind: "site", siteIcao: "KTLX" } }, transition: null }, ui: { paintedSource: "site", displayedSite: "KTLX" }, display: { lastComplete: { observationId: "site", site: "KTLX" } } },

@@ -106,9 +106,14 @@ Each 72-byte descriptor is:
 | 30 | 2 | Halo height |
 | 32 | 4 | Exact encoded chunk-record length |
 | 36 | 32 | Chunk-payload SHA-256 |
-| 68 | 4 | Reserved zero |
+| 68 | 1 | Chunk flags: bit 0 draws nothing; other bits reserved zero |
+| 69 | 3 | Reserved zero |
 
 The validator derives every interior/halo coordinate and size from the level shape, chunk index, 256-cell interior, and one-cell halo. Descriptors cannot independently redefine geometry.
+
+### Chunks that draw nothing (2026-09-29)
+
+Bit 0 of the chunk flags, in the descriptor and in the chunk record, is set only when every halo cell is missing or no-coverage. Such a chunk draws nothing in Native or Smooth: every fragment it covers samples only its own halo texture, and all of those cells are invalid. Complete-domain and viewport coverage therefore leave it out, so it is never transferred, retained by the page, or uploaded; on 2026-09-29 about 64% of the 392 native chunks were marked. The mark is a one-way promise. A marked chunk record whose payload holds a measured value fails validation on both sides, but a clear flag promises nothing, so an empty chunk without the mark, such as the reviewed fixture vectors, stays valid and is simply transferred. This defined a previously reserved field under version 1: the backend and the page ship together, no packed-grid records are persisted, and older records with the field zero keep their meaning.
 
 ## Chunk record
 
@@ -130,7 +135,8 @@ Magic is `MGCK`; record kind is `2`.
 | 78 | 2 | Chunk interior size |
 | 80 | 32 | Chunk index and interior/halo geometry, matching the descriptor fields through halo height |
 | 112 | 1 | Bit depth |
-| 113 | 3 | Reserved zero |
+| 113 | 1 | Chunk flags, as in the descriptor |
+| 114 | 2 | Reserved zero |
 | 116 | 4 | Reference value `R` as `f32` bits |
 | 120 | 2 | Binary scale `E` |
 | 122 | 2 | Decimal scale `D` |

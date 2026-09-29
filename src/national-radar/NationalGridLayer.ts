@@ -18,8 +18,9 @@ import { nationalObservationIdentity } from "./model";
 
 const PALETTE_WIDTH = 1_024;
 // Native-residency owner decision (2026-08-04): all retained observations
-// stay GPU-resident at the exact full-resolution grid (~49 MiB per frame,
-// ~2.8 GiB for the 60-frame loop plus one staged replacement). Sized for the
+// stay GPU-resident at the exact full-resolution grid (up to ~49 MiB per
+// frame, ~2.8 GiB for the 60-frame loop plus one staged replacement; chunks
+// that draw nothing are never uploaded, about 1.1 GiB on 2026-09-29). Sized for the
 // supported desktop floor â€” a discrete GPU with several GiB of memory â€” not
 // a minimal device.
 export const NATIONAL_GPU_TARGET_BYTES = 3328 * 1024 * 1024;

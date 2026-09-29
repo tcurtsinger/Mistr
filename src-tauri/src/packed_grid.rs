@@ -24,6 +24,10 @@ pub const PACKED_GRID_CHUNK_MAGIC: &[u8; 4] = b"MGCK";
 
 const RECORD_MANIFEST: u16 = 1;
 const RECORD_CHUNK: u16 = 2;
+// Descriptor byte 68 and chunk header byte 113. Set only when every halo cell
+// is missing or no-coverage, so the chunk draws nothing and a renderer may
+// skip it; clear promises nothing. Other bits are reserved zero.
+const CHUNK_FLAG_DRAWS_NOTHING: u8 = 1;
 const SOURCE_NATIONAL_MRMS: u8 = 1;
 const DOMAIN_CONUS: u8 = 1;
 const PRODUCT_MERGED_BASE_REFLECTIVITY_QC: u8 = 1;
@@ -156,6 +160,7 @@ pub struct PackedGridChunkDescriptor {
     pub halo_height: u16,
     pub encoded_length: u32,
     pub payload_sha256: String,
+    pub draws_nothing: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -442,6 +447,7 @@ fn encode_manifest(
         put_u32(&mut bytes, base + 32, descriptor.encoded_length);
         let hash = parse_sha256(&descriptor.payload_sha256)?;
         bytes[base + 36..base + 68].copy_from_slice(&hash);
+        bytes[base + 68] = chunk_flags(descriptor.draws_nothing);
     }
     if cursor + descriptors_length != bytes.len() {
         return Err(PackedGridError::Bounds(
@@ -504,6 +510,12 @@ fn encode_chunk(
     put_i16(&mut bytes, 122, pyramid.encoding.decimal_scale);
     put_u16(&mut bytes, 124, pyramid.encoding.missing_raw);
     put_u16(&mut bytes, 126, pyramid.encoding.no_coverage_raw);
+    let draws_nothing = draws_nothing(
+        &chunk.raw_codes,
+        pyramid.encoding.missing_raw,
+        pyramid.encoding.no_coverage_raw,
+    );
+    bytes[113] = chunk_flags(draws_nothing);
     put_u32(&mut bytes, 128, PACKED_GRID_HEADER_BYTES as u32);
     put_u32(&mut bytes, 132, payload_length as u32);
     let mut payload_hasher = Sha256::new();
@@ -531,6 +543,7 @@ fn encode_chunk(
         halo_height: chunk.halo_height,
         encoded_length: total_length as u32,
         payload_sha256,
+        draws_nothing,
     };
     Ok((bytes, descriptor))
 }
@@ -695,10 +708,12 @@ pub fn validate_packed_grid_manifest(
                     .try_into()
                     .expect("bounded descriptor hash"),
             ),
+            draws_nothing: bytes[base + 68] == CHUNK_FLAG_DRAWS_NOTHING,
         };
-        if bytes[base + 68..base + PACKED_GRID_DESCRIPTOR_BYTES]
-            .iter()
-            .any(|byte| *byte != 0)
+        if bytes[base + 68] & !CHUNK_FLAG_DRAWS_NOTHING != 0
+            || bytes[base + 69..base + PACKED_GRID_DESCRIPTOR_BYTES]
+                .iter()
+                .any(|byte| *byte != 0)
         {
             return Err(invalid_manifest(
                 "chunk descriptor reserved bytes are non-zero",
@@ -781,7 +796,8 @@ pub fn validate_packed_grid_chunk(bytes: &[u8]) -> Result<PackedGridChunkSummary
         || get_i16(bytes, 122)? != MRMS_DECIMAL_SCALE
         || get_u16(bytes, 124)? != MRMS_MISSING_RAW
         || get_u16(bytes, 126)? != MRMS_NO_COVERAGE_RAW
-        || bytes[113..116].iter().any(|byte| *byte != 0)
+        || bytes[113] & !CHUNK_FLAG_DRAWS_NOTHING != 0
+        || bytes[114..116].iter().any(|byte| *byte != 0)
         || bytes[168..PACKED_GRID_HEADER_BYTES]
             .iter()
             .any(|byte| *byte != 0)
@@ -811,6 +827,17 @@ pub fn validate_packed_grid_chunk(bytes: &[u8]) -> Result<PackedGridChunkSummary
     if bytes[136..168] != payload_hash {
         return Err(invalid_chunk("payload SHA-256 does not match"));
     }
+    let draws_nothing = bytes[113] == CHUNK_FLAG_DRAWS_NOTHING;
+    if draws_nothing
+        && bytes[payload_offset..].chunks_exact(2).any(|pair| {
+            let raw = u16::from_be_bytes([pair[0], pair[1]]);
+            raw != MRMS_MISSING_RAW && raw != MRMS_NO_COVERAGE_RAW
+        })
+    {
+        return Err(invalid_chunk(
+            "a chunk marked as drawing nothing holds a measured value",
+        ));
+    }
     let descriptor = PackedGridChunkDescriptor {
         index: get_u32(bytes, 80)?,
         chunk_x: get_u16(bytes, 84)?,
@@ -825,6 +852,7 @@ pub fn validate_packed_grid_chunk(bytes: &[u8]) -> Result<PackedGridChunkSummary
         halo_height,
         encoded_length: bytes.len() as u32,
         payload_sha256: hex_sha256(&payload_hash),
+        draws_nothing,
     };
     validate_chunk_descriptor(&descriptor, descriptor.index as usize, width, height)
         .map_err(invalid_chunk)?;
@@ -844,6 +872,20 @@ pub fn validate_packed_grid_chunk(bytes: &[u8]) -> Result<PackedGridChunkSummary
         missing_raw: get_u16(bytes, 124)?,
         no_coverage_raw: get_u16(bytes, 126)?,
     })
+}
+
+fn draws_nothing(raw_codes: &[u16], missing_raw: u16, no_coverage_raw: u16) -> bool {
+    raw_codes
+        .iter()
+        .all(|raw| *raw == missing_raw || *raw == no_coverage_raw)
+}
+
+fn chunk_flags(draws_nothing: bool) -> u8 {
+    if draws_nothing {
+        CHUNK_FLAG_DRAWS_NOTHING
+    } else {
+        0
+    }
 }
 
 fn orientation_code(orientation: MrmsRowOrientation) -> u8 {
@@ -1153,6 +1195,49 @@ mod tests {
         let chunk = validate_packed_grid_chunk(&frame.chunks[0]).unwrap();
         assert_eq!(chunk.generation, 7);
         assert_eq!(chunk.chunk, frame.summary.chunks[0]);
+    }
+
+    #[test]
+    fn chunks_with_no_measured_value_are_marked_as_drawing_nothing() {
+        let frame = PackedGridFrame::encode(7, &test_pyramid(), 4).unwrap();
+        // Only the first chunk holds measured values; the rest are missing or
+        // no-coverage throughout, halo included.
+        assert!(!frame.summary.chunks[0].draws_nothing);
+        assert!(
+            frame.summary.chunks[1..]
+                .iter()
+                .all(|chunk| chunk.draws_nothing)
+        );
+        for (bytes, expected) in frame.chunks.iter().zip(&frame.summary.chunks) {
+            assert_eq!(validate_packed_grid_chunk(bytes).unwrap().chunk, *expected);
+        }
+    }
+
+    #[test]
+    fn the_draws_nothing_mark_must_match_the_payload_and_use_only_its_bit() {
+        let frame = PackedGridFrame::encode(7, &test_pyramid(), 4).unwrap();
+        // A measured chunk claiming to draw nothing.
+        let mut false_claim = frame.chunks[0].clone();
+        false_claim[113] = CHUNK_FLAG_DRAWS_NOTHING;
+        assert!(validate_packed_grid_chunk(&false_claim).is_err());
+        // An empty chunk left unmarked is valid; the mark only permits skipping.
+        let mut unmarked = frame.chunks[1].clone();
+        unmarked[113] = 0;
+        assert!(
+            !validate_packed_grid_chunk(&unmarked)
+                .unwrap()
+                .chunk
+                .draws_nothing
+        );
+        for flag in [2u8, 0x80] {
+            let mut chunk = frame.chunks[1].clone();
+            chunk[113] = flag;
+            assert!(validate_packed_grid_chunk(&chunk).is_err());
+            let descriptor_offset = get_u32(&frame.manifest, 152).unwrap() as usize;
+            let mut manifest = frame.manifest.clone();
+            manifest[descriptor_offset + PACKED_GRID_DESCRIPTOR_BYTES + 68] = flag;
+            assert!(validate_packed_grid_manifest(&manifest).is_err());
+        }
     }
 
     #[test]

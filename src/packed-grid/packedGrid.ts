@@ -8,6 +8,10 @@ const MANIFEST_MAGIC = new TextEncoder().encode("MGRD");
 const CHUNK_MAGIC = new TextEncoder().encode("MGCK");
 const RECORD_MANIFEST = 1;
 const RECORD_CHUNK = 2;
+// Descriptor byte 68 and chunk header byte 113: set only when every halo cell
+// is missing or no-coverage, so the chunk draws nothing and need not be
+// transferred or uploaded. Clear promises nothing. Other bits are reserved.
+const CHUNK_FLAG_DRAWS_NOTHING = 1;
 const CHUNK_INTERIOR = 256;
 const CONTENT_HASH_START = 120;
 const CONTENT_HASH_END = 152;
@@ -55,6 +59,7 @@ export interface PackedGridChunkDescriptor {
   haloHeight: number;
   encodedLength: number;
   payloadSha256: string;
+  drawsNothing: boolean;
 }
 
 export interface PackedGridManifest {
@@ -192,7 +197,8 @@ export function parsePackedGridManifest(
   for (let index = 0; index < chunkCount; index += 1) {
     const base = descriptorOffset + index * descriptorBytes;
     const descriptor = readDescriptor(bytes, view, base);
-    assertZero(bytes, base + 68, base + PACKED_GRID_DESCRIPTOR_BYTES, "invalid_descriptor_section");
+    assertChunkFlags(bytes[base + 68], "invalid_descriptor_section");
+    assertZero(bytes, base + 69, base + PACKED_GRID_DESCRIPTOR_BYTES, "invalid_descriptor_section");
     validateDescriptor(descriptor, index, width, height);
     chunks.push(descriptor);
   }
@@ -268,7 +274,8 @@ export async function parsePackedGridChunk(
   ) {
     throw new PackedGridError("invalid_chunk_bounds", "payload range");
   }
-  assertZero(bytes, 113, 116);
+  assertChunkFlags(bytes[113], "invalid_record_kind");
+  assertZero(bytes, 114, 116);
   assertZero(bytes, 168, PACKED_GRID_HEADER_BYTES);
   const descriptor: PackedGridChunkDescriptor = {
     index: view.getUint32(80, false),
@@ -284,6 +291,7 @@ export async function parsePackedGridChunk(
     haloHeight: view.getUint16(110, false),
     encodedLength: bytes.byteLength,
     payloadSha256: "",
+    drawsNothing: bytes[113] === CHUNK_FLAG_DRAWS_NOTHING,
   };
   validateDescriptor(descriptor, descriptor.index, width, height);
   if (descriptor.haloWidth * descriptor.haloHeight * 2 !== payloadLength) {
@@ -300,6 +308,9 @@ export async function parsePackedGridChunk(
   const rawCodes = new Uint16Array(payloadLength / 2);
   for (let index = 0; index < rawCodes.length; index += 1) {
     rawCodes[index] = view.getUint16(payloadOffset + index * 2, false);
+  }
+  if (descriptor.drawsNothing && rawCodes.some((raw) => raw !== 9000 && raw !== 0)) {
+    throw new PackedGridError("invalid_encoding", "a chunk marked as drawing nothing holds a measured value");
   }
   return {
     schemaVersion: 1,
@@ -403,6 +414,7 @@ function readDescriptor(bytes: Uint8Array, view: DataView, base: number): Packed
     haloHeight: view.getUint16(base + 30, false),
     encodedLength: view.getUint32(base + 32, false),
     payloadSha256: toHex(bytes.subarray(base + 36, base + 68)),
+    drawsNothing: bytes[base + 68] === CHUNK_FLAG_DRAWS_NOTHING,
   };
 }
 
@@ -496,6 +508,10 @@ function assertZero(
   for (let index = start; index < end; index += 1) {
     if (bytes[index] !== 0) throw new PackedGridError(code, "reserved bytes are nonzero");
   }
+}
+
+function assertChunkFlags(flags: number, code: PackedGridErrorCode) {
+  if ((flags & ~CHUNK_FLAG_DRAWS_NOTHING) !== 0) throw new PackedGridError(code, "unknown chunk flags");
 }
 
 function isPowerOfTwo(value: number) {
