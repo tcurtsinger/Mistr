@@ -278,6 +278,14 @@ impl SitePrefetchState {
 }
 
 impl SiteHistoryPrefetch {
+    /// Claims prefetching for `session` and `site`, cancelling at once any
+    /// prefetches for another, so they do not compete with this request.
+    fn claim(&self, session: u64, site: &str) {
+        if let Ok(mut state) = self.state.lock() {
+            state.owner_token(session, site);
+        }
+    }
+
     /// Removes and returns the prefetch of the volume before `volume_index`.
     fn take(&self, session: u64, site: &str, volume_index: u16) -> Option<SitePrefetchTask> {
         let mut state = self.state.lock().ok()?;
@@ -352,6 +360,17 @@ fn retain_site_prefetches(
     });
 }
 
+/// A prefetch taken by a request. Once taken it is no longer among the
+/// prefetch entries, so nothing else aborts it: it is aborted when the
+/// request stops waiting on it, however that happens.
+struct TakenPrefetch(SitePrefetchTask);
+
+impl Drop for TakenPrefetch {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 /// The prefetched sweep, or nothing once the request's own generation is
 /// cancelled: a prefetch runs under its own token, and a request waiting on
 /// it must still unwind, and release its credit, as promptly as one acquiring
@@ -360,13 +379,14 @@ async fn await_prefetch(
     task: SitePrefetchTask,
     token: &GenerationToken,
 ) -> Option<SafeSweepCandidate> {
+    let mut taken = TakenPrefetch(task);
     let cancelled = async {
         while token.is_current() {
             tokio::time::sleep(Duration::from_millis(25)).await;
         }
     };
     tokio::select! {
-        joined = task => joined.ok().and_then(Result::ok),
+        joined = &mut taken.0 => joined.ok().and_then(Result::ok),
         () = cancelled => None,
     }
 }
@@ -1194,6 +1214,7 @@ pub async fn request_phase5_live_sweep(
     let prefetch = prefetch.inner().clone();
     let worker = tauri::async_runtime::spawn(async move {
         let token = worker_broker.live_generation_token(session, TransferLane::Site, generation)?;
+        prefetch.claim(session, &site);
         let prefetched = match history_request {
             Some(ValidatedLiveHistoryRequest::Before {
                 volume_index,
@@ -1311,9 +1332,9 @@ async fn acquire_requested_live_sweep(
     acquire_live_sweep(live, wait, timeout).await
 }
 
-// How long the fallback to the previous volume looks for it before waiting
-// on the newest volume after all.
-const PREVIOUS_VOLUME_DISCOVERY: Duration = Duration::from_secs(5);
+// How long the fallback to the previous volume has, from discovery through
+// download and decode, before waiting on the newest volume after all.
+const PREVIOUS_VOLUME_LIMIT: Duration = Duration::from_secs(5);
 
 /// The newest volume's safe sweep if its chunks already hold one; otherwise
 /// the previous volume's. A volume's lowest sweep takes the radar tens of
@@ -1348,10 +1369,13 @@ async fn acquire_newest_complete_sweep(
     )
     .await
     .map_err(|error| TransferError::new("live_start_failed", error.to_string()))?;
-    match acquire_live_sweep(previous, PREVIOUS_VOLUME_DISCOVERY.min(wait), timeout).await {
-        Ok(candidate) => Ok(candidate),
+    // The limit covers the whole attempt, stalled downloads included, so the
+    // newest volume keeps the rest of the request's time.
+    let limit = PREVIOUS_VOLUME_LIMIT.min(wait);
+    match tokio::time::timeout(limit, acquire_live_sweep(previous, limit, limit)).await {
+        Ok(Ok(candidate)) => Ok(candidate),
         // No usable previous volume: wait for the newest one after all.
-        Err(_) => acquire_live_sweep(latest, wait, timeout).await,
+        _ => acquire_live_sweep(latest, wait, timeout).await,
     }
 }
 
@@ -1909,9 +1933,11 @@ mod tests {
     #[tokio::test]
     async fn a_request_waiting_on_a_prefetch_unwinds_when_cancelled() {
         let token = GenerationClock::default().begin(3).unwrap();
-        let task = tauri::async_runtime::spawn(std::future::pending::<
-            Result<SafeSweepCandidate, TransferError>,
-        >());
+        let (running, stopped) = tokio::sync::oneshot::channel::<()>();
+        let task = tauri::async_runtime::spawn(async move {
+            let _running = running;
+            std::future::pending::<Result<SafeSweepCandidate, TransferError>>().await
+        });
         let waiter = {
             let token = token.clone();
             tauri::async_runtime::spawn(async move { await_prefetch(task, &token).await })
@@ -1923,6 +1949,11 @@ mod tests {
             .expect("the waiter stops within the cancellation poll")
             .unwrap();
         assert!(waited.is_none());
+        // The taken prefetch stops too, rather than running on detached.
+        let stopped = tokio::time::timeout(Duration::from_secs(2), stopped)
+            .await
+            .expect("the taken prefetch is aborted");
+        assert!(stopped.is_err());
     }
 
     #[tokio::test]
@@ -1955,10 +1986,12 @@ mod tests {
         };
         assert_eq!(remaining(&prefetch), [40]);
         assert!(token.is_current());
-        // Another site drops the rest and stops their downloads.
-        assert!(prefetch.take(1, "KFWS", 41).is_none());
+        // A request for another site drops the rest and stops their downloads
+        // before it acquires anything.
+        prefetch.claim(1, "KFWS");
         assert!(remaining(&prefetch).is_empty());
         assert!(!token.is_current());
+        assert!(prefetch.take(1, "KFWS", 41).is_none());
     }
     use std::sync::{
         Barrier,

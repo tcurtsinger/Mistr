@@ -281,12 +281,16 @@ finding the newest volume in the 999-slot ring.
   under their own token, and are held decoded; each is encoded for the
   request that uses it, and only if it is the exact volume that request's
   cursor selects. A request waiting on a prefetch still watches its own
-  generation, so a cancelled one releases its credit as promptly as before.
+  generation, so a cancelled one releases its credit as promptly as before,
+  and stops the prefetch it took. A request for another session or site
+  cancels the old site's prefetches before it acquires anything.
 - **Newest complete scan first.** A volume's lowest sweep takes the radar
   tens of seconds to record, and the first request waited for it when a Site
   opened just as a volume began. If the newest volume's listed chunks hold no
   safe sweep yet, the previous volume is shown instead; polling for newer
-  scans publishes the newest one as soon as it completes.
+  scans publishes the newest one as soon as it completes. The previous
+  volume gets 5 s in all, download and decode included, so a stalled one
+  leaves the request its time to wait on the newest.
 
 | KTLX, zoom 9.5 | Before | After |
 |---|---:|---:|
