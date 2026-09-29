@@ -1,15 +1,31 @@
 // Repeatable National load and regional-render benchmark over CDP.
 // Usage: scripts/run-national-load-bench.ps1 -Label <label> [-Runs n]. Results: artifacts/bench/<label>.json
 import { writeFile, mkdir } from "node:fs/promises";
-import { CdpClient, openWebSocketWithTimeout } from "./cdp-client.mjs";
+import { CdpClient, fetchJsonWithTimeout, openWebSocketWithTimeout } from "./cdp-client.mjs";
 
 const label = process.argv[2] ?? "run";
 const port = Number(process.env.MISTR_CDP_PORT ?? 9344);
 const outDir = new URL("../artifacts/bench/", import.meta.url);
 await mkdir(outDir, { recursive: true });
 
-const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
-const socket = new WebSocket(targets.find((target) => target.type === "page").webSocketDebuggerUrl);
+// The debugging endpoint can answer before the WebView publishes its page.
+async function waitForPageTarget(timeoutMs = 60_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const targets = await fetchJsonWithTimeout(`http://127.0.0.1:${port}/json/list`);
+      const page = targets.find((target) => target.type === "page" && target.webSocketDebuggerUrl);
+      if (page) return page;
+    } catch {
+      // Endpoint not ready yet.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error(`no WebView page target on port ${port} within ${timeoutMs} ms`);
+}
+
+const page = await waitForPageTarget();
+const socket = new WebSocket(page.webSocketDebuggerUrl);
 await openWebSocketWithTimeout(socket);
 const cdp = new CdpClient(socket, 240_000);
 const evaluate = async (expression) => {

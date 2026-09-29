@@ -126,15 +126,19 @@ trips dominating main-thread time.
   packaged gate. Removing them needs fence-based flow control that bounds
   in-flight upload work, a separate change.
 
-Measured on the same machine, old build against new, two runs each:
+Measured on the same machine, old build (two runs) against new (three runs):
 
 | | Before | After |
 |---|---:|---:|
-| GPU staging per frame (p50) | 585–604 ms | 427–428 ms |
-| Main-thread CPU per uploaded chunk | 0.92 ms | 0.78–0.83 ms |
+| Regional playback JavaScript busy time per 10 s | 2.63–2.68 s | 0.46–0.51 s |
 | Long tasks during the 60-frame load | 9 | 2 |
-| Regional playback JavaScript busy time per 10 s | 2.63–2.68 s | 0.46 s |
-| 60 frames loaded | 56.7 s | 50.6–52.4 s |
+| Main-thread CPU per uploaded chunk | 0.92–0.94 ms | 0.78–0.83 ms |
+| GPU staging per frame (p50) | 585–604 ms | 427–580 ms |
+| 60 frames loaded | 56.7 s | 50.6–56.9 s |
+
+The first three rows are consistent across runs. Staging time and total load
+time vary as much between runs of the same build as between builds, so they
+are not claimed as gains.
 
 Culling off-screen chunk draws was evaluated and not done: after the draw fix,
 all draw submission is about 0.4 s per 10 s of playback, so the saving is small.
