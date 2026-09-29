@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { RADAR_SITES } from "../data/radarSites";
-import { decideAutoSource, nationalCovers, sameAutoSource } from "./autoSourcePolicy";
+import {
+  autoSourceOf,
+  decideAutoSource,
+  nationalCovers,
+  pickedNextSource,
+  sameAutoSource,
+} from "./autoSourcePolicy";
 
 const KTLX = { longitude: -97.2778, latitude: 35.3331 };
 const OKC_METRO = { longitude: -97.52, latitude: 35.47 };
@@ -108,5 +114,33 @@ describe("decideAutoSource", () => {
     expect(sameAutoSource(ktlx, { kind: "site", siteIcao: "KTLX" })).toBe(true);
     expect(sameAutoSource(ktlx, { kind: "site", siteIcao: "KINX" })).toBe(false);
     expect(sameAutoSource(ktlx, national)).toBe(false);
+  });
+});
+
+describe("pickedNextSource", () => {
+  const kfws = { kind: "site", siteIcao: "KFWS" } as const;
+
+  it("goes straight to a picked Site from National", () => {
+    expect(pickedNextSource("KTLX", national)).toEqual(ktlx);
+  });
+
+  it("passes through National when another Site is displayed", () => {
+    expect(pickedNextSource("KTLX", kfws)).toEqual(national);
+  });
+
+  it("keeps a picked Site that is already displayed", () => {
+    expect(pickedNextSource("KTLX", ktlx)).toEqual(ktlx);
+  });
+
+  it("goes to National when National is picked", () => {
+    expect(pickedNextSource(undefined, ktlx)).toEqual(national);
+    expect(pickedNextSource(undefined, national)).toEqual(national);
+  });
+});
+
+describe("autoSourceOf", () => {
+  it("maps painted sources to automatic sources", () => {
+    expect(autoSourceOf({ kind: "national", domain: "conus" })).toEqual(national);
+    expect(autoSourceOf({ kind: "site", siteIcao: "KTLX" })).toEqual(ktlx);
   });
 });

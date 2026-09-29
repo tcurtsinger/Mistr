@@ -250,6 +250,12 @@ try {
     300_000,
   );
 
+  const latestIntent = await evaluate(
+    serialized("window.__MISTR_NATIONAL_PHASE4__.proveLatestIntentWins('KTLX')"),
+    true,
+    300_000,
+  );
+
   const timeCarry = await evaluate(
     serialized("window.__MISTR_NATIONAL_PHASE4__.proveTimeCarry('KTLX')"),
     true,
@@ -288,6 +294,7 @@ try {
     failedSiteRecovery,
     residentHandoff,
     zoomHandoff,
+    latestIntent,
     timeCarry,
     siteInspection,
     restoredSite,

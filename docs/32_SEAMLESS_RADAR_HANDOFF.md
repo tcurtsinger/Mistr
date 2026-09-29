@@ -70,7 +70,7 @@ Outside the National grid (130°W–60°W, 20°N–55°N: Alaska, Hawaii, Guam, 
 
 Moving between Sites always passes through National, so only one Site layer exists. A switch that succeeds re-checks the same camera, so one pan into another Site's coverage runs both legs. A pick stops applying once the center leaves its 230 km range. Site coordinates live in `src/data/radar-sites.json`: 150 from nexrad-model's registry (a Rust test keeps them in sync) and 5 from api.weather.gov.
 
-Only camera moves the operator makes are evaluated (MapLibre events with an `originalEvent`), plus the landing of an explicit picker or recenter flight. A move made while any switch is running is evaluated once it ends. Programmatic cameras, including every packaged harness camera, never switch sources.
+Only camera moves the operator makes are evaluated (MapLibre events with an `originalEvent`), plus the landing of an explicit picker or recenter flight. A move made while a manual switch is running is evaluated once it ends; one made during an automatic switch follows the latest-intent rule below. Programmatic cameras, including every packaged harness camera, never switch sources.
 
 ### Switching
 
@@ -78,7 +78,8 @@ Only camera moves the operator makes are evaluated (MapLibre events with an `ori
 - **Fade in:** the Site's first frame paints at `u_opacity = 0`, then fades to 1 over 300 ms (instant under reduced motion). Only then does the coordinator accept it, so the timeline follows a fully visible frame. National keeps playing underneath until it becomes resident.
 - **Fade out:** National paints underneath first (a reveal, or a fresh acquisition), then the Site fades to 0 and is removed.
 - **Layer order:** National is always inserted, and re-inserted after context loss, below the Site stack, so only the upper layer fades.
-- **Guards:** one automatic switch runs at a time; a Site that just failed is retried automatically after a minute if the camera still calls for it, and at once when it is picked. A Site showing only the bundled archive scan counts as not yet shown, so it still starts live radar.
+- **Latest intent wins:** one automatic switch runs at a time, but a camera move or pick that calls for a different source abandons it instead of waiting out a download that can take up to 180 s. Abandoning drops the transition and cancels the Site lane, so the backend stops at its next poll (about a second); a fading Site is removed and a fading-out Site is restored. Once the old switch has unwound, the view is re-evaluated and the new target starts. A pick abandons a switch that is not its own next step (from another Site, that step is National). A preload the view stops calling for is cancelled the same way. A Site replacing its own archive scan is never abandoned.
+- **Guards:** a Site that just failed is retried automatically after a minute if the camera still calls for it, and at once when it is picked. A Site showing only the bundled archive scan counts as not yet shown, so it still starts live radar.
 
 ### Camera
 
@@ -91,6 +92,8 @@ Automatic switches never move the camera. The picker flies to a Site at zoom 9.5
 ### Validation
 
 `proveZoomHandoff` in the National packaged gate: at zoom 8.3 over KTLX the Site preloads; at 9.6 the Site fades in under the preloaded generation with National resident and the camera untouched; one jump to KFWS at 9.6 goes KTLX, National, KFWS with no further move; at 7.5 the same National history returns, the Site layer is removed, and the camera is untouched.
+
+`proveLatestIntentWins` in the same gate holds a KTLX download open by waiting for the next scan, minutes away, as a slow connection would. Zooming out mid-download must settle within 5 s with National still shown, the Site lane released, and no Site layer; jumping to KFWS mid-download must paint KFWS without KTLX ever painting.
 
 ## Phase C — playback time across a switch
 

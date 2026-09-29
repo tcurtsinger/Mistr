@@ -4,6 +4,7 @@ import {
   validateResidentHandoff,
   validateBackfillFreshness,
   validateSiteInspection,
+  validateLatestIntent,
   validateTimeCarry,
   validateZoomHandoff,
 } from "./national-phase4-packaged-validation.mjs";
@@ -189,6 +190,40 @@ describe("National Phase 4 packaged acceptance", () => {
     delete report.zoomHandoff;
     expect(validateNationalPhase4Acceptance(report)).toContain(
       "zooming in fades the preloaded Site in without moving the camera",
+    );
+  });
+
+  it("requires a changed view to abandon a slow Site download", () => {
+    expect(validateLatestIntent(validReport().latestIntent)).toEqual([]);
+
+    const waited = validReport().latestIntent;
+    waited.zoomOut.settledMs = 45_000;
+    expect(validateLatestIntent(waited)).toContain(
+      "zooming out during a slow Site download abandons it within seconds",
+    );
+
+    const neverHeld = validReport().latestIntent;
+    neverHeld.zoomOut.inFlight.switchInFlight = null;
+    expect(validateLatestIntent(neverHeld)).toContain(
+      "zooming out during a slow Site download abandons it within seconds",
+    );
+
+    const leakedLane = validReport().latestIntent;
+    leakedLane.zoomOut.siteLaneActive = true;
+    expect(validateLatestIntent(leakedLane)).toContain(
+      "zooming out during a slow Site download abandons it within seconds",
+    );
+
+    const obsoletePainted = validReport().latestIntent;
+    obsoletePainted.sources = ["national", "KTLX", "national", "KFWS", "national"];
+    expect(validateLatestIntent(obsoletePainted)).toContain(
+      "panning to another Site during a slow download switches to that Site instead",
+    );
+
+    const report = validReport();
+    delete report.latestIntent;
+    expect(validateNationalPhase4Acceptance(report)).toContain(
+      "zooming out during a slow Site download abandons it within seconds",
     );
   });
 
@@ -515,6 +550,32 @@ function validReport() {
         },
       },
       playing: { site: { playing: true, frames: 3 }, national: { playing: true } },
+    },
+    latestIntent: {
+      site: "KTLX",
+      nextSite: "KFWS",
+      zoomOut: {
+        inFlight: {
+          switchInFlight: { target: { kind: "site", siteIcao: "KTLX" }, abandoned: false },
+          painted: "national",
+          siteLaneActive: true,
+        },
+        settledMs: 1_200,
+        painted: "national",
+        siteLaneActive: false,
+        siteLayerPresent: false,
+      },
+      pan: {
+        inFlight: {
+          switchInFlight: { target: { kind: "site", siteIcao: "KTLX" }, abandoned: false },
+          painted: "national",
+          siteLaneActive: true,
+        },
+        switchMs: 9_000,
+        painted: "KFWS",
+      },
+      abandoned: 2,
+      sources: ["national", "KFWS", "national"],
     },
     siteInspection: {
       site: "KTLX",
