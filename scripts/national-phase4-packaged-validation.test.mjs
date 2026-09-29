@@ -4,6 +4,7 @@ import {
   validateResidentHandoff,
   validateBackfillFreshness,
   validateSiteInspection,
+  validateAbandonedNationalLoad,
   validateLatestIntent,
   validateTimeCarry,
   validateZoomHandoff,
@@ -224,6 +225,28 @@ describe("National Phase 4 packaged acceptance", () => {
     delete report.latestIntent;
     expect(validateNationalPhase4Acceptance(report)).toContain(
       "zooming out during a slow Site download abandons it within seconds",
+    );
+  });
+
+  it("requires zooming back in to abandon a fresh National load", () => {
+    expect(validateAbandonedNationalLoad(validReport().abandonedNationalLoad)).toEqual([]);
+
+    const waited = validReport().abandonedNationalLoad;
+    waited.settledMs = 20_000;
+    expect(validateAbandonedNationalLoad(waited)).toEqual([
+      "zooming back in during a fresh National load keeps the Site updating",
+    ]);
+
+    const leakedLane = validReport().abandonedNationalLoad;
+    leakedLane.nationalLaneActive = true;
+    expect(validateAbandonedNationalLoad(leakedLane)).toEqual([
+      "zooming back in during a fresh National load keeps the Site updating",
+    ]);
+
+    const report = validReport();
+    delete report.abandonedNationalLoad;
+    expect(validateNationalPhase4Acceptance(report)).toContain(
+      "zooming back in during a fresh National load keeps the Site updating",
     );
   });
 
@@ -583,6 +606,21 @@ function validReport() {
         { index: 0, paintedObservationId: "s-old", inspectedObservationId: "s-old" },
         { index: 4, paintedObservationId: "s-new", inspectedObservationId: "s-new" },
       ],
+    },
+    abandonedNationalLoad: {
+      site: "KTLX",
+      inFlight: {
+        switchInFlight: { target: { kind: "national" }, abandoned: false },
+        painted: "KTLX",
+        nationalLaneActive: true,
+        siteLaneActive: false,
+      },
+      settledMs: 900,
+      painted: "KTLX",
+      nationalLaneActive: false,
+      siteUpdatesResumedMs: 1_100,
+      siteOpacity: 1,
+      nationalLayerPresent: false,
     },
     restoredSite: {
       sourceState: { painted: { source: { kind: "site", siteIcao: "KTLX" } }, transition: null },

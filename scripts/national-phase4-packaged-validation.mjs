@@ -159,6 +159,7 @@ export function validateNationalPhase4Acceptance(report) {
   failures.push(...validateResidentHandoff(report.residentHandoff));
   failures.push(...validateZoomHandoff(report.zoomHandoff));
   failures.push(...validateLatestIntent(report.latestIntent));
+  failures.push(...validateAbandonedNationalLoad(report.abandonedNationalLoad));
   failures.push(...validateTimeCarry(report.timeCarry));
   failures.push(...validateBackfillFreshness(report.history?.backfillFreshness));
   failures.push(...validateSiteInspection(report.siteInspection));
@@ -321,6 +322,25 @@ export function validateLatestIntent(intent) {
     || !(intent?.abandoned >= 2)
   ) failures.push("panning to another Site during a slow download switches to that Site instead");
   return failures;
+}
+
+// Zooming back in during a fresh National load abandons it within seconds:
+// the Site stays shown, the National lane is released, and Site updates
+// resume on their own lane.
+export function validateAbandonedNationalLoad(load) {
+  const inFlight = load?.inFlight;
+  const heldOpen = Boolean(load?.site)
+    && inFlight?.switchInFlight?.target?.kind === "national"
+    && inFlight?.switchInFlight?.abandoned === false
+    && inFlight?.painted === load.site
+    && inFlight?.nationalLaneActive === true;
+  const passed = heldOpen
+    && load?.settledMs >= 0 && load.settledMs <= 5_000
+    && load?.painted === load.site
+    && load?.nationalLaneActive === false
+    && load?.siteUpdatesResumedMs >= 0
+    && load?.siteOpacity === 1;
+  return passed ? [] : ["zooming back in during a fresh National load keeps the Site updating"];
 }
 
 export function validateZoomHandoff(handoff) {

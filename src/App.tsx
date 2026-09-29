@@ -1482,6 +1482,11 @@ export function App() {
         if (entry.target.kind === "site" && client?.isActive("site")) {
           void client.cancel("site").catch(() => {});
         }
+        // A fresh National load stops at its next backend check, so the Site
+        // it would have replaced resumes updating without waiting it out.
+        if (entry.nationalAcquire && client?.isActive("national")) {
+          void client.cancel("national").catch(() => {});
+        }
       };
 
       // A switch that succeeded re-checks the same camera: Site to Site goes
@@ -2533,6 +2538,10 @@ export function App() {
           livePollingSession += 1;
           nationalHistorySession += 1;
           await beginExclusiveLane(activeClient, "national", generation);
+          const pending = radarSessionCoordinatorRef.current!.snapshot().transition;
+          if (pending?.generation !== generation || pending.requestedSource.kind !== "national") {
+            throw new RadarSourceSupersededError("National transition was superseded before its download");
+          }
           const historyPreparation = await activeClient.prepareNationalHistoryCurrent();
           if (
             historyPreparation.observation.generation !== generation
@@ -3560,6 +3569,69 @@ export function App() {
             slowNextSiteFromNationalForDiagnostics = false;
             stopWatching();
           }
+        },
+        async proveAbandonedNationalLoadKeepsSite(site = "KTLX") {
+          const location = radarSiteById(normalizeRadarSite(site));
+          const auto = globalThis.__MISTR_AUTO_SOURCE__;
+          const activeClient = client;
+          if (!location || !auto || !activeClient) {
+            throw new Error("abandoned National load diagnostic is unavailable");
+          }
+          const coordinator = radarSessionCoordinatorRef.current!;
+          const waitFor = async (condition: () => boolean, timeoutMs: number, label: string) => {
+            const started = performance.now();
+            while (!condition()) {
+              if (performance.now() - started > timeoutMs) throw new Error(`${label} timed out`);
+              await waitMilliseconds(50);
+            }
+          };
+          const paintedLabel = () => {
+            const painted = coordinator.snapshot().painted?.source;
+            return !painted ? "none" : painted.kind === "site" ? painted.siteIcao : "national";
+          };
+          const idle = () => !coordinator.snapshot().transition && !auto.state().switchInFlight;
+          const center: [number, number] = [location.longitude, location.latitude];
+          const liveSiteShown = () => idle()
+            && paintedLabel() === location.id
+            && residentLiveHistory?.at(-1)?.siteIcao === location.id;
+          if (!liveSiteShown()) {
+            instance.jumpTo({ center, zoom: 9.6, bearing: 0, pitch: 0 });
+            auto.evaluate();
+            await waitFor(liveSiteShown, 120_000, "live Site before the National load");
+          }
+          // Without a resident National, zooming out starts a fresh National
+          // load, which takes the Site lane; zooming back in abandons it.
+          teardownNational();
+          instance.jumpTo({ center, zoom: 7, bearing: 0, pitch: 0 });
+          auto.evaluate();
+          await waitFor(
+            () => activeClient.isActive("national") && auto.state().switchInFlight?.target.kind === "national",
+            10_000,
+            "fresh National load",
+          );
+          const inFlight = {
+            switchInFlight: auto.state().switchInFlight,
+            painted: paintedLabel(),
+            nationalLaneActive: activeClient.isActive("national"),
+            siteLaneActive: activeClient.isActive("site"),
+          };
+          instance.jumpTo({ center, zoom: 9.6, bearing: 0, pitch: 0 });
+          const started = performance.now();
+          auto.evaluate();
+          await waitFor(idle, 30_000, "abandoned National load");
+          const settledMs = performance.now() - started;
+          const nationalLaneActive = activeClient.isActive("national");
+          await waitFor(() => activeClient.isActive("site"), 30_000, "Site updates resuming");
+          return {
+            site: location.id,
+            inFlight,
+            settledMs,
+            painted: paintedLabel(),
+            nationalLaneActive,
+            siteUpdatesResumedMs: performance.now() - started,
+            siteOpacity: layer?.getOpacity() ?? null,
+            nationalLayerPresent: Boolean(nationalLayer),
+          };
         },
         async waitForHistory(frameCount = MAX_LIVE_HISTORY_FRAMES, timeoutMs = 300_000) {
           if (!Number.isSafeInteger(frameCount) || frameCount < 1 || frameCount > MAX_LIVE_HISTORY_FRAMES) {
@@ -4978,6 +5050,7 @@ declare global {
     proveResidentHandoff(site?: string): Promise<NationalPhase4ResidentHandoffReport>;
     proveZoomHandoff(site?: string, nextSite?: string): Promise<unknown>;
     proveLatestIntentWins(site?: string, nextSite?: string): Promise<unknown>;
+    proveAbandonedNationalLoadKeepsSite(site?: string): Promise<unknown>;
     proveTimeCarry(site?: string): Promise<unknown>;
     proveSiteInspectionFollowsScan(site?: string): Promise<unknown>;
     loadTrace(): { atUnixMs: number; step: string; detail?: string }[];
