@@ -298,9 +298,25 @@ finding the newest volume in the 999-slot ring.
 | Each history frame (median) | 1,320 ms | 67 to 133 ms |
 | 60 frames | 87 s | 12.5 to 16 s |
 
-Decode attempts are still sequential. The successful one takes about
-130 ms, and all seven about 460 ms, which is most of what remains in the
-first scan.
+### Concurrent safe decodes (2026-09-29)
+
+A volume's safe sweep was found by decoding each contiguous prefix in turn
+until one held the complete lowest sweep: about seven attempts, the
+successful one about 130 ms and all of them about 460 ms, which was most of
+what remained in the first scan. Background prefetches paid the same cost
+for every history frame.
+
+Every contiguous boundary a download window reaches is now captured as it is
+ingested, and the window's boundaries decode together, each on its own
+thread. Results are read in boundary order and the earliest that decodes is
+published, so the selected sweep, its safe boundary, and its attempt count
+are those trying each in turn gives; a later attempt still running then is
+left to finish unread.
+
+| KTLX, zoom 9.5, 4 launches each | Before | After |
+|---|---:|---:|
+| First scan | 2.05 to 2.23 s | 1.70 to 1.73 s |
+| 60 frames | 14.3 to 16.3 s | 8.4 to 12.5 s |
 
 Diagnostics: `__MISTR_NATIONAL_PHASE4__.loadTrace()` records each prepare's
 discovery, download, and decode times, and the first frame's steps
