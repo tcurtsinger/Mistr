@@ -155,8 +155,8 @@ frames taking 925 ms, run strictly in sequence: 395 ms to download and decode
 on the backend, then 520 ms to upload to the GPU.
 
 - **Backend prefetch.** Once a predecessor is staged, the backend starts
-  downloading and decoding the next one, and the next prepare picks it up
-  already decoded. The frontend protocol is unchanged. Its network and
+  downloading and decoding the next one (three, later the same day), and
+  the next prepare picks it up already decoded. The frontend protocol is unchanged. Its network and
   decoder work is counted when it completes; a new National session drops it.
 - **Fence-paced uploads, no per-slice `getError`.** A reproducible startup
   stall (3 of 4 National launches) spent 2.96 of every 3 s blocked in
@@ -186,9 +186,37 @@ Measured from process launch, same workstation (120 Hz display):
 | Time per backfill frame (median) | 925 ms | 342 ms |
 | Upload per backfill frame (median) | 520 ms | 299 ms |
 
-The remaining per-frame time is the 4 ms upload budget: a frame's 392 chunks
-need about 36 animation frames of it. Raising the budget trades frame time
-during loading for load speed and is a separate decision.
+The remaining per-frame time was attributed here to the 4 ms upload budget.
+Measurement later the same day disproved that; see below.
+
+### Upload budget and a deeper prefetch (2026-09-29)
+
+Raising the upload budget did not speed loading. Two packaged launches each
+(`scripts/run-national-load-bench.ps1`, profiler off) loaded 60 frames in
+23.9 and 24.7 s at 4 ms, 25.1 s at 6 ms, and 26.2 and 24.2 s at 8 ms, with
+GPU staging at 261 to 294 ms per frame throughout; no setting missed a
+refresh while loading. The budget stays at 4 ms.
+
+A load trace then showed each backfill frame still waiting 170 ms on
+average for its prepare: the single prefetch started only once the previous
+predecessor was staged, about 275 ms of head start against 300 to 650 ms of
+download and decode. The backend now keeps the next three predecessors
+downloading and decoding, starting with the first three as soon as the
+current observation is staged, so backfill begins while the first frame
+uploads. Prefetches outside that window, or from an older session, are
+aborted.
+
+| | Before | After |
+|---|---:|---:|
+| Prepare wait per backfill frame (mean) | 170 ms | 2 ms |
+| 20 frames | 7.8 to 9.0 s | 6.6 to 8.8 s |
+| 60 frames | 23.9 to 26.2 s (5 runs) | 18.4 to 22.9 s (4 runs) |
+
+GPU staging, about 260 to 310 ms per frame, is now the whole per-frame
+cost. It is not the upload budget; the next step is finding what paces it.
+The load bench also records every animation-frame interval while history
+loads (`loadFramePacing`); set `MISTR_BENCH_NO_PROFILE=1` so the sampling
+profiler does not skew it.
 
 Diagnostics: `__MISTR_NATIONAL_PHASE4__.loadTrace()` records each prepare's
 discovery, download, and decode times, and the first frame's steps
