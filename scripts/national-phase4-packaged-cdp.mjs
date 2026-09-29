@@ -250,6 +250,12 @@ try {
     300_000,
   );
 
+  const latestIntent = await evaluate(
+    serialized("window.__MISTR_NATIONAL_PHASE4__.proveLatestIntentWins('KTLX')"),
+    true,
+    300_000,
+  );
+
   const timeCarry = await evaluate(
     serialized("window.__MISTR_NATIONAL_PHASE4__.proveTimeCarry('KTLX')"),
     true,
@@ -258,6 +264,12 @@ try {
 
   const siteInspection = await evaluate(
     serialized("window.__MISTR_NATIONAL_PHASE4__.proveSiteInspectionFollowsScan('KTLX')"),
+    true,
+    300_000,
+  );
+
+  const abandonedNationalLoad = await evaluate(
+    serialized("window.__MISTR_NATIONAL_PHASE4__.proveAbandonedNationalLoadKeepsSite('KTLX')"),
     true,
     300_000,
   );
@@ -288,8 +300,10 @@ try {
     failedSiteRecovery,
     residentHandoff,
     zoomHandoff,
+    latestIntent,
     timeCarry,
     siteInspection,
+    abandonedNationalLoad,
     restoredSite,
   };
   report.failures = validateNationalPhase4Acceptance(report);

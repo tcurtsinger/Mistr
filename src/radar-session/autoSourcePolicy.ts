@@ -1,5 +1,6 @@
 import type { RadarSiteOption } from "../data/radarSites";
 import { rangeBearing, type LngLatPoint } from "../radar-renderer/geo";
+import type { RadarSourceKey } from "./RadarSessionCoordinator";
 
 /** Zoom at which a covering Site replaces the ~1 km National mosaic. */
 export const AUTO_SITE_ENTER_ZOOM = 9;
@@ -92,6 +93,31 @@ export function decideAutoSource(
   if (zoom >= enterZoom) return { target: { kind: "site", siteIcao: candidate }, ...spent };
   if (zoom >= preloadZoom) return { target: NATIONAL, preload: candidate, ...spent };
   return { target: NATIONAL, ...spent };
+}
+
+/**
+ * The source a launch opens for the restored camera. Nothing is shown yet,
+ * so the thresholds for entering a Site apply, as they do from National.
+ */
+export function launchAutoSource(
+  camera: { readonly zoom: number; readonly center: LngLatPoint },
+  sites: readonly RadarSiteOption[],
+): AutoSource {
+  return decideAutoSource({ ...camera, visible: NATIONAL }, sites).target;
+}
+
+export function autoSourceOf(source: RadarSourceKey): AutoSource {
+  return source.kind === "national" ? NATIONAL : { kind: "site", siteIcao: source.siteIcao };
+}
+
+/**
+ * The switch a pick calls for next from the visible source: picking another
+ * Site passes through National, and picking National (undefined) goes there.
+ */
+export function pickedNextSource(pick: string | undefined, visible: AutoSource): AutoSource {
+  if (pick === undefined) return NATIONAL;
+  if (visible.kind === "site") return visible.siteIcao === pick ? visible : NATIONAL;
+  return { kind: "site", siteIcao: pick };
 }
 
 export function sameAutoSource(left: AutoSource, right: AutoSource): boolean {

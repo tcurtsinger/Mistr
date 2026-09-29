@@ -1411,7 +1411,19 @@ fn phase4_fixture_path(
     if development_path.is_file() {
         return Ok(development_path);
     }
-    Ok(resource_root.join("fixtures").join(relative))
+    let bundled_path = resource_root.join("fixtures").join(relative);
+    if !bundled_path.is_file() {
+        // Installers carry only the newest scan, the startup fallback. The
+        // rest of the archive loop is read from a repository checkout.
+        return Err(TransferError::new(
+            "fixture_not_bundled",
+            format!(
+                "fixture {} is not bundled; run archive diagnostics from the repository",
+                fixture.id
+            ),
+        ));
+    }
+    Ok(bundled_path)
 }
 
 fn phase6_fixture_path(fixture: &FixtureManifestEntry) -> Result<PathBuf, TransferError> {
@@ -2000,6 +2012,35 @@ mod tests {
         );
         let error = verify_phase3_archive_hash(b"another valid archive could decode").unwrap_err();
         assert_eq!(error.code, "fixture_hash_mismatch");
+    }
+
+    #[test]
+    fn installers_bundle_only_the_startup_fallback_scan() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let resources = config["bundle"]["resources"].as_object().unwrap();
+        let source = format!("../fixtures/cache/{PHASE3_FIXTURE_NAME}");
+        assert_eq!(resources.keys().collect::<Vec<_>>(), vec![&source]);
+        assert_eq!(
+            resources[&source],
+            format!("fixtures/cache/{PHASE3_FIXTURE_NAME}")
+        );
+    }
+
+    #[test]
+    fn a_loop_scan_missing_from_an_install_reports_not_bundled() {
+        let manifest = fixture_manifest().unwrap();
+        let fixture_id = &manifest.fixture_sets.get(PHASE4_FIXTURE_SET).unwrap()[0];
+        let fixture = phase4_fixture_expectation_in(&manifest, fixture_id).unwrap();
+        let root = std::env::temp_dir().join(format!("mistr-not-bundled-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let error = phase4_fixture_path(&fixture, &root).unwrap_err();
+        assert_eq!(error.code, "fixture_not_bundled");
+        let bundled = root.join("fixtures").join(&fixture.local_path);
+        std::fs::create_dir_all(bundled.parent().unwrap()).unwrap();
+        std::fs::write(&bundled, b"scan").unwrap();
+        assert_eq!(phase4_fixture_path(&fixture, &root).unwrap(), bundled);
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

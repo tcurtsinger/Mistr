@@ -43,6 +43,10 @@ function Test-PackagedLaunch([string]$Executable, [string]$WorkingDirectory, [in
     if (-not (Test-Path -LiteralPath $Executable -PathType Leaf)) {
         throw "Installed Mistr executable was not found at $Executable"
     }
+    $fallbackScan = Join-Path $WorkingDirectory "fixtures\cache\KTLX20240520_230512_V06"
+    if (-not (Test-Path -LiteralPath $fallbackScan -PathType Leaf)) {
+        throw "Installed Mistr is missing its startup fallback scan at $fallbackScan"
+    }
     $previousArguments = $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS
     $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=$Port"
     $env:MISTR_CDP_PORT = "$Port"

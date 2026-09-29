@@ -4,6 +4,8 @@ import {
   validateResidentHandoff,
   validateBackfillFreshness,
   validateSiteInspection,
+  validateAbandonedNationalLoad,
+  validateLatestIntent,
   validateTimeCarry,
   validateZoomHandoff,
 } from "./national-phase4-packaged-validation.mjs";
@@ -189,6 +191,62 @@ describe("National Phase 4 packaged acceptance", () => {
     delete report.zoomHandoff;
     expect(validateNationalPhase4Acceptance(report)).toContain(
       "zooming in fades the preloaded Site in without moving the camera",
+    );
+  });
+
+  it("requires a changed view to abandon a slow Site download", () => {
+    expect(validateLatestIntent(validReport().latestIntent)).toEqual([]);
+
+    const waited = validReport().latestIntent;
+    waited.zoomOut.settledMs = 45_000;
+    expect(validateLatestIntent(waited)).toContain(
+      "zooming out during a slow Site download abandons it within seconds",
+    );
+
+    const neverHeld = validReport().latestIntent;
+    neverHeld.zoomOut.inFlight.switchInFlight = null;
+    expect(validateLatestIntent(neverHeld)).toContain(
+      "zooming out during a slow Site download abandons it within seconds",
+    );
+
+    const leakedLane = validReport().latestIntent;
+    leakedLane.zoomOut.siteLaneActive = true;
+    expect(validateLatestIntent(leakedLane)).toContain(
+      "zooming out during a slow Site download abandons it within seconds",
+    );
+
+    const obsoletePainted = validReport().latestIntent;
+    obsoletePainted.sources = ["national", "KTLX", "national", "KFWS", "national"];
+    expect(validateLatestIntent(obsoletePainted)).toContain(
+      "panning to another Site during a slow download switches to that Site instead",
+    );
+
+    const report = validReport();
+    delete report.latestIntent;
+    expect(validateNationalPhase4Acceptance(report)).toContain(
+      "zooming out during a slow Site download abandons it within seconds",
+    );
+  });
+
+  it("requires zooming back in to abandon a fresh National load", () => {
+    expect(validateAbandonedNationalLoad(validReport().abandonedNationalLoad)).toEqual([]);
+
+    const waited = validReport().abandonedNationalLoad;
+    waited.settledMs = 20_000;
+    expect(validateAbandonedNationalLoad(waited)).toEqual([
+      "zooming back in during a fresh National load keeps the Site updating",
+    ]);
+
+    const leakedLane = validReport().abandonedNationalLoad;
+    leakedLane.nationalLaneActive = true;
+    expect(validateAbandonedNationalLoad(leakedLane)).toEqual([
+      "zooming back in during a fresh National load keeps the Site updating",
+    ]);
+
+    const report = validReport();
+    delete report.abandonedNationalLoad;
+    expect(validateNationalPhase4Acceptance(report)).toContain(
+      "zooming back in during a fresh National load keeps the Site updating",
     );
   });
 
@@ -516,12 +574,53 @@ function validReport() {
       },
       playing: { site: { playing: true, frames: 3 }, national: { playing: true } },
     },
+    latestIntent: {
+      site: "KTLX",
+      nextSite: "KFWS",
+      zoomOut: {
+        inFlight: {
+          switchInFlight: { target: { kind: "site", siteIcao: "KTLX" }, abandoned: false },
+          painted: "national",
+          siteLaneActive: true,
+        },
+        settledMs: 1_200,
+        painted: "national",
+        siteLaneActive: false,
+        siteLayerPresent: false,
+      },
+      pan: {
+        inFlight: {
+          switchInFlight: { target: { kind: "site", siteIcao: "KTLX" }, abandoned: false },
+          painted: "national",
+          siteLaneActive: true,
+        },
+        switchMs: 9_000,
+        painted: "KFWS",
+      },
+      abandoned: 2,
+      sources: ["national", "KFWS", "national"],
+    },
     siteInspection: {
       site: "KTLX",
       steps: [
         { index: 0, paintedObservationId: "s-old", inspectedObservationId: "s-old" },
         { index: 4, paintedObservationId: "s-new", inspectedObservationId: "s-new" },
       ],
+    },
+    abandonedNationalLoad: {
+      site: "KTLX",
+      inFlight: {
+        switchInFlight: { target: { kind: "national" }, abandoned: false },
+        painted: "KTLX",
+        nationalLaneActive: true,
+        siteLaneActive: false,
+      },
+      settledMs: 900,
+      painted: "KTLX",
+      nationalLaneActive: false,
+      siteUpdatesResumedMs: 1_100,
+      siteOpacity: 1,
+      nationalLayerPresent: false,
     },
     restoredSite: {
       sourceState: { painted: { source: { kind: "site", siteIcao: "KTLX" } }, transition: null },

@@ -28,15 +28,15 @@ The ignored evidence is written by `npm run test:alpha:soak`. Provider payloads 
 
 ## Installed-product gate
 
-Both local Windows bundle formats must build and pass install, first-launch, GPU-paint, and uninstall checks. The installed application must paint the newest pinned KTLX archive observation without depending on the repository working directory or the developer's ignored fixture cache, and packaged diagnostics must still be able to hydrate the complete 20-frame loop.
+Both local Windows bundle formats must build and pass install, first-launch, GPU-paint, and uninstall checks. The installed application must paint the newest pinned KTLX archive observation without depending on the repository working directory or the developer's ignored fixture cache.
 
 The public Alpha package version is `0.1.0`. Local upgrade evidence installs the prior `0.0.1` bundle, applies the `0.1.0` bundle, proves the new installed radar, and then uninstalls it for both NSIS and MSI.
 
-The release bundle therefore includes only the 20 hash-pinned Phase 4 archives as named Tauri resources. The source files remain ignored public-data downloads; the reviewed manifest, exact resource allowlist, sizes, and hashes remain the provenance boundary. Runtime resolution prefers an explicit diagnostic override, then a development checkout, then Tauri's packaged resource directory.
+The release bundle therefore includes one hash-pinned archive, the newest Phase 4 observation, as a named Tauri resource. It is the startup fallback; the other 19 loop archives (about 153 MiB raw) were dropped from the installer on 2026-09-28 because only diagnostics read them. Packaged diagnostics that hydrate the full 20-frame loop run from a repository checkout, where every packaged harness launches, and an installed build reports `fixture_not_bundled` for the rest of the loop. The source files remain ignored public-data downloads; the reviewed manifest, exact resource allowlist, sizes, and hashes remain the provenance boundary. Runtime resolution prefers an explicit diagnostic override, then a development checkout, then Tauri's packaged resource directory.
 
 `npm run test:alpha:installers` validates local NSIS and MSI mechanics plus the installed first-launch radar. `npm run test:alpha:clean-machine` performs the dependency-isolated install/launch/uninstall pass when Windows Sandbox is enabled. A local install pass is not mislabeled as clean-machine evidence.
 
-**Result:** Passed for the final `0.1.0` NSIS and MSI bundles. Both upgraded from local `0.0.1` baselines, established the 20-frame KTLX archive from installed resources, painted it on the GPU, and uninstalled cleanly. The same final bundles passed independent NSIS/MSI install, launch, and uninstall in a fresh Windows 11 Enterprise Sandbox.
+**Result:** Passed for the final `0.1.0` NSIS and MSI bundles. Both upgraded from local `0.0.1` baselines, established the 20-frame KTLX archive from installed resources, painted it on the GPU, and uninstalled cleanly. (That run predates the one-archive installer; the installed smoke now checks the fallback paint, or the live KTLX scan that replaces it, instead of the 20-frame loop.) The same final bundles passed independent NSIS/MSI install, launch, and uninstall in a fresh Windows 11 Enterprise Sandbox.
 
 ## Interface and accessibility gate
 
