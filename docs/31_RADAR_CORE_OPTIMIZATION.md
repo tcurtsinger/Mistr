@@ -239,9 +239,15 @@ picture is unchanged: every fragment such a chunk covers would discard.
 | GPU memory for 60 frames | 2,985 MB | 1,104 MB |
 
 The saving depends on the weather: widespread precipitation leaves fewer
-empty chunks, although areas outside radar coverage are always empty. The
-backend still retains every chunk's bytes; dropping the empty ones would
-save about the same share of its memory.
+empty chunks, although areas outside radar coverage are always empty.
+
+The backend holds the same chunks compactly. Point inspection reads them, and
+an empty chunk still distinguishes missing from no-coverage cells, so it
+keeps its record header and either one code (when every cell matches) or one
+bit per cell: about 8 KiB at most instead of about 127 KiB. Its record is
+rebuilt byte for byte if anything requests it. For 60 frames on the same
+day, the backend's retained frame bytes fell from 3,138 MB to 1,252 MB, and
+its process memory from 3,081 MB to 1,322 MB.
 The load bench also records every animation-frame interval while history
 loads (`loadFramePacing`); set `MISTR_BENCH_NO_PROFILE=1` so the sampling
 profiler does not skew it.
