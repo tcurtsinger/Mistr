@@ -465,6 +465,28 @@ impl ChunkAssembler {
         assemble(volume, volume.contiguous_through())
     }
 
+    /// The byte length of the contiguous prefix `assembled_contiguous` returns.
+    pub fn contiguous_byte_len(&self) -> usize {
+        self.volume.as_ref().map_or(0, |volume| {
+            (1..=volume.contiguous_through())
+                .filter_map(|sequence| volume.chunks.get(&sequence))
+                .map(|chunk| chunk.bytes.len())
+                .sum()
+        })
+    }
+
+    /// The assembled prefix through `through`, which must be contiguous.
+    pub fn assembled_through(&self, through: u16) -> Result<Vec<u8>, ChunkAssemblyError> {
+        let volume = self
+            .volume
+            .as_ref()
+            .ok_or(ChunkAssemblyError::NoActiveVolume)?;
+        if through > volume.contiguous_through() {
+            return Err(ChunkAssemblyError::VolumeIncomplete);
+        }
+        assemble(volume, through)
+    }
+
     pub fn assembled_complete(&self) -> Result<Vec<u8>, ChunkAssemblyError> {
         let volume = self
             .volume

@@ -2,7 +2,9 @@
 //! chunk-assembly boundaries.
 
 use crate::acquisition::{AcquisitionCounters, AcquisitionError, PublicRadarClient};
-use crate::chunk_assembly::{ChunkAssembler, ChunkAssemblyError, ChunkIngestOutcome};
+use crate::chunk_assembly::{
+    ChunkAssembler, ChunkAssemblyError, ChunkIngestOutcome, ChunkMetadata, VolumeIdentity,
+};
 use crate::radar::{DecodeError, DecodeOutput, RadarProduct, decode_safe_lowest_sweep};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -17,9 +19,15 @@ use tokio::time::{Instant, sleep};
 
 const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(1);
 // A lowest sweep usually completes within the first seven or so chunks, so
-// one window covers it in one round trip; a safe sweep found mid-window
-// leaves at most seven extra chunks downloaded and unused.
+// one window covers it in one round trip and one round of concurrent safe
+// decodes; a safe sweep found mid-window leaves at most seven extra chunks
+// downloaded and decoded unused.
 const CHUNK_DOWNLOAD_WINDOW: usize = 8;
+// A window's safe decodes run together while their inputs total at most
+// this. A first scan's seven or so total about 5 MB; the prefixes of a
+// large volume run in smaller groups, since each decoder copies and
+// decompresses its whole input.
+const CONCURRENT_SAFE_DECODE_INPUT_BYTES: usize = 16 * 1024 * 1024;
 
 #[derive(Debug, Clone, Default)]
 pub struct GenerationClock {
@@ -467,8 +475,11 @@ impl LiveSweepSession {
         candidates.sort_by_key(|(sequence, _, _)| *sequence);
         candidates.retain(|(_, object, _)| !self.downloaded_keys.contains(&object.key));
         // Chunks download a window at a time and are ingested in sequence, so
-        // a volume costs a few round trips rather than one per chunk.
+        // a volume costs a few round trips rather than one per chunk. Each
+        // contiguous boundary the window reaches is captured, and the window's
+        // boundaries decode together once it is ingested.
         let mut downloaded = Vec::new();
+        let mut boundaries = Vec::new();
         for (index, (_, object, _)) in candidates.iter().enumerate() {
             if index % CHUNK_DOWNLOAD_WINDOW == 0 {
                 let window =
@@ -484,34 +495,38 @@ impl LiveSweepSession {
                 .await;
                 downloaded.reverse();
             }
-            let (metadata, bytes) = downloaded
+            let ingested = downloaded
                 .pop()
-                .expect("a download for every chunk in the window")?;
-            self.token.ensure_current()?;
-            let previous_contiguous = self.assembler.contiguous_through();
-            let outcome = self
-                .assembler
-                .ingest(self.token.generation(), metadata, bytes)?;
-            self.downloaded_keys.insert(object.key.clone());
-            let contiguous_advanced = contiguous_prefix_advanced(previous_contiguous, &outcome);
-            match outcome {
-                ChunkIngestOutcome::Accepted {
-                    waiting_for_sequence,
-                    ..
-                } => {
-                    if waiting_for_sequence.is_some() {
-                        self.gap_observations = self.gap_observations.saturating_add(1);
-                    }
+                .expect("a download for every chunk in the window")
+                .map_err(LivePipelineError::from)
+                .and_then(|(metadata, bytes)| {
+                    self.ingest_listed_chunk(
+                        &object.key,
+                        metadata,
+                        bytes,
+                        attempt_safe_decode,
+                        &mut boundaries,
+                    )
+                });
+            if let Err(error) = ingested {
+                // A later chunk's failure does not cost a safe sweep that an
+                // earlier boundary in its window already holds.
+                if self.token.is_current()
+                    && let Some(candidate) = self
+                        .try_safe_sweeps(std::mem::take(&mut boundaries))
+                        .await?
+                {
+                    return Ok(Some(candidate));
                 }
-                ChunkIngestOutcome::Duplicate { .. } => {
-                    self.duplicate_observations = self.duplicate_observations.saturating_add(1);
-                }
-                ChunkIngestOutcome::Late { .. } => {}
-                ChunkIngestOutcome::Rollover { .. } => {}
+                return Err(error);
             }
-            if attempt_safe_decode
-                && contiguous_advanced
-                && let Some(candidate) = self.try_safe_sweep().await?
+            let window_ingested =
+                (index + 1) % CHUNK_DOWNLOAD_WINDOW == 0 || index + 1 == candidates.len();
+            if window_ingested
+                && !boundaries.is_empty()
+                && let Some(candidate) = self
+                    .try_safe_sweeps(std::mem::take(&mut boundaries))
+                    .await?
             {
                 // Do not download a later listed chunk after the earliest safe
                 // contiguous boundary has produced publishable radar truth.
@@ -524,64 +539,231 @@ impl LiveSweepSession {
         Ok(None)
     }
 
-    async fn try_safe_sweep(&mut self) -> Result<Option<SafeSweepCandidate>, LivePipelineError> {
-        if self.assembler.contiguous_through() == 0 {
+    /// Ingests one downloaded chunk and, when safe decodes are attempted,
+    /// captures the contiguous boundary it reaches.
+    fn ingest_listed_chunk(
+        &mut self,
+        key: &str,
+        metadata: ChunkMetadata,
+        bytes: Vec<u8>,
+        attempt_safe_decode: bool,
+        boundaries: &mut Vec<SafeDecodeBoundary>,
+    ) -> Result<(), LivePipelineError> {
+        self.token.ensure_current()?;
+        let previous_contiguous = self.assembler.contiguous_through();
+        let outcome = self
+            .assembler
+            .ingest(self.token.generation(), metadata, bytes)?;
+        self.downloaded_keys.insert(key.to_string());
+        let contiguous_advanced = contiguous_prefix_advanced(previous_contiguous, &outcome);
+        match outcome {
+            ChunkIngestOutcome::Accepted {
+                waiting_for_sequence,
+                ..
+            } => {
+                if waiting_for_sequence.is_some() {
+                    self.gap_observations = self.gap_observations.saturating_add(1);
+                }
+            }
+            ChunkIngestOutcome::Duplicate { .. } => {
+                self.duplicate_observations = self.duplicate_observations.saturating_add(1);
+            }
+            ChunkIngestOutcome::Late { .. } => {}
+            // Boundaries of the superseded volume can no longer publish.
+            ChunkIngestOutcome::Rollover { .. } => boundaries.clear(),
+        }
+        if attempt_safe_decode
+            && contiguous_advanced
+            && let Some(boundary) = self.safe_decode_boundary()?
+        {
+            boundaries.push(boundary);
+        }
+        Ok(())
+    }
+
+    /// The contiguous prefix just reached, captured for a safe decode.
+    fn safe_decode_boundary(&self) -> Result<Option<SafeDecodeBoundary>, LivePipelineError> {
+        let through = self.assembler.contiguous_through();
+        let Some(volume) = self.assembler.active_volume().cloned() else {
+            return Ok(None);
+        };
+        if through == 0 {
             return Ok(None);
         }
-        let bytes = self.assembler.assembled_contiguous()?;
-        let decode_started_at_unix_ms = Utc::now().timestamp_millis();
-        self.decoder_attempts = self.decoder_attempts.saturating_add(1);
-        let decoded = run_native_work("mistr-level2-safe-decode", move || {
-            decode_safe_lowest_sweep(&bytes, RadarProduct::Reflectivity)
+        let last_modified_unix_ms = self
+            .assembler
+            .latest_contiguous_last_modified_unix_ms()
+            .ok_or_else(|| {
+                LivePipelineError::Assembly("safe sequence has no last-modified timestamp".into())
+            })?;
+        Ok(Some(SafeDecodeBoundary {
+            volume,
+            through,
+            last_modified_unix_ms,
+            input_bytes: self.assembler.contiguous_byte_len(),
+        }))
+    }
+
+    /// Decodes `boundaries` concurrently and publishes the earliest that holds
+    /// a safe sweep, exactly as trying each in turn would. Each attempt costs
+    /// up to about 130 ms, so a window's seven or so took about 460 ms in
+    /// turn; together they take about as long as the one that succeeds.
+    async fn try_safe_sweeps(
+        &mut self,
+        boundaries: Vec<SafeDecodeBoundary>,
+    ) -> Result<Option<SafeSweepCandidate>, LivePipelineError> {
+        let Some(last) = boundaries.last() else {
+            return Ok(None);
+        };
+        // One assembled buffer serves every boundary: each is a prefix of it.
+        let assembled = Arc::new(self.assembler.assembled_through(last.through)?);
+        if boundaries
+            .iter()
+            .any(|boundary| boundary.input_bytes > assembled.len())
+        {
+            return Err(LivePipelineError::Assembly(
+                "safe decode boundary exceeds the assembled volume".into(),
+            ));
+        }
+        let groups = concurrent_decode_groups(
+            &boundaries
+                .iter()
+                .map(|boundary| boundary.input_bytes)
+                .collect::<Vec<_>>(),
+            CONCURRENT_SAFE_DECODE_INPUT_BYTES,
+        );
+        let mut boundaries = boundaries.into_iter();
+        for group in groups {
+            let mut attempts = Vec::with_capacity(group);
+            for boundary in boundaries.by_ref().take(group) {
+                let assembled = assembled.clone();
+                let input_bytes = boundary.input_bytes;
+                let decode = spawn_native_work("mistr-level2-safe-decode", move || {
+                    let started_at_unix_ms = Utc::now().timestamp_millis();
+                    let decoded = decode_safe_lowest_sweep(
+                        &assembled[..input_bytes],
+                        RadarProduct::Reflectivity,
+                    );
+                    (started_at_unix_ms, decoded, Utc::now().timestamp_millis())
+                })?;
+                attempts.push((boundary, decode));
+            }
+            if let Some(decoded) =
+                earliest_safe_decode(attempts, &mut self.decoder_attempts).await?
+            {
+                return self.publish_safe_sweep(decoded).map(Some);
+            }
+        }
+        Ok(None)
+    }
+
+    fn publish_safe_sweep(
+        &mut self,
+        decoded: SafeDecoded<SafeDecodeBoundary, DecodeOutput>,
+    ) -> Result<SafeSweepCandidate, LivePipelineError> {
+        let SafeDecoded {
+            boundary,
+            output,
+            started_at_unix_ms: decode_started_at_unix_ms,
+            completed_at_unix_ms: decode_completed_at_unix_ms,
+        } = decoded;
+        self.token.ensure_current()?;
+        if self.assembler.active_volume() != Some(&boundary.volume) {
+            return Err(LivePipelineError::Assembly(
+                "safe decode completed for a superseded volume".into(),
+            ));
+        }
+        self.assembler.mark_safe_sweep_published()?;
+        self.safe_fingerprint = Some(SweepFingerprint::from_output(&output));
+        Ok(SafeSweepCandidate {
+            evidence: SafeSweepEvidence {
+                generation: self.token.generation(),
+                site: self.site.clone(),
+                volume_index: boundary.volume.volume_index,
+                volume_started_at_unix_ms: boundary.volume.started_at_unix_ms,
+                safe_sequence: boundary.through,
+                safe_chunk_last_modified_unix_ms: boundary.last_modified_unix_ms,
+                discovered_at_unix_ms: decode_started_at_unix_ms,
+                decode_started_at_unix_ms,
+                decode_completed_at_unix_ms,
+                decoder_attempts: self.decoder_attempts,
+                gap_observations: self.gap_observations,
+                duplicate_observations: self.duplicate_observations,
+                acquisition_delta: subtract_counters(
+                    self.client.counters(),
+                    self.counters_at_start,
+                ),
+            },
+            output,
         })
-        .await?;
-        let decode_completed_at_unix_ms = Utc::now().timestamp_millis();
+    }
+}
+
+/// A contiguous prefix of the active volume and its assembled length.
+struct SafeDecodeBoundary {
+    volume: VolumeIdentity,
+    through: u16,
+    last_modified_unix_ms: i64,
+    input_bytes: usize,
+}
+
+/// The sizes of consecutive groups of boundaries, by their input sizes in
+/// order, that decode together: each group's inputs total at most `budget`,
+/// and a group always holds at least one boundary.
+fn concurrent_decode_groups(input_bytes: &[usize], budget: usize) -> Vec<usize> {
+    let mut groups = Vec::new();
+    let (mut size, mut total) = (0usize, 0usize);
+    for &bytes in input_bytes {
+        if size > 0 && total.saturating_add(bytes) > budget {
+            groups.push(size);
+            (size, total) = (0, 0);
+        }
+        size += 1;
+        total = total.saturating_add(bytes);
+    }
+    if size > 0 {
+        groups.push(size);
+    }
+    groups
+}
+
+/// A safe decode running on its own thread: its start time, result, and
+/// completion time.
+type SafeDecodeAttempt<T> = tokio::sync::oneshot::Receiver<(i64, Result<T, DecodeError>, i64)>;
+
+struct SafeDecoded<B, T> {
+    boundary: B,
+    output: T,
+    started_at_unix_ms: i64,
+    completed_at_unix_ms: i64,
+}
+
+/// The earliest of `attempts`, in the order given, that decoded a safe
+/// sweep. They run concurrently and are read in order, so the result is the
+/// one trying each in turn gives; a later attempt still running when an
+/// earlier one succeeds is left to finish unread.
+async fn earliest_safe_decode<B, T>(
+    attempts: Vec<(B, SafeDecodeAttempt<T>)>,
+    decoder_attempts: &mut u32,
+) -> Result<Option<SafeDecoded<B, T>>, LivePipelineError> {
+    for (boundary, attempt) in attempts {
+        let (started_at_unix_ms, decoded, completed_at_unix_ms) =
+            native_work_result(attempt).await?;
+        *decoder_attempts = decoder_attempts.saturating_add(1);
         match decoded {
             Ok(output) => {
-                self.token.ensure_current()?;
-                let volume = self.assembler.active_volume().cloned().ok_or_else(|| {
-                    LivePipelineError::Assembly(
-                        "safe decode completed without an active volume".into(),
-                    )
-                })?;
-                self.assembler.mark_safe_sweep_published()?;
-                let fingerprint = SweepFingerprint::from_output(&output);
-                self.safe_fingerprint = Some(fingerprint);
-                Ok(Some(SafeSweepCandidate {
-                    evidence: SafeSweepEvidence {
-                        generation: self.token.generation(),
-                        site: self.site.clone(),
-                        volume_index: volume.volume_index,
-                        volume_started_at_unix_ms: volume.started_at_unix_ms,
-                        safe_sequence: self.assembler.contiguous_through(),
-                        safe_chunk_last_modified_unix_ms: self
-                            .assembler
-                            .latest_contiguous_last_modified_unix_ms()
-                            .ok_or_else(|| {
-                                LivePipelineError::Assembly(
-                                    "safe sequence has no last-modified timestamp".into(),
-                                )
-                            })?,
-                        discovered_at_unix_ms: decode_started_at_unix_ms,
-                        decode_started_at_unix_ms,
-                        decode_completed_at_unix_ms,
-                        decoder_attempts: self.decoder_attempts,
-                        gap_observations: self.gap_observations,
-                        duplicate_observations: self.duplicate_observations,
-                        acquisition_delta: subtract_counters(
-                            self.client.counters(),
-                            self.counters_at_start,
-                        ),
-                    },
+                return Ok(Some(SafeDecoded {
+                    boundary,
                     output,
-                }))
+                    started_at_unix_ms,
+                    completed_at_unix_ms,
+                }));
             }
-            Err(DecodeError::MissingProduct { .. }) | Err(DecodeError::IncompleteSweep(_)) => {
-                Ok(None)
-            }
-            Err(error) => Err(LivePipelineError::Decode(error.to_string())),
+            Err(DecodeError::MissingProduct { .. }) | Err(DecodeError::IncompleteSweep(_)) => {}
+            Err(error) => return Err(LivePipelineError::Decode(error.to_string())),
         }
     }
+    Ok(None)
 }
 
 fn contiguous_prefix_advanced(previous: u16, outcome: &ChunkIngestOutcome) -> bool {
@@ -599,6 +781,18 @@ where
     T: Send + 'static,
     F: FnOnce() -> T + Send + 'static,
 {
+    native_work_result(spawn_native_work(thread_name, work)?).await
+}
+
+/// Starts `work` on its own native thread; its result arrives on the receiver.
+fn spawn_native_work<T, F>(
+    thread_name: &str,
+    work: F,
+) -> Result<tokio::sync::oneshot::Receiver<T>, LivePipelineError>
+where
+    T: Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
+{
     let (sender, receiver) = tokio::sync::oneshot::channel();
     std::thread::Builder::new()
         .name(thread_name.to_string())
@@ -606,6 +800,12 @@ where
             let _ = sender.send(work());
         })
         .map_err(|error| LivePipelineError::DecodeTask(error.to_string()))?;
+    Ok(receiver)
+}
+
+async fn native_work_result<T>(
+    receiver: tokio::sync::oneshot::Receiver<T>,
+) -> Result<T, LivePipelineError> {
     receiver.await.map_err(|_| {
         LivePipelineError::DecodeTask("native decoder stopped before returning a result".into())
     })
@@ -910,6 +1110,69 @@ mod tests {
         assert!(contiguous_prefix_advanced(6, &contiguous));
         assert!(!contiguous_prefix_advanced(7, &gap));
         assert!(!contiguous_prefix_advanced(7, &duplicate));
+    }
+
+    #[test]
+    fn concurrent_safe_decodes_share_a_bounded_input_budget() {
+        // A first scan's prefixes all decode together.
+        assert_eq!(concurrent_decode_groups(&[1, 2, 3, 4], 100), [4]);
+        // Larger ones split once the budget is reached, in order.
+        assert_eq!(
+            concurrent_decode_groups(&[10, 10, 10, 10, 10], 25),
+            [2, 2, 1]
+        );
+        // A prefix over the budget still decodes, on its own.
+        assert_eq!(concurrent_decode_groups(&[30, 5, 40], 20), [1, 1, 1]);
+        assert!(concurrent_decode_groups(&[], 20).is_empty());
+    }
+
+    #[tokio::test]
+    async fn concurrent_safe_decodes_publish_the_earliest_boundary_that_decodes() {
+        let attempt = |delay_ms: u64, decoded: Result<&'static str, DecodeError>| {
+            spawn_native_work("mistr-test-safe-decode", move || {
+                std::thread::sleep(Duration::from_millis(delay_ms));
+                (0, decoded, 0)
+            })
+            .expect("test decode thread")
+        };
+        let started = std::time::Instant::now();
+        let mut decoder_attempts = 0;
+        let earliest = earliest_safe_decode(
+            vec![
+                (
+                    1,
+                    attempt(200, Err(DecodeError::MissingProduct { product: "REF" })),
+                ),
+                (
+                    2,
+                    attempt(200, Err(DecodeError::IncompleteSweep("open".into()))),
+                ),
+                (3, attempt(200, Ok("third"))),
+                // Finishes first, but a later boundary than the third.
+                (4, attempt(0, Ok("fourth"))),
+            ],
+            &mut decoder_attempts,
+        )
+        .await
+        .expect("safe decode")
+        .expect("a boundary decodes");
+        assert_eq!((earliest.boundary, earliest.output), (3, "third"));
+        assert_eq!(decoder_attempts, 3);
+        // Together, not in turn, which would take 600 ms.
+        assert!(started.elapsed() < Duration::from_millis(450));
+
+        let mut decoder_attempts = 0;
+        let none = earliest_safe_decode(
+            vec![(
+                1,
+                attempt(0, Err(DecodeError::IncompleteSweep("open".into()))),
+            )],
+            &mut decoder_attempts,
+        )
+        .await
+        .expect("safe decode");
+        assert!(none.is_none());
+        assert_eq!(decoder_attempts, 1);
     }
 
     #[tokio::test]
