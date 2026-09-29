@@ -3281,10 +3281,20 @@ export function App() {
           // Pin a point 30 km north of the radar, as a click would.
           inspectionPointRef.current = { longitude: location.longitude, latitude: location.latitude + 0.27 };
           interrogationObservationRef.current = null;
+          const history = residentLiveHistory ?? [];
+          const targets = [history[0], history[history.length - 1]].map((frame) => frame.observationId);
           const steps = [];
-          for (const index of [0, (residentLiveHistory?.length ?? 1) - 1]) {
-            await controller!.scrub(index);
-            await waitMilliseconds(100);
+          for (const observationId of targets) {
+            // Older scans keep arriving while history fills and shift every
+            // index, so each scan's index is resolved as it is selected, as a
+            // click on it would be, until that scan is the one painted.
+            let index = -1;
+            for (let attempt = 0; attempt < 20; attempt += 1) {
+              index = (residentLiveHistory ?? []).findIndex((frame) => frame.observationId === observationId);
+              await controller!.scrub(index).catch(() => undefined);
+              await waitMilliseconds(100);
+              if (layer?.getSnapshot().paintReceipt?.observationId === observationId) break;
+            }
             steps.push({
               index,
               paintedObservationId: layer?.getSnapshot().paintReceipt?.observationId ?? null,
@@ -3342,9 +3352,16 @@ export function App() {
             };
           };
           const carrySettled = () => playheadCarryRef.current === null;
+          // The carry is taken before its scrub paints, so the Site has also
+          // settled only once the frame it paints is the one it selected.
           const siteSettled = () => {
             const snapshot = coordinator.snapshot();
-            return !snapshot.transition && snapshot.painted?.source.kind === "site";
+            const playback = controller?.snapshot();
+            return !snapshot.transition
+              && snapshot.painted?.source.kind === "site"
+              && playback !== undefined
+              && !playback.holdReason
+              && playback.lastPaintedObservationId === playback.selectedObservationId;
           };
           const nationalSettled = () => {
             const snapshot = coordinator.snapshot();
