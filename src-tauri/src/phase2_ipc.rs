@@ -352,6 +352,25 @@ fn retain_site_prefetches(
     });
 }
 
+/// The prefetched sweep, or nothing once the request's own generation is
+/// cancelled: a prefetch runs under its own token, and a request waiting on
+/// it must still unwind, and release its credit, as promptly as one acquiring
+/// fresh.
+async fn await_prefetch(
+    task: SitePrefetchTask,
+    token: &GenerationToken,
+) -> Option<SafeSweepCandidate> {
+    let cancelled = async {
+        while token.is_current() {
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    };
+    tokio::select! {
+        joined = task => joined.ok().and_then(Result::ok),
+        () = cancelled => None,
+    }
+}
+
 /// Whether a prefetched volume is the one a request for the volume before
 /// `volume_index`, strictly older than `volume_started_at_unix_ms`, receives.
 fn prefetch_satisfies(
@@ -1180,7 +1199,7 @@ pub async fn request_phase5_live_sweep(
                 volume_index,
                 volume_started_at_unix_ms,
             }) => match prefetch.take(session, &site, volume_index) {
-                Some(task) => task.await.ok().and_then(Result::ok).filter(|candidate| {
+                Some(task) => await_prefetch(task, &token).await.filter(|candidate| {
                     prefetch_satisfies(
                         &candidate.evidence,
                         &site,
@@ -1885,6 +1904,25 @@ mod tests {
             1,
             2_000
         ));
+    }
+
+    #[tokio::test]
+    async fn a_request_waiting_on_a_prefetch_unwinds_when_cancelled() {
+        let token = GenerationClock::default().begin(3).unwrap();
+        let task = tauri::async_runtime::spawn(std::future::pending::<
+            Result<SafeSweepCandidate, TransferError>,
+        >());
+        let waiter = {
+            let token = token.clone();
+            tauri::async_runtime::spawn(async move { await_prefetch(task, &token).await })
+        };
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        token.cancel();
+        let waited = tokio::time::timeout(Duration::from_secs(2), waiter)
+            .await
+            .expect("the waiter stops within the cancellation poll")
+            .unwrap();
+        assert!(waited.is_none());
     }
 
     #[tokio::test]

@@ -280,7 +280,8 @@ finding the newest volume in the 999-slot ring.
   every request, so prefetches belong to the transfer session and site, run
   under their own token, and are held decoded; each is encoded for the
   request that uses it, and only if it is the exact volume that request's
-  cursor selects.
+  cursor selects. A request waiting on a prefetch still watches its own
+  generation, so a cancelled one releases its credit as promptly as before.
 - **Newest complete scan first.** A volume's lowest sweep takes the radar
   tens of seconds to record, and the first request waited for it when a Site
   opened just as a volume began. If the newest volume's listed chunks hold no
