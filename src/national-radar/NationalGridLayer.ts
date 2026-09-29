@@ -314,6 +314,9 @@ export class NationalGridLayer implements CustomLayerInterface {
   private status: NationalGridRendererSnapshot["status"] = "initializing";
   private runtimeError: string | undefined;
   private peakGpuResourceBytes = 0;
+  // GPU bytes owned when the current staging began (staging itself excluded).
+  private gpuBytesBeforeStaging = 0;
+  private frameEmitScheduled = false;
   private uploadCount = 0;
   private uploadBytes = 0;
   private maximumUploadSliceMs = 0;
@@ -379,49 +382,47 @@ export class NationalGridLayer implements CustomLayerInterface {
         this.fenceResidentPresentation(gl, this.active);
         return;
       }
-      const state = captureGlState(gl);
-      try {
-        gl.disable(gl.DEPTH_TEST);
-        gl.disable(gl.STENCIL_TEST);
-        gl.disable(gl.CULL_FACE);
-        gl.enable(gl.BLEND);
-        gl.blendEquationSeparate(gl.FUNC_ADD, gl.FUNC_ADD);
-        gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-        gl.useProgram(this.program);
-        gl.bindVertexArray(this.vao);
-        gl.uniformMatrix4fv(this.uniforms.matrix, false, options.defaultProjectionData.mainMatrix);
-        gl.uniform1i(this.uniforms.rawCodes, 0);
-        gl.uniform1i(this.uniforms.palette, 1);
-        gl.uniform1i(this.uniforms.smooth, this.displayMode === "smooth" ? 1 : 0);
-        gl.activeTexture(gl.TEXTURE1);
-        gl.bindTexture(gl.TEXTURE_2D, this.paletteTexture);
-        if (
-          this.fallback
-          && presentationUsesCommonFallback(this.active.manifest.presentationFactor)
-        ) {
-          this.drawPresentation(gl, this.fallback, this.active.coverage);
-        }
-        this.drawPresentation(gl, this.active, null);
-        this.drawSequence += 1;
-        if (this.fallback && !presentationIsResident(this.fallback)) {
-          this.map?.triggerRepaint();
-          return;
-        }
-        if (!this.pendingPaint && !receiptMatches(this.paintReceipt, this.active, this.contextEpoch)) {
-          const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
-          if (!sync) throw new Error("National renderer could not allocate a GPU completion fence");
-          this.pendingPaint = {
-            sync,
-            resources: this.active,
-            mutation: this.pendingResidencyMutation,
-            drawSequence: this.drawSequence,
-            presented: true,
-          };
-          gl.flush();
-          this.map?.triggerRepaint();
-        }
-      } finally {
-        restoreGlState(gl, state);
+      // MapLibre marks its GL state dirty after every custom layer and restores it,
+      // so this draw sets only what it needs instead of saving and restoring state
+      // through blocking getParameter queries every frame.
+      gl.disable(gl.DEPTH_TEST);
+      gl.disable(gl.STENCIL_TEST);
+      gl.disable(gl.CULL_FACE);
+      gl.enable(gl.BLEND);
+      gl.blendEquationSeparate(gl.FUNC_ADD, gl.FUNC_ADD);
+      gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+      gl.useProgram(this.program);
+      gl.bindVertexArray(this.vao);
+      gl.uniformMatrix4fv(this.uniforms.matrix, false, options.defaultProjectionData.mainMatrix);
+      gl.uniform1i(this.uniforms.rawCodes, 0);
+      gl.uniform1i(this.uniforms.palette, 1);
+      gl.uniform1i(this.uniforms.smooth, this.displayMode === "smooth" ? 1 : 0);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, this.paletteTexture);
+      if (
+        this.fallback
+        && presentationUsesCommonFallback(this.active.manifest.presentationFactor)
+      ) {
+        this.drawPresentation(gl, this.fallback, this.active.coverage);
+      }
+      this.drawPresentation(gl, this.active, null);
+      this.drawSequence += 1;
+      if (this.fallback && !presentationIsResident(this.fallback)) {
+        this.map?.triggerRepaint();
+        return;
+      }
+      if (!this.pendingPaint && !receiptMatches(this.paintReceipt, this.active, this.contextEpoch)) {
+        const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+        if (!sync) throw new Error("National renderer could not allocate a GPU completion fence");
+        this.pendingPaint = {
+          sync,
+          resources: this.active,
+          mutation: this.pendingResidencyMutation,
+          drawSequence: this.drawSequence,
+          presented: true,
+        };
+        gl.flush();
+        this.map?.triggerRepaint();
       }
     } catch (error) {
       if (this.pendingPaint) this.rollbackPendingCommit(error);
@@ -490,6 +491,7 @@ export class NationalGridLayer implements CustomLayerInterface {
       throw new Error("National renderer already owns an uncommitted presentation");
     }
     assertCoverageMatchesManifest(manifest, coverage);
+    this.gpuBytesBeforeStaging = this.currentGpuBytes();
     this.staging = {
       manifest,
       coverage,
@@ -533,8 +535,14 @@ export class NationalGridLayer implements CustomLayerInterface {
     this.maximumUploadSliceMs = Math.max(this.maximumUploadSliceMs, maximumSliceMs);
     this.uploadCount += 1;
     this.uploadBytes += resource.gpuBytes;
-    this.peakGpuResourceBytes = Math.max(this.peakGpuResourceBytes, this.currentGpuBytes());
-    this.emit();
+    // Staging only grows, so the peak is the bytes owned when it began plus
+    // what it has uploaded, without rescanning every resident presentation.
+    this.peakGpuResourceBytes = Math.max(
+      this.peakGpuResourceBytes,
+      this.gpuBytesBeforeStaging + staging.uploadedBytes,
+    );
+    // Hundreds of chunks upload per second; observers need progress once a frame.
+    this.emitOncePerFrame();
   }
 
   commitStaging(): Promise<NationalPaintReceipt> {
@@ -1571,6 +1579,15 @@ export class NationalGridLayer implements CustomLayerInterface {
   private emit() {
     this.options.onSnapshot?.(this.getSnapshot());
   }
+
+  private emitOncePerFrame() {
+    if (this.frameEmitScheduled) return;
+    this.frameEmitScheduled = true;
+    void nextAnimationFrame().then(() => {
+      this.frameEmitScheduled = false;
+      this.emit();
+    });
+  }
 }
 
 export function commonResidencyReadyForSelection(
@@ -1811,6 +1828,7 @@ export class UploadFrameBudget {
   recordFixedCost(elapsedMs: number): void {
     this.spentMs += elapsedMs;
   }
+
 }
 
 async function uploadRawTextureTimeSliced(
@@ -2022,76 +2040,6 @@ function requireUniform(
   const location = gl.getUniformLocation(program, name);
   if (!location) throw new Error(`National shader is missing uniform ${name}`);
   return location;
-}
-
-interface GlState {
-  activeTexture: number;
-  texture0: WebGLTexture | null;
-  texture1: WebGLTexture | null;
-  program: WebGLProgram | null;
-  vao: WebGLVertexArrayObject | null;
-  blend: boolean;
-  depth: boolean;
-  stencil: boolean;
-  cull: boolean;
-  blendSrcRgb: number;
-  blendDstRgb: number;
-  blendSrcAlpha: number;
-  blendDstAlpha: number;
-  blendEquationRgb: number;
-  blendEquationAlpha: number;
-}
-
-function captureGlState(gl: WebGL2RenderingContext): GlState {
-  const activeTexture = gl.getParameter(gl.ACTIVE_TEXTURE) as number;
-  gl.activeTexture(gl.TEXTURE0);
-  const texture0 = gl.getParameter(gl.TEXTURE_BINDING_2D) as WebGLTexture | null;
-  gl.activeTexture(gl.TEXTURE1);
-  const texture1 = gl.getParameter(gl.TEXTURE_BINDING_2D) as WebGLTexture | null;
-  gl.activeTexture(activeTexture);
-  return {
-    activeTexture,
-    texture0,
-    texture1,
-    program: gl.getParameter(gl.CURRENT_PROGRAM) as WebGLProgram | null,
-    vao: gl.getParameter(gl.VERTEX_ARRAY_BINDING) as WebGLVertexArrayObject | null,
-    blend: gl.isEnabled(gl.BLEND),
-    depth: gl.isEnabled(gl.DEPTH_TEST),
-    stencil: gl.isEnabled(gl.STENCIL_TEST),
-    cull: gl.isEnabled(gl.CULL_FACE),
-    blendSrcRgb: gl.getParameter(gl.BLEND_SRC_RGB) as number,
-    blendDstRgb: gl.getParameter(gl.BLEND_DST_RGB) as number,
-    blendSrcAlpha: gl.getParameter(gl.BLEND_SRC_ALPHA) as number,
-    blendDstAlpha: gl.getParameter(gl.BLEND_DST_ALPHA) as number,
-    blendEquationRgb: gl.getParameter(gl.BLEND_EQUATION_RGB) as number,
-    blendEquationAlpha: gl.getParameter(gl.BLEND_EQUATION_ALPHA) as number,
-  };
-}
-
-function restoreGlState(gl: WebGL2RenderingContext, state: GlState) {
-  setCapability(gl, gl.BLEND, state.blend);
-  setCapability(gl, gl.DEPTH_TEST, state.depth);
-  setCapability(gl, gl.STENCIL_TEST, state.stencil);
-  setCapability(gl, gl.CULL_FACE, state.cull);
-  gl.blendEquationSeparate(state.blendEquationRgb, state.blendEquationAlpha);
-  gl.blendFuncSeparate(
-    state.blendSrcRgb,
-    state.blendDstRgb,
-    state.blendSrcAlpha,
-    state.blendDstAlpha,
-  );
-  gl.useProgram(state.program);
-  gl.bindVertexArray(state.vao);
-  gl.activeTexture(gl.TEXTURE0);
-  gl.bindTexture(gl.TEXTURE_2D, state.texture0);
-  gl.activeTexture(gl.TEXTURE1);
-  gl.bindTexture(gl.TEXTURE_2D, state.texture1);
-  gl.activeTexture(state.activeTexture);
-}
-
-function setCapability(gl: WebGL2RenderingContext, capability: number, enabled: boolean) {
-  if (enabled) gl.enable(capability);
-  else gl.disable(capability);
 }
 
 function receiptMatches(

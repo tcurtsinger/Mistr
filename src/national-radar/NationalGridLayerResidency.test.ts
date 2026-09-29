@@ -19,7 +19,15 @@ const GL_CONSTANTS: Record<string, number> = {
 // Just enough WebGL2 for the layer's state machine: every call is a no-op
 // except fences, which a test can hold open, and draws, which are counted.
 function fakeGl() {
-  const state = { draws: 0, fences: 0, fenceSignaled: true, lost: false };
+  const state = {
+    draws: 0,
+    fences: 0,
+    fenceSignaled: true,
+    lost: false,
+    stateQueries: 0,
+    failNextAllocation: false,
+    pendingError: 0,
+  };
   const gl = new Proxy({}, {
     get(_target, property) {
       if (typeof property !== "string") return undefined;
@@ -32,10 +40,22 @@ function fakeGl() {
         case "fenceSync": return () => { state.fences += 1; return {}; };
         case "clientWaitSync":
           return () => state.fenceSignaled ? GL_CONSTANTS.ALREADY_SIGNALED : GL_CONSTANTS.TIMEOUT_EXPIRED;
-        case "getError": return () => 0;
+        case "texImage2D":
+          return () => {
+            if (state.failNextAllocation) {
+              state.failNextAllocation = false;
+              state.pendingError = 0x0505; // OUT_OF_MEMORY
+            }
+          };
+        case "getError":
+          return () => {
+            const error = state.pendingError;
+            state.pendingError = 0;
+            return error;
+          };
         case "isContextLost": return () => state.lost;
-        case "isEnabled": return () => false;
-        case "getParameter": return () => null;
+        case "isEnabled": return () => { state.stateQueries += 1; return false; };
+        case "getParameter": return () => { state.stateQueries += 1; return null; };
         case "getShaderParameter":
         case "getProgramParameter": return () => true;
         default: return () => ({});
@@ -205,6 +225,25 @@ describe("National resident visibility", () => {
     layer.setVisibility("resident");
     await expect(layer.revealAndWait(1_000, "missing-observation")).rejects.toThrow("not complete");
     expect(layer.getSnapshot().visibility).toBe("resident");
+  });
+
+  it("draws a frame without blocking GL state queries", async () => {
+    const { state, render } = await paintedLayer();
+    const drawsBefore = state.draws;
+    const queriesBefore = state.stateQueries;
+    render();
+    expect(state.draws).toBeGreaterThan(drawsBefore);
+    expect(state.stateQueries).toBe(queriesBefore);
+  });
+
+  it("still fails a chunk upload when its texture cannot be allocated", async () => {
+    const { layer, state } = await paintedLayer();
+    const manifest = parsePackedGridManifest(Uint8Array.from(readFileSync(MANIFEST)).buffer);
+    const chunk = await parsePackedGridChunk(Uint8Array.from(readFileSync(CHUNK)).buffer);
+    const coverage = viewportCoverage(manifest, { west: -129.99, east: -129.9, south: 54.9, north: 54.99 }, 1);
+    layer.beginStaging(manifest, coverage);
+    state.failNextAllocation = true;
+    await expect(layer.uploadStagedChunk(chunk)).rejects.toThrow("allocation failed (GL 1285)");
   });
 
   it("refuses frame selection while hidden", async () => {
