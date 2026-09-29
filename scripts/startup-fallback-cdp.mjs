@@ -36,7 +36,6 @@ try {
     await evaluate(`localStorage.setItem("mistr.camera", ${JSON.stringify(JSON.stringify(camera))}); true`);
     process.exit(0);
   }
-  const started = Date.now();
   const sample = () => evaluate(`(() => {
     const source = window.__MISTR_NATIONAL_PHASE4__?.sourceState?.();
     const painted = source?.painted?.source;
@@ -56,44 +55,70 @@ try {
       notice: document.querySelector(".radar-notice")?.textContent?.trim() || null,
     };
   })()`);
-  let state = null;
-  const painted = [];
-  // Before any source paints, the chrome must not claim one is displayed.
-  let prePaintSamples = 0;
-  const falseDisplayClaims = [];
-  while (Date.now() - started < 120_000) {
-    try {
-      state = await sample();
-    } catch {
-      // The reloaded document is still rebuilding its diagnostics.
-      await delay(250);
-      continue;
+  const settle = async () => {
+    const started = Date.now();
+    let state = null;
+    const painted = [];
+    // Before any source paints, the chrome must not claim one is displayed.
+    let prePaintSamples = 0;
+    const falseDisplayClaims = [];
+    while (Date.now() - started < 120_000) {
+      try {
+        state = await sample();
+      } catch {
+        // The reloaded document is still rebuilding its diagnostics.
+        await delay(250);
+        continue;
+      }
+      if (state.painted && painted.at(-1) !== state.painted) painted.push(state.painted);
+      if (!state.painted && state.sourceLabel) {
+        prePaintSamples += 1;
+        const claim = / is displayed\./.test(state.sourceLabel) ? state.sourceLabel
+          : /^Showing /.test(state.notice ?? "") ? state.notice
+            : null;
+        if (claim && !falseDisplayClaims.includes(claim)) falseDisplayClaims.push(claim);
+      }
+      const settled = !state.transition && state.startupFallback && (
+        (state.painted === "national" && state.nationalRenderer === "painted")
+        || (state.painted && state.painted !== "national" && state.liveSite === state.painted
+          && state.liveSourceKind === "nexrad_level2_chunks"
+          && state.siteRenderer === "painted" && state.sitePlaybackReady)
+      );
+      if (settled) break;
+      await delay(state.painted ? 250 : 50);
     }
-    if (state.painted && painted.at(-1) !== state.painted) painted.push(state.painted);
-    if (!state.painted && state.sourceLabel) {
-      prePaintSamples += 1;
-      const claim = / is displayed\./.test(state.sourceLabel) ? state.sourceLabel
-        : /^Showing /.test(state.notice ?? "") ? state.notice
-          : null;
-      if (claim && !falseDisplayClaims.includes(claim)) falseDisplayClaims.push(claim);
-    }
-    const settled = !state.transition && state.startupFallback && (
-      (state.painted === "national" && state.nationalRenderer === "painted")
-      || (state.painted && state.painted !== "national" && state.liveSite === state.painted
-        && state.liveSourceKind === "nexrad_level2_chunks"
-        && state.siteRenderer === "painted" && state.sitePlaybackReady)
-    );
-    if (settled) break;
-    await delay(state.painted ? 250 : 50);
-  }
-  const result = {
-    case: label,
-    ...state,
-    paintedSequence: painted,
-    prePaintSamples,
-    falseDisplayClaims,
-    settledMs: Date.now() - started,
+    return {
+      ...state,
+      paintedSequence: painted,
+      prePaintSamples,
+      falseDisplayClaims,
+      settledMs: Date.now() - started,
+    };
   };
+  let result;
+  if (label === "reload") {
+    // A reload while the first document is downloading its history must
+    // still reach live radar, not have its first requests refused.
+    const beforeReload = await settle();
+    await delay(2_000);
+    await evaluate("setTimeout(() => location.reload(), 0); true");
+    await delay(500);
+    result = { case: label, ...(await settle()), reloaded: true, beforeReload };
+  } else if (label === "kfws") {
+    // A launch that skips the startup scan must still let diagnostics
+    // hydrate the full 20-frame KTLX archive loop.
+    const launched = await settle();
+    let archive;
+    try {
+      await evaluate("window.__MISTR_PHASE4__.prepareArchive().then(() => true)");
+      archive = await evaluate("({ residentFrames: window.__MISTR_PHASE4__.report()?.renderer?.metrics?.residentFrameCount ?? null })");
+    } catch (error) {
+      archive = { residentFrames: null, error: String(error?.message ?? error).slice(0, 300) };
+    }
+    result = { case: label, ...launched, archive };
+  } else {
+    result = { case: label, ...(await settle()) };
+  }
   result.failures = validateStartupFallbackCase(label, result);
   await writeFile(resolve(output, `${label}.json`), `${JSON.stringify(result, null, 2)}\n`);
   console.log(JSON.stringify(result, null, 2));

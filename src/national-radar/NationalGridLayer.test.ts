@@ -7,6 +7,7 @@ import {
   presentationUsesCommonFallback,
   sameNationalPresentationReceipt,
   UploadFrameBudget,
+  UPLOAD_FRAMES_IN_FLIGHT,
   type NationalPaintReceipt,
 } from "./NationalGridLayer";
 
@@ -83,6 +84,86 @@ describe("National upload frame budget", () => {
     expect(budget.rowsForSlice(31)).toBe(31);
     budget.recordSlice(32, 0.1);
     expect(budget.rowsForSlice(2)).toBe(2);
+  });
+
+  function fenceGl() {
+    const fences: { signaled: boolean; deleted: boolean }[] = [];
+    const gl = {
+      SYNC_GPU_COMMANDS_COMPLETE: 0x9117,
+      TIMEOUT_EXPIRED: 0x911b,
+      ALREADY_SIGNALED: 0x911a,
+      fenceSync: () => {
+        const fence = { signaled: false, deleted: false };
+        fences.push(fence);
+        return fence as unknown as WebGLSync;
+      },
+      clientWaitSync: (sync: WebGLSync) => (
+        (sync as unknown as { signaled: boolean }).signaled ? 0x911a : 0x911b
+      ),
+      deleteSync: (sync: WebGLSync) => {
+        (sync as unknown as { deleted: boolean }).deleted = true;
+      },
+      isContextLost: () => false,
+    };
+    return { gl: gl as unknown as WebGL2RenderingContext, fences };
+  }
+
+  async function spendFrame(budget: UploadFrameBudget, gl: WebGL2RenderingContext) {
+    budget.recordSlice(32, 3.9);
+    await budget.yieldIfSpent(gl);
+  }
+
+  it("fences each frame of uploads and waits while the GPU is behind", async () => {
+    const frames = stubAnimationFrames();
+    const { gl, fences } = fenceGl();
+    const budget = new UploadFrameBudget(4);
+    await budget.yieldIfSpent(gl);
+    // The forced first yield issued no upload work, so it fences nothing.
+    expect(fences).toHaveLength(0);
+
+    for (let frame = 0; frame < UPLOAD_FRAMES_IN_FLIGHT; frame += 1) await spendFrame(budget, gl);
+    expect(fences).toHaveLength(UPLOAD_FRAMES_IN_FLIGHT);
+    const framesBeforeBacklog = frames.count();
+
+    // One more unfinished frame of uploads waits a frame at a time until the
+    // oldest fence signals; it never blocks on the GPU.
+    let released = false;
+    const third = spendFrame(budget, gl).then(() => { released = true; });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(released).toBe(false);
+    fences[0].signaled = true;
+    await third;
+    expect(released).toBe(true);
+    expect(fences[0].deleted).toBe(true);
+    expect(frames.count()).toBeGreaterThan(framesBeforeBacklog + 1);
+  });
+
+  it("forgets fences from a lost context instead of touching them", async () => {
+    stubAnimationFrames();
+    const { gl, fences } = fenceGl();
+    const budget = new UploadFrameBudget(4);
+    await budget.yieldIfSpent(gl);
+    for (let frame = 0; frame < UPLOAD_FRAMES_IN_FLIGHT; frame += 1) await spendFrame(budget, gl);
+    budget.discardFences();
+    const polled: WebGLSync[] = [];
+    const restored = {
+      ...gl,
+      clientWaitSync: (sync: WebGLSync) => { polled.push(sync); return 0x911b; },
+      deleteSync: (sync: WebGLSync) => { polled.push(sync); },
+    } as unknown as WebGL2RenderingContext;
+    await spendFrame(budget, restored);
+    expect(polled.some((sync) => fences.slice(0, UPLOAD_FRAMES_IN_FLIGHT).includes(sync as never))).toBe(false);
+  });
+
+  it("gives up on a fence the driver never signals", async () => {
+    const frames = stubAnimationFrames();
+    const { gl } = fenceGl();
+    const budget = new UploadFrameBudget(4);
+    await budget.yieldIfSpent(gl);
+    for (let frame = 0; frame <= UPLOAD_FRAMES_IN_FLIGHT; frame += 1) await spendFrame(budget, gl);
+    // Patience is bounded; uploads carry on rather than stall.
+    expect(frames.count()).toBeLessThan(200);
   });
 
   it("rejects a non-positive budget", () => {

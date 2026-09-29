@@ -8,8 +8,8 @@
 //! the retained immutable object under a single-operation gate.
 
 use crate::mrms::{
-    DownloadedMrmsObject, MrmsCellValue, MrmsClient, MrmsDecodeEvidence, MrmsObject,
-    MrmsValueEncoding, bounded_poll_delay, decode_mrms_gzip,
+    DownloadedMrmsObject, MrmsAcquisitionCounters, MrmsCellValue, MrmsClient, MrmsDecodeEvidence,
+    MrmsObject, MrmsValueEncoding, bounded_poll_delay, decode_mrms_gzip,
 };
 use crate::packed_grid::{MrmsNumericPyramid, PackedGridFrame};
 use crate::phase2_ipc::{TransferBroker, TransferError, TransferLane};
@@ -591,6 +591,10 @@ impl NationalHistoryStore {
 pub struct NationalHistoryState {
     inner: Arc<Mutex<NationalHistoryStore>>,
     point_lookup_gate: Arc<Semaphore>,
+    // The next backfill predecessor, downloaded and decoded while the
+    // frontend uploads the one just staged, so backfill is not one network
+    // round trip plus one decode slower per frame than the GPU upload.
+    predecessor_prefetch: Arc<Mutex<Option<PredecessorPrefetch>>>,
 }
 
 impl Default for NationalHistoryState {
@@ -598,6 +602,84 @@ impl Default for NationalHistoryState {
         Self {
             inner: Arc::new(Mutex::new(NationalHistoryStore::default())),
             point_lookup_gate: Arc::new(Semaphore::new(1)),
+            predecessor_prefetch: Arc::new(Mutex::new(None)),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct PredecessorPrefetch {
+    generation: u64,
+    object_key: String,
+    task: tauri::async_runtime::JoinHandle<Result<PrefetchedPredecessor, TransferError>>,
+}
+
+#[derive(Debug)]
+struct PrefetchedPredecessor {
+    frame: Arc<RetainedNationalFrame>,
+    download_ms: f64,
+    decode_and_level_ms: f64,
+    counters: MrmsAcquisitionCounters,
+}
+
+impl NationalHistoryState {
+    fn take_predecessor_prefetch(
+        &self,
+        generation: u64,
+        object_key: &str,
+    ) -> Option<tauri::async_runtime::JoinHandle<Result<PrefetchedPredecessor, TransferError>>>
+    {
+        let mut slot = self.predecessor_prefetch.lock().ok()?;
+        let prefetch = slot.take()?;
+        if prefetch.generation == generation && prefetch.object_key == object_key {
+            return Some(prefetch.task);
+        }
+        prefetch.task.abort();
+        None
+    }
+
+    fn clear_predecessor_prefetch(&self) {
+        if let Ok(mut slot) = self.predecessor_prefetch.lock()
+            && let Some(prefetch) = slot.take()
+        {
+            prefetch.task.abort();
+        }
+    }
+
+    /// Starts downloading and decoding `object`, the predecessor after the
+    /// one just staged. Its network and decoder work is counted when it
+    /// completes, whether or not a later prepare uses it.
+    fn prefetch_predecessor(
+        &self,
+        object: MrmsObject,
+        generation: u64,
+        token: crate::live_pipeline::GenerationToken,
+    ) {
+        let object_key = object.key.clone();
+        let state = self.clone();
+        let task = tauri::async_runtime::spawn(async move {
+            let client = MrmsClient::new().map_err(mrms_error)?;
+            let (frame, download_ms, decode_and_level_ms) =
+                acquire_overview(&client, object, generation, &token, false).await?;
+            let counters = client.counters();
+            add_acquisition_activity(&mut *lock_store(&state)?, counters, 1);
+            Ok(PrefetchedPredecessor {
+                frame,
+                download_ms,
+                decode_and_level_ms,
+                counters,
+            })
+        });
+        let Ok(mut slot) = self.predecessor_prefetch.lock() else {
+            task.abort();
+            return;
+        };
+        if let Some(previous) = slot.replace(PredecessorPrefetch {
+            generation,
+            object_key,
+            task,
+        }) {
+            previous.task.abort();
         }
     }
 }
@@ -689,6 +771,7 @@ pub async fn prepare_national_history_current(
     generation: u64,
 ) -> Result<NationalHistoryPrepareReport, TransferError> {
     let token = broker.live_generation_token(session, TransferLane::National, generation)?;
+    state.clear_predecessor_prefetch();
     let client = MrmsClient::new().map_err(mrms_error)?;
     let discovery_started = Instant::now();
     let retained_limit = lock_store(&state)?.retained_limit;
@@ -707,7 +790,7 @@ pub async fn prepare_national_history_current(
     {
         let mut store = lock_store(&state)?;
         store.reset(generation, backfill_candidates);
-        add_acquisition_activity(&mut store, &client, 1);
+        add_acquisition_activity(&mut store, client.counters(), 1);
         store.stage(NationalHistoryMutationKind::Current, frame.clone())?;
     }
     prepare_report(
@@ -717,7 +800,7 @@ pub async fn prepare_national_history_current(
         discovery_ms,
         download_ms,
         decode_and_level_ms,
-        &client,
+        client.counters(),
     )
 }
 
@@ -766,14 +849,37 @@ pub async fn prepare_national_history_predecessor(
         }
         candidate
     };
-    let client = MrmsClient::new().map_err(mrms_error)?;
-    let (frame, download_ms, decode_and_level_ms) =
-        acquire_overview(&client, candidate, generation, &token, false).await?;
-    {
+    let prefetched = match state.take_predecessor_prefetch(generation, &candidate.key) {
+        Some(task) => task.await.ok().and_then(Result::ok),
+        None => None,
+    };
+    let (frame, download_ms, decode_and_level_ms, counters) = match prefetched {
+        // Its activity was counted when the prefetch completed.
+        Some(prefetched) => (
+            prefetched.frame,
+            prefetched.download_ms,
+            prefetched.decode_and_level_ms,
+            prefetched.counters,
+        ),
+        None => {
+            let client = MrmsClient::new().map_err(mrms_error)?;
+            let (frame, download_ms, decode_and_level_ms) =
+                acquire_overview(&client, candidate, generation, &token, false).await?;
+            let counters = client.counters();
+            add_acquisition_activity(&mut *lock_store(&state)?, counters, 1);
+            (frame, download_ms, decode_and_level_ms, counters)
+        }
+    };
+    token.ensure_current().map_err(stale_error)?;
+    let next_candidate = {
         let mut store = lock_store(&state)?;
         store.ensure_generation(generation)?;
-        add_acquisition_activity(&mut store, &client, 1);
         store.stage(NationalHistoryMutationKind::Predecessor, frame.clone())?;
+        // The staged frame is still the front candidate until it commits.
+        store.backfill_candidates.get(1).cloned()
+    };
+    if let Some(next) = next_candidate {
+        state.prefetch_predecessor(next, generation, token);
     }
     prepare_report(
         &state,
@@ -782,7 +888,7 @@ pub async fn prepare_national_history_predecessor(
         0.0,
         download_ms,
         decode_and_level_ms,
-        &client,
+        counters,
     )
     .map(Some)
 }
@@ -827,7 +933,7 @@ pub async fn prepare_national_history_newer(
     {
         let mut store = lock_store(&state)?;
         store.ensure_generation(generation)?;
-        add_acquisition_activity(&mut store, &client, 1);
+        add_acquisition_activity(&mut store, client.counters(), 1);
         store.stage(NationalHistoryMutationKind::Newer, frame.clone())?;
     }
     prepare_report(
@@ -837,7 +943,7 @@ pub async fn prepare_national_history_newer(
         discovery_ms,
         download_ms,
         decode_and_level_ms,
-        &client,
+        client.counters(),
     )
 }
 
@@ -1432,10 +1538,9 @@ fn prepare_report(
     discovery_ms: f64,
     download_ms: f64,
     decode_and_level_ms: f64,
-    client: &MrmsClient,
+    counters: MrmsAcquisitionCounters,
 ) -> Result<NationalHistoryPrepareReport, TransferError> {
     let history = lock_store(state)?.snapshot();
-    let counters = client.counters();
     Ok(NationalHistoryPrepareReport {
         kind,
         observation: frame.identity(),
@@ -1599,10 +1704,9 @@ fn validate_point_request(
 
 fn add_acquisition_activity(
     store: &mut NationalHistoryStore,
-    client: &MrmsClient,
+    counters: MrmsAcquisitionCounters,
     decoder_runs: u64,
 ) {
-    let counters = client.counters();
     store.activity.network_requests = store
         .activity
         .network_requests
@@ -1741,6 +1845,7 @@ mod tests {
             let state = NationalHistoryState {
                 inner: Arc::new(Mutex::new(store)),
                 point_lookup_gate: Arc::new(Semaphore::new(1)),
+                predecessor_prefetch: Arc::new(Mutex::new(None)),
             };
             let report = retry_prepare_report(&state, kind, retried).unwrap();
             assert_eq!(report.kind, kind);

@@ -315,7 +315,7 @@ export function RadarChrome({
         <section aria-label="Radar playback" className="playback-bar">
         <div className="scan-time" aria-label={`Displayed scan ${timestamp.accessible}`}>
           <span>{timestamp.date}</span>
-          <strong>{timestamp.time}</strong>
+          <strong><ScanClock time={timestamp.time} /></strong>
           <span>{timestamp.zone}</span>
         </div>
         <span aria-hidden="true" className="instrument-divider" />
@@ -711,6 +711,20 @@ export function formatScanTimestamp(unixMs: number | undefined) {
     zone,
     accessible: `${dateText} ${timeText} ${zone}`.trim(),
   };
+}
+
+// AM and PM differ in width in the proportional letters of the bundled font;
+// a fixed-width meridiem keeps the playback bar from shifting at noon and
+// midnight.
+function ScanClock({ time }: { time: string }) {
+  const split = time.lastIndexOf(" ");
+  if (split < 0) return <>{time}</>;
+  return (
+    <>
+      {time.slice(0, split)}{" "}
+      <span className="scan-time-meridiem"><span>{time.slice(split + 1)}</span></span>
+    </>
+  );
 }
 
 function PlayIcon() {

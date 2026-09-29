@@ -364,7 +364,7 @@ export function App() {
     const nationalLoadTrace: { atUnixMs: number; step: string; detail?: string }[] = [];
     const traceNationalLoad = (step: string, detail?: string) => {
       nationalLoadTrace.push({ atUnixMs: Date.now(), step, ...(detail ? { detail } : {}) });
-      if (nationalLoadTrace.length > 200) nationalLoadTrace.splice(0, nationalLoadTrace.length - 200);
+      if (nationalLoadTrace.length > 1000) nationalLoadTrace.splice(0, nationalLoadTrace.length - 1000);
     };
     let activeNationalBackfillSession: number | null = null;
     // National lane generation of the retained history. National can stay
@@ -389,7 +389,7 @@ export function App() {
     let autoSiteRetryTimer: ReturnType<typeof globalThis.setTimeout> | null = null;
     let latestReport: Phase4Report | null = null;
     // The bundled first paint: painted, or why it was skipped.
-    let startupFallback: { painted: boolean; elapsedMs: number; error?: string } | null = null;
+    let startupFallback: StartupFallbackOutcome | null = null;
     let activeScenario: Promise<Phase4ScenarioReport> | null = null;
     let startupAcquisition: Promise<void> | null = null;
     let prepareArchiveForDiagnostics: (() => Promise<RadarPaintReceipt>) | null = null;
@@ -646,6 +646,7 @@ export function App() {
       const invoke = await tauriInvokeFunction();
       client = new PackedSweepTransferClient(invoke);
       await client.open();
+      await waitForUnwoundTransfers(client);
       await beginExclusiveLane(client, "site", 1);
       const fixtureIds = fixtureManifest.fixtureSets.phase4KtlxReflectivityLoop;
       const fixturesById = new Map(
@@ -685,10 +686,17 @@ export function App() {
       // not need. The full loop is hydrated only for its packaged diagnostics.
       // The scan is only a bridge: when it is missing or will not decode or
       // paint, startup goes straight on to current radar.
-      setPhase4({ kind: "running", stage: "LOADING NEWEST SAFE SCAN" });
       const fallbackStarted = performance.now();
       let fallbackPainted: { model: RadarSweepCpuModel; receipt: RadarPaintReceipt } | null = null;
-      try {
+      // The scan is KTLX. Any other launch would paint it in the wrong place
+      // and hold current radar back by its decode, about a second.
+      const launchSource = startupSourceRef.current;
+      const fallbackWanted = launchSource.kind === "site" && launchSource.siteIcao === "KTLX";
+      if (!fallbackWanted) {
+        startupFallback = { painted: false, elapsedMs: 0, skipped: "launch is not KTLX" };
+        setPhase4({ kind: "running", stage: "LOADING CURRENT RADAR" });
+      } else try {
+        setPhase4({ kind: "running", stage: "LOADING NEWEST SAFE SCAN" });
         const newestArchiveModel = await decodeArchiveFixture(fixtureIds[fixtureIds.length - 1]);
         archiveModels.push(newestArchiveModel);
         loadedArchiveFixtureIds.add(fixtureIds[fixtureIds.length - 1]);
@@ -2415,7 +2423,7 @@ export function App() {
               nationalHistoryOwnershipCheck(generation, historySession);
               traceNationalLoad("backfill:prepare");
               const preparation = await activeClientForNational().prepareNationalHistoryPredecessor();
-              traceNationalLoad("backfill:prepared");
+              traceNationalLoad("backfill:prepared", preparation ? preparationTiming(preparation) : "none");
               return preparation;
             }),
             commit: async (preparation) => {
@@ -2581,11 +2589,13 @@ export function App() {
           livePollingSession += 1;
           nationalHistorySession += 1;
           await beginExclusiveLane(activeClient, "national", generation);
+          traceNationalLoad("current:prepare");
           const pending = radarSessionCoordinatorRef.current!.snapshot().transition;
           if (pending?.generation !== generation || pending.requestedSource.kind !== "national") {
             throw new RadarSourceSupersededError("National transition was superseded before its download");
           }
           const historyPreparation = await activeClient.prepareNationalHistoryCurrent();
+          traceNationalLoad("current:prepared", preparationTiming(historyPreparation));
           if (
             historyPreparation.observation.generation !== generation
             || transferGeneration !== generation
@@ -2615,6 +2625,7 @@ export function App() {
               historyPreparation.observation,
               ownershipCheck,
             );
+            traceNationalLoad("current:staged");
             if (!historyWorkingSet.receipt) {
               throw new Error("National current frame completed without a paint receipt");
             }
@@ -2629,9 +2640,11 @@ export function App() {
               historyPreparation.observation,
             );
             backendFinalized = true;
+            traceNationalLoad("current:committed");
             const authoritativeReceipt = await activeLayer.waitForAuthoritativeReceipt(
               historyWorkingSet.receipt,
             );
+            traceNationalLoad("current:painted");
             ownershipCheck();
             await fadeOutSiteLayer(() => {
               try {
@@ -2687,6 +2700,7 @@ export function App() {
           }
         },
         onPaintAccepted: (report) => {
+          traceNationalLoad("current:accepted");
           if (revealedNationalReports.has(report)) {
             acceptRevealedNational(report);
             return;
@@ -4510,6 +4524,34 @@ function nationalHistoryContainsFinalizedObservation(
     ));
 }
 
+/** The bundled first paint: painted, failed (`error`), or not wanted (`skipped`). */
+interface StartupFallbackOutcome {
+  painted: boolean;
+  elapsedMs: number;
+  error?: string;
+  skipped?: string;
+}
+
+/**
+ * After a page reload the previous document's downloads are cancelled but
+ * stay charged against the transfer credits until they unwind, usually
+ * within a second; requests made before then are refused. A launch finds
+ * nothing in flight and does not wait.
+ */
+async function waitForUnwoundTransfers(
+  client: PackedSweepTransferClient,
+  timeoutMs = 10_000,
+): Promise<void> {
+  const started = performance.now();
+  for (;;) {
+    const snapshot = await client.transferSnapshot();
+    if (snapshot.inFlightCredits === 0 && snapshot.heldCredits === 0) return;
+    // Past the bound, go ahead: a refused request reports its own error.
+    if (performance.now() - started > timeoutMs) return;
+    await waitMilliseconds(50);
+  }
+}
+
 function waitMilliseconds(milliseconds: number): Promise<void> {
   return new Promise((resolve) => globalThis.setTimeout(resolve, milliseconds));
 }
@@ -5002,6 +5044,11 @@ function anchorFeatures(alignment: AlignmentReport) {
   };
 }
 
+function preparationTiming(preparation: NationalHistoryPrepareReport): string {
+  return `discovery ${preparation.discoveryMs} ms, download ${preparation.downloadMs} ms, `
+    + `decode ${preparation.decodeAndLevelMs} ms, ${preparation.acquisitionResponseBytes} bytes`;
+}
+
 function removeDiagnosticLayers(map: MapLibreMap, radarLayer: RadarCustomLayer | null) {
   if (!map.getStyle()) return;
   for (const id of [ANCHOR_LAYER_ID, radarLayer?.id, RANGE_LAYER_ID]) {
@@ -5035,7 +5082,7 @@ function formatMs(milliseconds: number) {
 
 declare global {
   var __MISTR_PHASE4__: undefined | {
-    startupFallback(): { painted: boolean; elapsedMs: number; error?: string } | null;
+    startupFallback(): StartupFallbackOutcome | null;
     report(): Phase4Report;
     runScenario(transitionCount?: number): Promise<Phase4ScenarioReport>;
     prepareArchive(): Promise<RadarPaintReceipt>;

@@ -449,8 +449,15 @@ button { color: inherit; }
   font-family: "Recursive Variable", "Cascadia Mono", Consolas, monospace;
   font-variant-numeric: tabular-nums;
 }
-.scan-time span { color: var(--quiet); font-size: 11px; font-weight: 520; letter-spacing: 0.035em; }
+.scan-time > span { color: var(--quiet); font-size: 11px; font-weight: 520; letter-spacing: 0.035em; }
 .scan-time strong { color: var(--scan-cyan); font-size: 13px; font-weight: 600; letter-spacing: 0.035em; }
+/* AM and PM differ in width; the cell reserves both, so the bar holds still. */
+.scan-time-meridiem { display: inline-grid; }
+.scan-time-meridiem::before,
+.scan-time-meridiem::after,
+.scan-time-meridiem > span { grid-area: 1 / 1; }
+.scan-time-meridiem::before { content: "AM"; visibility: hidden; }
+.scan-time-meridiem::after { content: "PM"; visibility: hidden; }
 
 .playback-toggle {
   width: 34px;
@@ -644,7 +651,7 @@ button { color: inherit; }
   }
   .playback-bar--preparing { width: auto; min-width: 260px; }
   .playback-bar > .instrument-divider { display: none; }
-  .scan-time span:first-child { display: none; }
+  .scan-time > span:first-child { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

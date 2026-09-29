@@ -117,12 +117,13 @@ trips dominating main-thread time.
   each (about 440 a second during a fill) and rescanned every resident
   presentation for the GPU byte peak. Progress now emits once per animation
   frame and the peak is tracked incrementally during staging.
-- **Per-slice upload error checks (kept).** Every upload slice drains and reads
-  `getError`, about half of loading JavaScript time. Checking once per chunk was
-  tried and reverted: those synchronous checks also keep the upload pacer's
-  per-row estimate honest about GPU work. Without them the GPU queue filled,
-  upload calls blocked on backpressure, the pacer collapsed to minimum bands,
-  and context-loss recovery at 4K slowed from about 20 s to over 60 s in the
+- **Per-slice upload error checks (kept, then replaced on 2026-09-29; see
+  below).** Every upload slice drains and reads `getError`, about half of
+  loading JavaScript time. Checking once per chunk was tried and reverted:
+  those synchronous checks also keep the upload pacer's per-row estimate
+  honest about GPU work. Without them the GPU queue filled, upload calls
+  blocked on backpressure, the pacer collapsed to minimum bands, and
+  context-loss recovery at 4K slowed from about 20 s to over 60 s in the
   packaged gate. Removing them needs fence-based flow control that bounds
   in-flight upload work, a separate change.
 
@@ -146,3 +147,49 @@ all draw submission is about 0.4 s per 10 s of playback, so the saving is small.
 Benchmark: `scripts/run-national-load-bench.ps1` (results in `artifacts/bench/`).
 For readable CPU profiles, `MISTR_UNMINIFIED=1 npm run tauri:build -- --no-bundle`
 builds the frontend without minification.
+
+## Loading speed (2026-09-29)
+
+A per-step load log of a packaged National launch showed each of the 60
+frames taking 925 ms, run strictly in sequence: 395 ms to download and decode
+on the backend, then 520 ms to upload to the GPU.
+
+- **Backend prefetch.** Once a predecessor is staged, the backend starts
+  downloading and decoding the next one, and the next prepare picks it up
+  already decoded. The frontend protocol is unchanged. Its network and
+  decoder work is counted when it completes; a new National session drops it.
+- **Fence-paced uploads, no per-slice `getError`.** A reproducible startup
+  stall (3 of 4 National launches) spent 2.96 of every 3 s blocked in
+  `getError`: each call waited on the GPU process for a whole vsync, so the
+  first frame's upload crawled for a minute or never finished. This is the
+  likely cause of the earlier reports of a loop stuck at one frame until
+  Play. Uploads now issue no error queries. Each animation frame's uploads
+  end with a fence; before more work is issued, the oldest fence is polled
+  with a zero timeout, never waited on, keeping at most 6 frames of uploads
+  ahead of the GPU. Fence status reaches WebGL several frames after the GPU
+  finishes: with 2 in flight the first frame waited about 1 s on finished
+  work, with 6 it never waited. Errors are read once per staged
+  presentation, at commit, and once after context-loss rehydration. The
+  4 ms per-frame upload budget is unchanged.
+- **The KTLX startup scan only for a KTLX launch.** It painted KTLX in the
+  wrong place for any other launch and held current radar back by its
+  decode, about 1.1 s.
+
+Measured from process launch, same workstation (120 Hz display):
+
+| | Before | After |
+|---|---:|---:|
+| First National frame | 3.2 s | 1.5 s |
+| 20 frames | 21.8 s | 8.1 s |
+| 60 frames | 59.0 s | 22.3 s |
+| Time per backfill frame (median) | 925 ms | 342 ms |
+| Upload per backfill frame (median) | 520 ms | 299 ms |
+
+The remaining per-frame time is the 4 ms upload budget: a frame's 392 chunks
+need about 36 animation frames of it. Raising the budget trades frame time
+during loading for load speed and is a separate decision.
+
+Diagnostics: `__MISTR_NATIONAL_PHASE4__.loadTrace()` records each prepare's
+discovery, download, and decode times, and the first frame's steps
+(`current:*`); the renderer snapshot reports `uploadGpuWaitFrames` and
+`uploadFenceGiveUps`.
