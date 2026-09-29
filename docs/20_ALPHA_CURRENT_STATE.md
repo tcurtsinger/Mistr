@@ -38,7 +38,7 @@ Windows is the Alpha release platform. Shared Tauri, Rust, React, TypeScript, Ma
 
 ### First launch
 
-Mistr decodes and paints only the newest pinned KTLX archive observation as a safe startup bridge, then automatically acquires current live radar for the stored site or KTLX on a fresh profile. The remaining 19 archive fixtures are hydrated only when packaged diagnostics explicitly request the full loop. Before the first paint, the playback area shows plain-language preparation progress instead of `0 / 0`, `PAUSED`, or an inspect prompt.
+Mistr opens current radar for the restored camera, and National on a fresh profile. Until 2026-09-29 every launch first painted the newest pinned KTLX archive observation as a safe startup bridge; that scan is no longer shown, and the 20 archive fixtures are hydrated only when packaged diagnostics explicitly request the full loop. Before the first paint, the playback area shows plain-language preparation progress instead of `0 / 0`, `PAUSED`, or an inspect prompt.
 
 The OpenFreeMap style graph is bundled with the frontend and radar initialization begins on MapLibre's local `style.load` event. Remote tiles, sprites, and glyphs may continue loading afterward; a basemap failure is named without blocking or mislabeling radar.
 

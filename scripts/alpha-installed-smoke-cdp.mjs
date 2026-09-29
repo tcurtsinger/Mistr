@@ -17,17 +17,14 @@ try {
   await call("Page.enable");
   await evaluate("localStorage.clear(); location.reload()", false);
   await delay(1_000);
-  // Installers carry only the startup fallback scan, not the archive loop,
-  // so the first launch is checked as the operator sees it: the fallback
-  // paint, or the live KTLX scan that replaces it.
-  await waitForArchive();
+  // A fresh install opens National over the whole country; installers carry
+  // no radar archives.
+  await waitForFirstPaint();
   const report = await evaluate(`(()=>({
-    phase4:window.__MISTR_PHASE4__.report(),
-    phase5:window.__MISTR_PHASE5__.report(),
-    phase6:window.__MISTR_PHASE6__.report(),
-    bodyText:document.body.innerText,
+    sourceState:window.__MISTR_NATIONAL_PHASE4__.sourceState(),
+    national:window.__MISTR_NATIONAL_PHASE4__.report(),
     playbackText:document.querySelector('.playback-bar')?.innerText ?? '',
-    topSite:document.querySelector('[data-control=radar-sites]')?.dataset.displayedSite,
+    paintedSource:document.querySelector('[data-control=radar-sites]')?.dataset.paintedSource,
     frameAge:(()=>{const output=document.querySelector('.frame-age');return {
       text:output?.textContent?.trim() ?? null,
       accessibleName:output?.getAttribute('aria-label') ?? null,
@@ -36,26 +33,20 @@ try {
     error:document.querySelector('[role=alert]')?.textContent?.trim() ?? null
   }))()`);
   const failures = [];
-  const sourceKind = report.phase6?.sourceKind;
-  if (report.phase4?.renderer?.status !== "painted") failures.push("installed radar is not painted");
-  if (!(report.phase4?.renderer?.metrics?.residentFrameCount >= 1)) failures.push("installed radar has no resident scan");
-  if (!(report.phase4?.renderer?.paintReceipt?.framebufferWidth > 0)) failures.push("installed radar has no GPU paint receipt");
-  if (report.topSite !== "KTLX") failures.push("installed first launch does not paint KTLX");
-  if (sourceKind === "nexrad_level2_archive_ii") {
-    if (report.frameAge?.kind !== "historical") failures.push("installed archive age is not historical");
-    if (!report.frameAge?.accessibleName?.startsWith("Historical scan,")) failures.push("installed archive age lacks non-color historical semantics");
-  } else if (sourceKind === "nexrad_level2_chunks") {
-    if (!report.frameAge?.accessibleName?.startsWith("Latest live scan,")) failures.push("installed live scan lacks latest-scan semantics");
-  } else {
-    failures.push("installed first launch does not report KTLX Level II source truth");
+  const painted = report.sourceState?.painted?.source;
+  const receipt = report.national?.renderer?.paintReceipt;
+  if (painted?.kind !== "national") failures.push("installed first launch does not open National");
+  if (report.national?.renderer?.status !== "painted") failures.push("installed National radar is not painted");
+  if (!(receipt?.framebufferWidth > 0)) failures.push("installed National radar has no GPU paint receipt");
+  if (report.paintedSource !== "national") failures.push("installed source control does not name National");
+  if (report.frameAge?.kind !== "current" || !report.frameAge?.accessibleName?.startsWith("Newest National observation,")) {
+    failures.push("installed first launch does not show the newest National observation as current");
   }
   if (/\b(?:FRESH|STALE|PAUSED|NEWEST)\b/i.test(report.playbackText)) failures.push("installed playback bar exposes removed status noise");
   if (report.error) failures.push(`installed first launch reports: ${report.error}`);
   const summary = {
     status: failures.length === 0 ? "PASS" : "FAIL",
-    residentFrameCount: report.phase4?.renderer?.metrics?.residentFrameCount,
-    sourceKind,
-    topSite: report.topSite,
+    paintedSource: painted?.kind ?? null,
     frameAge: report.frameAge,
     failures,
   };
@@ -92,25 +83,24 @@ async function waitForTarget() {
   throw new Error(`installed Mistr page did not appear on CDP port ${port}`);
 }
 
-async function waitForArchive() {
+async function waitForFirstPaint() {
   const deadline = Date.now() + 120_000;
   while (Date.now() < deadline) {
     try {
       const ready = await evaluate(`Boolean(
-        window.__MISTR_PHASE4__
-        && window.__MISTR_PHASE6__
-        && window.__MISTR_PHASE4__.report()?.renderer?.status === 'painted'
+        window.__MISTR_NATIONAL_PHASE4__?.sourceState?.()?.painted
+        && !window.__MISTR_NATIONAL_PHASE4__.sourceState().transition
       )`);
       if (ready) return;
       const errorText = await evaluate("document.querySelector('[role=alert]')?.textContent ?? null");
-      if (errorText) throw new Error(`installed app failed before archive residency: ${errorText}`);
+      if (errorText) throw new Error(`installed app failed before its first paint: ${errorText}`);
     } catch (error) {
-      if (String(error).includes("failed before archive")) throw error;
+      if (String(error).includes("failed before its first paint")) throw error;
       // Reload is still rebuilding the document and diagnostic API.
     }
     await delay(250);
   }
-  throw new Error("installed first launch did not establish the archive loop");
+  throw new Error("installed first launch did not paint radar");
 }
 
 function assertProtocolResult(response, method) {

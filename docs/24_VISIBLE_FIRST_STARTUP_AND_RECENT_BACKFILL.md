@@ -72,22 +72,18 @@ These workstation measurements are diagnostic evidence, not a universal latency 
 - Phase 4 must still lazy-load its complete archive before performance scenarios.
 - Phase 5 and Phase 6 must continue to pass their existing cancellation, paint-receipt, N0S, and context-recovery gates.
 
-## The startup scan is optional (2026-09-28)
+## The startup scan is optional (2026-09-28), then removed (2026-09-29)
 
-Until this change, a missing, truncated, or undecodable bundled scan failed the whole startup: the Site layer, playback controller, and source sessions were all built on that first paint, so current radar never started. Now the scan is attempted once; if it fails, the reason is logged and exposed as `__MISTR_PHASE4__.startupFallback()`, the partial layer is removed, the chrome shows `LOADING CURRENT RADAR`, and startup continues to the source the restored camera calls for. With no Site painted, a Site switch builds its own layer and fades it in, the same path used from National.
+On 2026-09-28 the scan became a bridge rather than a prerequisite: a missing, truncated, or undecodable bundled scan used to fail the whole startup, because the Site layer, playback controller, and source sessions were all built on that first paint. It was then limited to KTLX launches, since any other launch painted KTLX in the wrong place and held current radar back by its decode, about 1.1 s.
 
-`npm run test:startup-fallback:packaged` launches the packaged app three times, each after a separate launch stores its camera:
+On 2026-09-29 it was removed from launches altogether. It showed a 2024 scan for about a second and delayed live KTLX by its decode; the product no longer needs a KTLX default. Startup now shows `LOADING CURRENT RADAR` and paints nothing of its own; the first paint is current radar for the restored camera, and a fresh profile opens National. With no Site painted, a Site switch builds its own layer and fades it in, the same path used from National. Until something paints, the source control reads "No radar is displayed yet" and the notice names the radar that is loading.
 
-| Case | Startup scan | Camera | Result |
-|---|---|---|---|
-| bundled | present | KTLX, zoom 9.5 | scan painted in 1.14 s, then live KTLX |
-| missing | absent (`os error 2`) | KTLX, zoom 9.5 | scan skipped, live KTLX |
-| corrupt | 255 bytes | country view | scan skipped (size mismatch), National |
+The 20-frame KTLX archive loop remains a diagnostic: `__MISTR_PHASE4__.prepareArchive()` hydrates it from any launch, building the Site layer itself when National is shown, and waits for the source sessions if called early. Installers carry no archives.
 
-The scan runs before current radar starts, delaying it by about 1.1 s, so only a KTLX launch uses it (2026-09-29): any other launch would paint KTLX in the wrong place. National and other Site launches skip it (`skipped` in `startupFallback()`). For a KTLX launch, starting both at once would need the startup acquisition to share the Site lane with the scan request; that and the predecoded scan below are the remaining startup optimizations.
+A page reload used to fail startup: the previous document's native downloads stay charged against the transfer credits for about a second while they unwind, and the new document's first requests were refused. Startup now waits (at most 10 s) until nothing is in flight; a launch finds nothing and does not wait.
 
-A page reload used to fail startup: the previous document's native downloads stay charged against the transfer credits for about a second while they unwind, and the new document's first requests were refused. Startup now waits (at most 10 s) until nothing is in flight; a launch finds nothing and does not wait. The gate's `national` and `reload` cases cover both.
+`npm run test:startup:packaged` launches the packaged app six times, each after a separate launch stores (or clears) its camera: a fresh profile and a country view open National; KTLX at zoom 9.5 opens live KTLX; a reload mid-download still reaches live KTLX; and after a KFWS launch and after a National launch, diagnostics hydrate all 20 archive frames. Every case fails if a bundled archive scan is shown or if anything claims a radar is displayed before one paints.
 
 ## Deferred optimization
 
-The bundled startup observation is still decoded from raw Level II data. A future performance-only change may bundle a hash-pinned predecoded packed sweep, provided provenance, wire validation, public-repository policy, and installer evidence remain equivalent. That optimization is not required to correct the demonstrated blocking dependencies.
+Superseded on 2026-09-29: with no startup scan, there is nothing to predecode.

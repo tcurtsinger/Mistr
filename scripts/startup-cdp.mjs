@@ -1,27 +1,29 @@
-// The startup-fallback gate's CDP side. `prime` stores the camera the next
-// launch restores; a case name checks what that launch painted and whether it
-// used the bundled startup scan. (A reload is no substitute for a launch: the
-// previous document's native downloads stay charged until they unwind.)
-// Usage: node scripts/startup-fallback-cdp.mjs prime <longitude> <latitude> <zoom>
-//        node scripts/startup-fallback-cdp.mjs <case>
+// The startup gate's CDP side. `prime` stores the camera the next launch
+// restores (`prime clear` removes it, as on a fresh profile); a case name
+// checks what that launch painted. A reload is no substitute for a launch:
+// the previous document's native downloads stay charged until they unwind.
+// Usage: node scripts/startup-cdp.mjs prime <longitude> <latitude> <zoom>
+//        node scripts/startup-cdp.mjs prime clear
+//        node scripts/startup-cdp.mjs <case>
 import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { CdpClient, fetchJsonWithTimeout, openWebSocketWithTimeout } from "./cdp-client.mjs";
-import { validateStartupFallbackCase } from "./startup-fallback-validation.mjs";
+import { validateStartupCase } from "./startup-validation.mjs";
 
 const [label, longitude, latitude, zoom] = process.argv.slice(2);
 const port = Number(process.env.MISTR_CDP_PORT ?? 9344);
-const output = resolve(process.env.MISTR_STARTUP_FALLBACK_OUTPUT ?? "artifacts/startup-fallback");
+const output = resolve(process.env.MISTR_STARTUP_OUTPUT ?? "artifacts/startup");
+const clearCamera = label === "prime" && longitude === "clear";
 const camera = { longitude: Number(longitude), latitude: Number(latitude), zoom: Number(zoom) };
-if (!label || (label === "prime" && !Object.values(camera).every(Number.isFinite))) {
-  throw new Error("usage: startup-fallback-cdp.mjs prime <longitude> <latitude> <zoom> | <case>");
+if (!label || (label === "prime" && !clearCamera && !Object.values(camera).every(Number.isFinite))) {
+  throw new Error("usage: startup-cdp.mjs prime <longitude> <latitude> <zoom> | prime clear | <case>");
 }
 await mkdir(output, { recursive: true });
 
 const target = await waitForTarget();
 const socket = new WebSocket(target.webSocketDebuggerUrl);
 await openWebSocketWithTimeout(socket);
-const client = new CdpClient(socket, 60_000);
+const client = new CdpClient(socket, 120_000);
 const evaluate = async (expression) => {
   const reply = await client.call("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
   if (reply.error) throw new Error(`Runtime.evaluate: ${JSON.stringify(reply.error)}`);
@@ -33,24 +35,25 @@ try {
   await client.call("Runtime.enable");
   await waitFor(() => evaluate("Boolean(window.__MISTR_PHASE4__)"), 60_000);
   if (label === "prime") {
-    await evaluate(`localStorage.setItem("mistr.camera", ${JSON.stringify(JSON.stringify(camera))}); true`);
+    await evaluate(clearCamera
+      ? `localStorage.removeItem("mistr.camera"); true`
+      : `localStorage.setItem("mistr.camera", ${JSON.stringify(JSON.stringify(camera))}); true`);
     process.exit(0);
   }
   const sample = () => evaluate(`(() => {
     const source = window.__MISTR_NATIONAL_PHASE4__?.sourceState?.();
     const painted = source?.painted?.source;
     const phase4 = window.__MISTR_PHASE4__?.report?.();
+    const lastComplete = window.__MISTR_PHASE5__?.report?.()?.display?.lastComplete;
     return {
-      startupFallback: window.__MISTR_PHASE4__?.startupFallback?.() ?? null,
       painted: painted ? (painted.kind === "site" ? painted.siteIcao : "national") : null,
       transition: Boolean(source?.transition),
-      liveSite: window.__MISTR_PHASE5__?.report?.()?.display?.lastComplete?.site ?? null,
-      liveSourceKind: window.__MISTR_PHASE5__?.report?.()?.display?.lastComplete?.source ?? null,
+      liveSite: lastComplete?.site ?? null,
+      liveSourceKind: lastComplete?.source ?? null,
       siteRenderer: phase4?.renderer?.status ?? null,
       sitePlaybackReady: Boolean(phase4?.playback),
       nationalRenderer: window.__MISTR_NATIONAL_PHASE4__?.report?.()?.renderer?.status ?? null,
       alert: document.querySelector("[role=alert]")?.textContent?.trim() || null,
-      preparing: document.querySelector(".playback-bar")?.innerText?.includes("LOADING") ?? false,
       sourceLabel: document.querySelector('[data-role="radar-source"]')?.getAttribute("aria-label") ?? null,
       notice: document.querySelector(".radar-notice")?.textContent?.trim() || null,
     };
@@ -62,6 +65,7 @@ try {
     // Before any source paints, the chrome must not claim one is displayed.
     let prePaintSamples = 0;
     const falseDisplayClaims = [];
+    let archiveShownAtLaunch = false;
     while (Date.now() - started < 120_000) {
       try {
         state = await sample();
@@ -71,6 +75,7 @@ try {
         continue;
       }
       if (state.painted && painted.at(-1) !== state.painted) painted.push(state.painted);
+      if (state.liveSourceKind === "nexrad_level2_archive_ii") archiveShownAtLaunch = true;
       if (!state.painted && state.sourceLabel) {
         prePaintSamples += 1;
         const claim = / is displayed\./.test(state.sourceLabel) ? state.sourceLabel
@@ -78,7 +83,7 @@ try {
             : null;
         if (claim && !falseDisplayClaims.includes(claim)) falseDisplayClaims.push(claim);
       }
-      const settled = !state.transition && state.startupFallback && (
+      const settled = !state.transition && (
         (state.painted === "national" && state.nationalRenderer === "painted")
         || (state.painted && state.painted !== "national" && state.liveSite === state.painted
           && state.liveSourceKind === "nexrad_level2_chunks"
@@ -92,8 +97,22 @@ try {
       paintedSequence: painted,
       prePaintSamples,
       falseDisplayClaims,
+      archiveShownAtLaunch,
       settledMs: Date.now() - started,
     };
+  };
+  // Diagnostics hydrate the full 20-frame KTLX archive loop from any launch.
+  const prepareArchive = async () => {
+    try {
+      await evaluate("window.__MISTR_PHASE4__.prepareArchive().then(() => true)");
+      return await evaluate(`({
+        residentFrames: window.__MISTR_PHASE4__.report()?.renderer?.metrics?.residentFrameCount ?? null,
+        painted: window.__MISTR_NATIONAL_PHASE4__.sourceState()?.painted?.source ?? null,
+        source: window.__MISTR_PHASE5__.report()?.display?.lastComplete?.source ?? null,
+      })`);
+    } catch (error) {
+      return { residentFrames: null, error: String(error?.message ?? error).slice(0, 300) };
+    }
   };
   let result;
   if (label === "reload") {
@@ -104,22 +123,13 @@ try {
     await evaluate("setTimeout(() => location.reload(), 0); true");
     await delay(500);
     result = { case: label, ...(await settle()), reloaded: true, beforeReload };
-  } else if (label === "kfws") {
-    // A launch that skips the startup scan must still let diagnostics
-    // hydrate the full 20-frame KTLX archive loop.
+  } else if (label === "kfws" || label === "national-archive") {
     const launched = await settle();
-    let archive;
-    try {
-      await evaluate("window.__MISTR_PHASE4__.prepareArchive().then(() => true)");
-      archive = await evaluate("({ residentFrames: window.__MISTR_PHASE4__.report()?.renderer?.metrics?.residentFrameCount ?? null })");
-    } catch (error) {
-      archive = { residentFrames: null, error: String(error?.message ?? error).slice(0, 300) };
-    }
-    result = { case: label, ...launched, archive };
+    result = { case: label, ...launched, archive: await prepareArchive() };
   } else {
     result = { case: label, ...(await settle()) };
   }
-  result.failures = validateStartupFallbackCase(label, result);
+  result.failures = validateStartupCase(label, result);
   await writeFile(resolve(output, `${label}.json`), `${JSON.stringify(result, null, 2)}\n`);
   console.log(JSON.stringify(result, null, 2));
   if (result.failures.length > 0) process.exitCode = 1;

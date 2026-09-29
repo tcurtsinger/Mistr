@@ -173,7 +173,8 @@ on the backend, then 520 ms to upload to the GPU.
   4 ms per-frame upload budget is unchanged.
 - **The KTLX startup scan only for a KTLX launch.** It painted KTLX in the
   wrong place for any other launch and held current radar back by its
-  decode, about 1.1 s.
+  decode, about 1.1 s. (Removed from every launch later the same day; see
+  [Visible-First Startup](24_VISIBLE_FIRST_STARTUP_AND_RECENT_BACKFILL.md).)
 
 Measured from process launch, same workstation (120 Hz display):
 
