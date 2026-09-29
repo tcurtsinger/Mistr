@@ -250,7 +250,13 @@ day, the backend's retained frame bytes fell from 3,138 MB to 1,252 MB, and
 its process memory from 3,081 MB to 1,322 MB.
 The load bench also records every animation-frame interval while history
 loads (`loadFramePacing`); set `MISTR_BENCH_NO_PROFILE=1` so the sampling
-profiler does not skew it.
+profiler does not skew it. It attaches as soon as the page exists, about
+0.3 s after navigation and before the first frame, and reports that start as
+`fromMs`. A missed refresh is an interval over one and a half refresh
+intervals, estimated from the samples or set with `MISTR_BENCH_REFRESH_HZ`.
+`longAnimationFrames` counts every frame of 50 ms or more from navigation
+start, before attachment included, and frame times come from the app's load
+trace.
 
 Diagnostics: `__MISTR_NATIONAL_PHASE4__.loadTrace()` records each prepare's
 discovery, download, and decode times, and the first frame's steps
