@@ -32,6 +32,9 @@ export function validateStartupFallbackCase(label, result) {
       failures.push("the Site renderer and playback are ready");
     }
   }
+  if (result?.falseDisplayClaims?.length) {
+    failures.push("nothing is claimed as displayed before a source paints");
+  }
   if (result?.alert) failures.push(`the launch reports: ${result.alert}`);
   return failures;
 }

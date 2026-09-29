@@ -46,6 +46,13 @@ describe("startup-fallback gate", () => {
     ]);
   });
 
+  it("rejects claiming a displayed source before anything paints", () => {
+    const claimed = { ...liveSite(false), falseDisplayClaims: ["Choose radar source. KTLX Site is displayed."] };
+    expect(validateStartupFallbackCase("missing", claimed)).toContain(
+      "nothing is claimed as displayed before a source paints",
+    );
+  });
+
   it("rejects a skipped scan that records no reason", () => {
     const silent = liveSite(false);
     delete silent.startupFallback.error;

@@ -52,10 +52,15 @@ try {
       nationalRenderer: window.__MISTR_NATIONAL_PHASE4__?.report?.()?.renderer?.status ?? null,
       alert: document.querySelector("[role=alert]")?.textContent?.trim() || null,
       preparing: document.querySelector(".playback-bar")?.innerText?.includes("LOADING") ?? false,
+      sourceLabel: document.querySelector('[data-role="radar-source"]')?.getAttribute("aria-label") ?? null,
+      notice: document.querySelector(".radar-notice")?.textContent?.trim() || null,
     };
   })()`);
   let state = null;
   const painted = [];
+  // Before any source paints, the chrome must not claim one is displayed.
+  let prePaintSamples = 0;
+  const falseDisplayClaims = [];
   while (Date.now() - started < 120_000) {
     try {
       state = await sample();
@@ -65,6 +70,13 @@ try {
       continue;
     }
     if (state.painted && painted.at(-1) !== state.painted) painted.push(state.painted);
+    if (!state.painted && state.sourceLabel) {
+      prePaintSamples += 1;
+      const claim = / is displayed\./.test(state.sourceLabel) ? state.sourceLabel
+        : /^Showing /.test(state.notice ?? "") ? state.notice
+          : null;
+      if (claim && !falseDisplayClaims.includes(claim)) falseDisplayClaims.push(claim);
+    }
     const settled = !state.transition && state.startupFallback && (
       (state.painted === "national" && state.nationalRenderer === "painted")
       || (state.painted && state.painted !== "national" && state.liveSite === state.painted
@@ -72,9 +84,16 @@ try {
         && state.siteRenderer === "painted" && state.sitePlaybackReady)
     );
     if (settled) break;
-    await delay(250);
+    await delay(state.painted ? 250 : 50);
   }
-  const result = { case: label, ...state, paintedSequence: painted, settledMs: Date.now() - started };
+  const result = {
+    case: label,
+    ...state,
+    paintedSequence: painted,
+    prePaintSamples,
+    falseDisplayClaims,
+    settledMs: Date.now() - started,
+  };
   result.failures = validateStartupFallbackCase(label, result);
   await writeFile(resolve(output, `${label}.json`), `${JSON.stringify(result, null, 2)}\n`);
   console.log(JSON.stringify(result, null, 2));
