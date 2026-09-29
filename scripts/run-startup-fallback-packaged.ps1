@@ -33,7 +33,8 @@ try {
         @{ Name = "missing"; Cache = $missing; Camera = @("-97.2778", "35.3331", "9.5") },
         @{ Name = "corrupt"; Cache = $corrupt; Camera = @("-97.2778", "35.3331", "9.5") },
         @{ Name = "national"; Cache = $null; Camera = @("-98.5", "39.5", "4.5") },
-        @{ Name = "reload"; Cache = $null; Camera = @("-97.2778", "35.3331", "9.5") }
+        @{ Name = "reload"; Cache = $null; Camera = @("-97.2778", "35.3331", "9.5") },
+        @{ Name = "kfws"; Cache = $null; Camera = @("-97.3031", "32.5731", "9.5") }
     )
     $previousArguments = $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS
     $previousCache = $env:MISTR_PHASE4_FIXTURE_CACHE_DIR
@@ -69,7 +70,7 @@ try {
         Write-Output "FAIL: $($failed -join ', ')"
         exit 1
     }
-    Write-Output "PASS: startup reaches current radar with the startup scan bundled, missing, corrupt, not wanted, and after a reload"
+    Write-Output "PASS: startup reaches current radar with the startup scan bundled, missing, corrupt, not wanted, after a reload, and with the archive loop hydrated after a KFWS launch"
 }
 finally {
     Pop-Location

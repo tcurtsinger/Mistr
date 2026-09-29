@@ -253,9 +253,8 @@ export function App() {
   const [paintedSourceKind, setPaintedSourceKind] = useState<RadarSweepCpuModel["sourceKind"]>(
     "nexrad_level2_archive_ii",
   );
-  const [paintedRadarSource, setPaintedRadarSource] = useState<RadarSourceKey>(
-    siteRadarSource("KTLX"),
-  );
+  // Null until a source paints: the startup scan can be skipped or fail.
+  const [paintedRadarSource, setPaintedRadarSource] = useState<RadarSourceKey | null>(null);
   const [requestedSourceKind, setRequestedSourceKind] = useState<"site" | "national" | undefined>();
   const [nationalPhase3, setNationalPhase3] = useState<NationalPhase3Report | null>(null);
   const [nationalPlayback, setNationalPlayback] = useState<NationalPlaybackSnapshot | null>(null);
@@ -666,6 +665,8 @@ export function App() {
         throw new Error(`Phase 4 requires its explicit ${PHASE4_FRAME_COUNT}-fixture KTLX set`);
       }
       const archiveModels: RadarSweepCpuModel[] = [];
+      // Fixtures already in archiveModels; the startup scan is one only when it painted.
+      const loadedArchiveFixtureIds = new Set<string>();
       const decodeArchiveFixture = async (fixtureId: string) => {
         if (!client) throw new Error("archive transfer client is unavailable");
         const lease = await client.requestPhase4Fixture(fixtureId);
@@ -698,6 +699,7 @@ export function App() {
         setPhase4({ kind: "running", stage: "LOADING NEWEST SAFE SCAN" });
         const newestArchiveModel = await decodeArchiveFixture(fixtureIds[fixtureIds.length - 1]);
         archiveModels.push(newestArchiveModel);
+        loadedArchiveFixtureIds.add(fixtureIds[fixtureIds.length - 1]);
         modelsById.set(newestArchiveModel.observationId, newestArchiveModel);
         const diagnosticModel = newestArchiveModel;
         radarModelRef.current = diagnosticModel;
@@ -743,6 +745,7 @@ export function App() {
         latestReport = null;
         radarModelRef.current = null;
         archiveModels.length = 0;
+        loadedArchiveFixtureIds.clear();
         modelsById.clear();
         setTimelineFrames([]);
         setPhase4({ kind: "running", stage: "LOADING CURRENT RADAR" });
@@ -754,12 +757,13 @@ export function App() {
         for (let index = 0; index < fixtureIds.length; index += 1) {
           if (cancelled) throw new Error("archive hydration was cancelled");
           const fixtureId = fixtureIds[index];
-          if (fixtureId === fixtureIds[fixtureIds.length - 1]) continue;
+          if (loadedArchiveFixtureIds.has(fixtureId)) continue;
           setPhase4({
             kind: "running",
             stage: `DECODING OBSERVATION ${index + 1}/${fixtureIds.length}`,
           });
           const model = await decodeArchiveFixture(fixtureId);
+          loadedArchiveFixtureIds.add(fixtureId);
           if (!existingIds.has(model.observationId)) {
             archiveModels.push(model);
             existingIds.add(model.observationId);
@@ -3911,7 +3915,7 @@ export function App() {
     };
   }, [radarHostReady, runtime.shell]);
 
-  const nationalActive = paintedRadarSource.kind === "national";
+  const nationalActive = paintedRadarSource?.kind === "national";
   const nationalCommonResidencyReady = nationalActive
     && nationalPhase3 !== null
     && commonResidencyReadyForInteraction(
@@ -4010,6 +4014,13 @@ export function App() {
       : undefined;
   const radarNotice = userFacingError
     ? { kind: "error" as const, message: userFacingError }
+    : !paintedRadarSource && (requestedSourceKind === "national" || pendingSite)
+      ? {
+          kind: "info" as const,
+          message: requestedSourceKind === "national"
+            ? "Loading National CONUS radar."
+            : `Loading ${pendingSite} live radar.`,
+        }
     : requestedSourceKind === "national"
       ? {
           kind: "info" as const,
@@ -4177,6 +4188,7 @@ export function App() {
   const recenterRadar = () => {
     const instance = map.current;
     if (!instance) return;
+    if (!paintedRadarSource) return;
     autoSourceRef.current?.evaluateAfterNextMove();
     if (paintedRadarSource.kind === "national") {
       flyToNational(instance);
@@ -4239,7 +4251,7 @@ export function App() {
         preparingLabel={preparingLabel}
         radarNotice={radarNotice}
         recenterReady={displayedAtUnixMs !== undefined}
-        paintedSourceKind={paintedRadarSource.kind}
+        paintedSourceKind={paintedRadarSource?.kind ?? "none"}
         requestedSourceKind={requestedSourceKind}
         requestedSite={requestedSite ?? undefined}
         selectedSite={selectedSite}
@@ -4269,7 +4281,7 @@ function synchronizeRadarSourceUi(
   snapshot: RadarSessionSnapshot,
   setRequestedSite: (site: string | null) => void,
   setSelectedSite: (site: string) => void,
-  setPaintedSource: (source: RadarSourceKey) => void,
+  setPaintedSource: (source: RadarSourceKey | null) => void,
   setRequestedSourceKind: (source: "site" | "national" | undefined) => void,
 ): void {
   setRequestedSourceKind(snapshot.requestedSource?.kind);
@@ -4281,7 +4293,7 @@ function synchronizeRadarSourceUi(
   if (snapshot.painted?.source.kind === "site") {
     setSelectedSite(snapshot.painted.source.siteIcao);
   }
-  if (snapshot.painted) setPaintedSource(snapshot.painted.source);
+  setPaintedSource(snapshot.painted?.source ?? null);
 }
 
 function focusRadar(instance: MapLibreMap, model: RadarSweepCpuModel): void {

@@ -7,6 +7,7 @@ const EXPECTED = {
   corrupt: { fallbackPainted: false, painted: "KTLX" },
   national: { fallbackPainted: false, skipped: true, painted: "national" },
   reload: { fallbackPainted: true, painted: "KTLX", reloaded: true },
+  kfws: { fallbackPainted: false, skipped: true, painted: "KFWS", archiveFrames: 20 },
 };
 
 export function validateStartupFallbackCase(label, result) {
@@ -39,6 +40,12 @@ export function validateStartupFallbackCase(label, result) {
     }
   }
   if (expected.reloaded && result?.reloaded !== true) failures.push("the page reloaded mid-download");
+  if (expected.archiveFrames && result?.archive?.residentFrames !== expected.archiveFrames) {
+    failures.push("diagnostics hydrate the full archive loop without a startup scan");
+  }
+  if (result?.falseDisplayClaims?.length) {
+    failures.push("nothing is claimed as displayed before a source paints");
+  }
   if (result?.alert) failures.push(`the launch reports: ${result.alert}`);
   return failures;
 }

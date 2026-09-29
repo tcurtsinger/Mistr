@@ -51,12 +51,17 @@ try {
       nationalRenderer: window.__MISTR_NATIONAL_PHASE4__?.report?.()?.renderer?.status ?? null,
       alert: document.querySelector("[role=alert]")?.textContent?.trim() || null,
       preparing: document.querySelector(".playback-bar")?.innerText?.includes("LOADING") ?? false,
+      sourceLabel: document.querySelector('[data-role="radar-source"]')?.getAttribute("aria-label") ?? null,
+      notice: document.querySelector(".radar-notice")?.textContent?.trim() || null,
     };
   })()`);
   const settle = async () => {
     const started = Date.now();
     let state = null;
     const painted = [];
+    // Before any source paints, the chrome must not claim one is displayed.
+    let prePaintSamples = 0;
+    const falseDisplayClaims = [];
     while (Date.now() - started < 120_000) {
       try {
         state = await sample();
@@ -66,6 +71,13 @@ try {
         continue;
       }
       if (state.painted && painted.at(-1) !== state.painted) painted.push(state.painted);
+      if (!state.painted && state.sourceLabel) {
+        prePaintSamples += 1;
+        const claim = / is displayed\./.test(state.sourceLabel) ? state.sourceLabel
+          : /^Showing /.test(state.notice ?? "") ? state.notice
+            : null;
+        if (claim && !falseDisplayClaims.includes(claim)) falseDisplayClaims.push(claim);
+      }
       const settled = !state.transition && state.startupFallback && (
         (state.painted === "national" && state.nationalRenderer === "painted")
         || (state.painted && state.painted !== "national" && state.liveSite === state.painted
@@ -73,9 +85,15 @@ try {
           && state.siteRenderer === "painted" && state.sitePlaybackReady)
       );
       if (settled) break;
-      await delay(250);
+      await delay(state.painted ? 250 : 50);
     }
-    return { ...state, paintedSequence: painted, settledMs: Date.now() - started };
+    return {
+      ...state,
+      paintedSequence: painted,
+      prePaintSamples,
+      falseDisplayClaims,
+      settledMs: Date.now() - started,
+    };
   };
   let result;
   if (label === "reload") {
@@ -86,6 +104,18 @@ try {
     await evaluate("setTimeout(() => location.reload(), 0); true");
     await delay(500);
     result = { case: label, ...(await settle()), reloaded: true, beforeReload };
+  } else if (label === "kfws") {
+    // A launch that skips the startup scan must still let diagnostics
+    // hydrate the full 20-frame KTLX archive loop.
+    const launched = await settle();
+    let archive;
+    try {
+      await evaluate("window.__MISTR_PHASE4__.prepareArchive().then(() => true)");
+      archive = await evaluate("({ residentFrames: window.__MISTR_PHASE4__.report()?.renderer?.metrics?.residentFrameCount ?? null })");
+    } catch (error) {
+      archive = { residentFrames: null, error: String(error?.message ?? error).slice(0, 300) };
+    }
+    result = { case: label, ...launched, archive };
   } else {
     result = { case: label, ...(await settle()) };
   }

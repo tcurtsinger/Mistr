@@ -60,6 +60,27 @@ describe("startup-fallback gate", () => {
     expect(validateStartupFallbackCase("reload", liveSite(true))).toContain("the page reloaded mid-download");
   });
 
+  it("requires the full archive loop after a launch that skipped the startup scan", () => {
+    const kfws = {
+      ...liveSite(false),
+      startupFallback: { painted: false, elapsedMs: 0, skipped: "launch is not KTLX" },
+      painted: "KFWS",
+      liveSite: "KFWS",
+      archive: { residentFrames: 20 },
+    };
+    expect(validateStartupFallbackCase("kfws", kfws)).toEqual([]);
+    expect(validateStartupFallbackCase("kfws", { ...kfws, archive: { residentFrames: 19 } })).toContain(
+      "diagnostics hydrate the full archive loop without a startup scan",
+    );
+  });
+
+  it("rejects claiming a displayed source before anything paints", () => {
+    const claimed = { ...liveSite(false), falseDisplayClaims: ["Choose radar source. KTLX Site is displayed."] };
+    expect(validateStartupFallbackCase("missing", claimed)).toContain(
+      "nothing is claimed as displayed before a source paints",
+    );
+  });
+
   it("rejects a failed scan that records no reason", () => {
     const silent = liveSite(false);
     delete silent.startupFallback.error;

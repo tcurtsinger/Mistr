@@ -42,7 +42,8 @@ export interface RadarChromeProps {
   preparingLabel?: string;
   radarNotice?: { kind: "info" | "error"; message: string };
   recenterReady: boolean;
-  paintedSourceKind: "site" | "national";
+  /** "none" until a source has painted. */
+  paintedSourceKind: "site" | "national" | "none";
   requestedSourceKind?: "site" | "national";
   requestedSite?: string;
   selectedSite: string;
@@ -204,7 +205,7 @@ export function RadarChrome({
           aria-controls="mistr-context-site-panel"
           aria-expanded={openPanel === "context-sites"}
           aria-haspopup="dialog"
-          aria-label={`Choose radar source. ${paintedSourceKind === "national" ? "National CONUS" : `${selectedSite} Site`} is displayed.${requestedSourceKind === "national" ? " Updating National." : requestedSite ? ` Updating ${requestedSite}.` : ""}`}
+          aria-label={`Choose radar source. ${paintedSourceKind === "none" ? "No radar is displayed yet." : `${paintedSourceKind === "national" ? "National CONUS" : `${selectedSite} Site`} is displayed.`}${requestedSourceKind === "national" ? " Updating National." : requestedSite ? ` Updating ${requestedSite}.` : ""}`}
           className="context-tool context-tool--site"
           data-control="radar-sites"
           data-role="radar-source"
@@ -223,7 +224,7 @@ export function RadarChrome({
           onFocus={() => setToolbarTabStop("site")}
           ref={siteTriggerRef}
           tabIndex={effectiveToolbarTabStop === "site" ? 0 : -1}
-          tooltip={`Radar Source · ${paintedSourceKind === "national" ? "National" : selectedSite}`}
+          tooltip={`Radar Source · ${paintedSourceKind === "none" ? "Loading" : paintedSourceKind === "national" ? "National" : selectedSite}`}
           tooltipSuppressed={openPanel === "context-sites"}
           type="button"
         >
@@ -293,7 +294,7 @@ export function RadarChrome({
           id="mistr-context-site-panel"
           onSelectNational={selectNational}
           onSelect={selectSite}
-          paintedSourceKind={paintedSourceKind}
+          paintedSourceKind={paintedSourceKind === "none" ? requestedSourceKind ?? "site" : paintedSourceKind}
           selectionReady={siteSelectionReady}
           sites={sites}
         />
