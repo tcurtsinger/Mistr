@@ -8,6 +8,7 @@ use crate::mrms::{
 };
 use serde::Serialize;
 use sha2::{Digest, Sha256};
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use thiserror::Error;
@@ -269,6 +270,199 @@ impl PackedGridFrame {
 
     pub fn transfer_bytes(&self) -> usize {
         self.manifest.len() + self.chunks.iter().map(Vec::len).sum::<usize>()
+    }
+}
+
+/// A packed frame as the backend retains it for serving and inspection. A
+/// chunk that draws nothing keeps only its record header and which of its
+/// cells are missing rather than no-coverage, about 8 KiB or less instead of
+/// about 127 KiB; its record is rebuilt byte for byte on request.
+#[derive(Debug, Clone)]
+pub struct RetainedPackedGrid {
+    pub manifest: Vec<u8>,
+    pub summary: PackedGridManifestSummary,
+    chunks: Vec<RetainedChunk>,
+}
+
+#[derive(Debug, Clone)]
+enum RetainedChunk {
+    Encoded(Vec<u8>),
+    DrawsNothing {
+        header: Box<[u8; PACKED_GRID_HEADER_BYTES]>,
+        cells: EmptyCells,
+    },
+}
+
+#[derive(Debug, Clone)]
+enum EmptyCells {
+    /// Every cell holds this raw code.
+    Uniform { code: u16, count: usize },
+    /// One bit per cell, set where the cell is missing, clear where it has
+    /// no coverage.
+    Missing { bits: Vec<u64>, count: usize },
+}
+
+impl RetainedPackedGrid {
+    pub fn retain(frame: PackedGridFrame) -> Result<Self, PackedGridError> {
+        let missing_raw = frame.summary.missing_raw;
+        let no_coverage_raw = frame.summary.no_coverage_raw;
+        let chunks = frame
+            .chunks
+            .into_iter()
+            .zip(&frame.summary.chunks)
+            .map(|(bytes, descriptor)| {
+                if !descriptor.draws_nothing {
+                    return Ok(RetainedChunk::Encoded(bytes));
+                }
+                let header: [u8; PACKED_GRID_HEADER_BYTES] = bytes
+                    .get(..PACKED_GRID_HEADER_BYTES)
+                    .and_then(|header| header.try_into().ok())
+                    .ok_or_else(|| {
+                        PackedGridError::InvalidChunk(
+                            "chunk record is shorter than its header".into(),
+                        )
+                    })?;
+                let codes = bytes[PACKED_GRID_HEADER_BYTES..]
+                    .chunks_exact(2)
+                    .map(|pair| u16::from_be_bytes([pair[0], pair[1]]));
+                Ok(RetainedChunk::DrawsNothing {
+                    header: Box::new(header),
+                    cells: EmptyCells::from_codes(codes, missing_raw, no_coverage_raw)?,
+                })
+            })
+            .collect::<Result<Vec<_>, PackedGridError>>()?;
+        Ok(Self {
+            manifest: frame.manifest,
+            summary: frame.summary,
+            chunks,
+        })
+    }
+
+    pub fn chunk_count(&self) -> usize {
+        self.chunks.len()
+    }
+
+    /// The exact chunk record, as `PackedGridFrame::encode` produced it.
+    pub fn chunk_record(&self, index: usize) -> Option<Cow<'_, [u8]>> {
+        Some(match self.chunks.get(index)? {
+            RetainedChunk::Encoded(bytes) => Cow::Borrowed(bytes.as_slice()),
+            RetainedChunk::DrawsNothing { header, cells } => {
+                let mut bytes = Vec::with_capacity(PACKED_GRID_HEADER_BYTES + cells.count() * 2);
+                bytes.extend_from_slice(header.as_slice());
+                for cell in 0..cells.count() {
+                    let code =
+                        cells.code(cell, self.summary.missing_raw, self.summary.no_coverage_raw)?;
+                    bytes.extend_from_slice(&code.to_be_bytes());
+                }
+                Cow::Owned(bytes)
+            }
+        })
+    }
+
+    /// The raw code of one halo cell, row-major within the chunk's halo.
+    pub fn raw_code(&self, index: usize, cell: usize) -> Option<u16> {
+        match self.chunks.get(index)? {
+            RetainedChunk::Encoded(bytes) => {
+                let offset = PACKED_GRID_HEADER_BYTES.checked_add(cell.checked_mul(2)?)?;
+                bytes
+                    .get(offset..offset + 2)
+                    .map(|pair| u16::from_be_bytes([pair[0], pair[1]]))
+            }
+            RetainedChunk::DrawsNothing { cells, .. } => {
+                cells.code(cell, self.summary.missing_raw, self.summary.no_coverage_raw)
+            }
+        }
+    }
+
+    /// Bytes a full transfer of the frame puts on the wire.
+    pub fn transfer_bytes(&self) -> usize {
+        self.manifest.len()
+            + self
+                .summary
+                .chunks
+                .iter()
+                .map(|chunk| chunk.encoded_length as usize)
+                .sum::<usize>()
+    }
+
+    /// Bytes the frame holds in memory.
+    pub fn retained_bytes(&self) -> usize {
+        self.manifest.len()
+            + self
+                .chunks
+                .iter()
+                .map(|chunk| match chunk {
+                    RetainedChunk::Encoded(bytes) => bytes.len(),
+                    RetainedChunk::DrawsNothing { cells, .. } => {
+                        PACKED_GRID_HEADER_BYTES + cells.retained_bytes()
+                    }
+                })
+                .sum::<usize>()
+    }
+}
+
+impl EmptyCells {
+    fn from_codes(
+        codes: impl Iterator<Item = u16>,
+        missing_raw: u16,
+        no_coverage_raw: u16,
+    ) -> Result<Self, PackedGridError> {
+        let mut bits = Vec::new();
+        let mut count = 0usize;
+        let mut first = None;
+        let mut uniform = true;
+        for code in codes {
+            let missing = if code == missing_raw {
+                true
+            } else if code == no_coverage_raw {
+                false
+            } else {
+                return Err(PackedGridError::InvalidChunk(
+                    "a chunk marked as drawing nothing holds a measured value".into(),
+                ));
+            };
+            uniform &= *first.get_or_insert(code) == code;
+            if count % 64 == 0 {
+                bits.push(0u64);
+            }
+            if missing {
+                *bits.last_mut().expect("a word per 64 cells") |= 1 << (count % 64);
+            }
+            count += 1;
+        }
+        Ok(match (uniform, first) {
+            (true, Some(code)) => Self::Uniform { code, count },
+            _ => Self::Missing { bits, count },
+        })
+    }
+
+    fn count(&self) -> usize {
+        match self {
+            Self::Uniform { count, .. } | Self::Missing { count, .. } => *count,
+        }
+    }
+
+    fn code(&self, cell: usize, missing_raw: u16, no_coverage_raw: u16) -> Option<u16> {
+        if cell >= self.count() {
+            return None;
+        }
+        Some(match self {
+            Self::Uniform { code, .. } => *code,
+            Self::Missing { bits, .. } => {
+                if bits[cell / 64] & (1 << (cell % 64)) != 0 {
+                    missing_raw
+                } else {
+                    no_coverage_raw
+                }
+            }
+        })
+    }
+
+    fn retained_bytes(&self) -> usize {
+        match self {
+            Self::Uniform { .. } => 2,
+            Self::Missing { bits, .. } => bits.len() * 8,
+        }
     }
 }
 
@@ -1211,6 +1405,42 @@ mod tests {
         for (bytes, expected) in frame.chunks.iter().zip(&frame.summary.chunks) {
             assert_eq!(validate_packed_grid_chunk(bytes).unwrap().chunk, *expected);
         }
+    }
+
+    #[test]
+    fn retained_frames_rebuild_every_chunk_and_cell_exactly() {
+        let mut pyramid = test_pyramid();
+        // Chunk 1 mixes missing and no-coverage cells; the rest stay uniform.
+        let level = pyramid.levels.get_mut(&4).unwrap();
+        for row in 0..40 {
+            level.raw_codes[row * level.width + 300] = MRMS_MISSING_RAW;
+        }
+        let frame = PackedGridFrame::encode(7, &pyramid, 4).unwrap();
+        let encoded = frame.chunks.clone();
+        let retained = RetainedPackedGrid::retain(frame).unwrap();
+        assert_eq!(retained.chunk_count(), encoded.len());
+        assert!(retained.summary.chunks[1].draws_nothing);
+        for (index, bytes) in encoded.iter().enumerate() {
+            assert_eq!(
+                retained.chunk_record(index).unwrap().as_ref(),
+                bytes.as_slice()
+            );
+            let cells = (bytes.len() - PACKED_GRID_HEADER_BYTES) / 2;
+            for cell in [0, 1, cells / 2, cells - 1] {
+                let offset = PACKED_GRID_HEADER_BYTES + cell * 2;
+                let expected = u16::from_be_bytes([bytes[offset], bytes[offset + 1]]);
+                assert_eq!(retained.raw_code(index, cell), Some(expected));
+            }
+            assert_eq!(retained.raw_code(index, cells), None);
+        }
+        assert!(retained.chunk_record(encoded.len()).is_none());
+        let full = retained.manifest.len() + encoded.iter().map(Vec::len).sum::<usize>();
+        assert_eq!(retained.transfer_bytes(), full);
+        // Only chunk 0 holds a measured value, so the rest shrink to headers
+        // and, for chunk 1, one bit per cell.
+        assert!(
+            retained.retained_bytes() < retained.manifest.len() + encoded[0].len() + 28 * 16_384
+        );
     }
 
     #[test]

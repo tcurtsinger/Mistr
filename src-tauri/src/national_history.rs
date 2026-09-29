@@ -11,10 +11,11 @@ use crate::mrms::{
     DownloadedMrmsObject, MrmsAcquisitionCounters, MrmsCellValue, MrmsClient, MrmsDecodeEvidence,
     MrmsObject, MrmsValueEncoding, bounded_poll_delay, decode_mrms_gzip,
 };
-use crate::packed_grid::{MrmsNumericPyramid, PackedGridFrame};
+use crate::packed_grid::{MrmsNumericPyramid, PackedGridFrame, RetainedPackedGrid};
 use crate::phase2_ipc::{TransferBroker, TransferError, TransferLane};
 use chrono::Utc;
 use serde::Serialize;
+use std::borrow::Cow;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -27,7 +28,8 @@ const HISTORY_LIMIT: usize = 60;
 // throughout this store is therefore factor 1 — there is exactly one version
 // of the data, and no coarser level ever reaches the operator.
 const OVERVIEW_FACTOR: u16 = 1;
-// Sixty retained native-resolution encodings (~49 MB each) plus one staged
+// Sixty retained native-resolution encodings (up to ~49 MB each; chunks that
+// draw nothing are held compactly, about 18 MB on 2026-09-29) plus one staged
 // mutation and the compressed downloads. Sized for the supported desktop
 // floor (tens of GB of system memory), not a minimal device.
 const HISTORY_BACKEND_TARGET_BYTES: usize = 4096 * 1024 * 1024;
@@ -45,7 +47,7 @@ struct RetainedNationalFrame {
     generation: u64,
     download: Arc<DownloadedMrmsObject>,
     evidence: MrmsDecodeEvidence,
-    overview: Arc<PackedGridFrame>,
+    overview: Arc<RetainedPackedGrid>,
     exact_pyramid: Arc<Mutex<Option<Arc<MrmsNumericPyramid>>>>,
 }
 
@@ -57,7 +59,7 @@ impl RetainedNationalFrame {
             observation_time_unix_ms: self.evidence.observation_time_unix_ms,
             content_sha256: self.evidence.compressed_sha256.clone(),
             compressed_bytes: self.evidence.compressed_bytes,
-            overview_chunk_count: self.overview.chunks.len(),
+            overview_chunk_count: self.overview.chunk_count(),
             overview_gpu_bytes: self
                 .overview
                 .summary
@@ -70,7 +72,7 @@ impl RetainedNationalFrame {
 
     fn retained_bytes(&self) -> usize {
         self.download.compressed_bytes.len()
-            + self.overview.transfer_bytes()
+            + self.overview.retained_bytes()
             + self
                 .exact_pyramid
                 .lock()
@@ -102,7 +104,7 @@ struct DetailedPresentation {
     generation: u64,
     observation_time_unix_ms: i64,
     content_sha256: String,
-    frame: Arc<PackedGridFrame>,
+    frame: Arc<RetainedPackedGrid>,
 }
 
 #[derive(Debug, Clone)]
@@ -294,7 +296,7 @@ impl NationalHistoryStore {
     fn detail_bytes(&self) -> usize {
         self.detail
             .as_ref()
-            .map(|detail| detail.frame.transfer_bytes())
+            .map(|detail| detail.frame.retained_bytes())
             .unwrap_or(0)
     }
 
@@ -304,7 +306,7 @@ impl NationalHistoryStore {
         observation_time_unix_ms: i64,
         content_sha256: &str,
         presentation_factor: u16,
-    ) -> Option<Arc<PackedGridFrame>> {
+    ) -> Option<Arc<RetainedPackedGrid>> {
         self.detail
             .as_ref()
             .filter(|detail| {
@@ -345,7 +347,7 @@ impl NationalHistoryStore {
                             .as_ref()
                             .is_some_and(|current| Arc::ptr_eq(&current.frame, &prior.frame))
                     })
-                    .map(|detail| detail.frame.transfer_bytes())
+                    .map(|detail| detail.frame.retained_bytes())
                     .unwrap_or(0);
                 retained_bytes.saturating_add(detail_bytes)
             })
@@ -1105,7 +1107,7 @@ pub async fn prepare_national_history_presentation(
         return Ok(NationalHistoryPresentationReport {
             observation: retained.identity(),
             presentation_factor,
-            chunk_count: packed.chunks.len(),
+            chunk_count: packed.chunk_count(),
             transfer_bytes: packed.transfer_bytes(),
             projected_gpu_bytes,
             decode_and_level_ms: elapsed_ms(started),
@@ -1142,6 +1144,7 @@ pub async fn prepare_national_history_presentation(
             }
         };
         PackedGridFrame::encode(generation, &pyramid, presentation_factor)
+            .and_then(RetainedPackedGrid::retain)
             .map_err(|error| TransferError::new("national_packed_grid_failed", error.to_string()))
     })
     .await
@@ -1187,7 +1190,7 @@ pub async fn prepare_national_history_presentation(
     Ok(NationalHistoryPresentationReport {
         observation,
         presentation_factor,
-        chunk_count: packed.chunks.len(),
+        chunk_count: packed.chunk_count(),
         transfer_bytes: packed.transfer_bytes(),
         projected_gpu_bytes,
         decode_and_level_ms: elapsed_ms(started),
@@ -1239,9 +1242,8 @@ pub fn request_national_history_chunk(
         presentation_factor,
         |frame| {
             frame
-                .chunks
-                .get(chunk_index as usize)
-                .cloned()
+                .chunk_record(chunk_index as usize)
+                .map(Cow::into_owned)
                 .ok_or_else(|| {
                     TransferError::new(
                         "national_chunk_not_found",
@@ -1274,13 +1276,33 @@ pub async fn request_national_history_chunk_batch(
         observation_time_unix_ms,
         &content_sha256,
         presentation_factor,
-        |frame| encode_chunk_batch(&frame.chunks, &chunk_indices),
+        |frame| encode_chunk_batch(frame, &chunk_indices),
     )
     .and_then(|bytes| bytes);
     publish_history_bytes(&broker, &state, session, generation, result)
 }
 
-fn encode_chunk_batch(chunks: &[Vec<u8>], indices: &[u32]) -> Result<Vec<u8>, TransferError> {
+/// Chunk records a batch can be built from.
+trait ChunkRecords {
+    fn record(&self, index: usize) -> Option<Cow<'_, [u8]>>;
+}
+
+impl ChunkRecords for RetainedPackedGrid {
+    fn record(&self, index: usize) -> Option<Cow<'_, [u8]>> {
+        self.chunk_record(index)
+    }
+}
+
+impl ChunkRecords for [Vec<u8>] {
+    fn record(&self, index: usize) -> Option<Cow<'_, [u8]>> {
+        self.get(index).map(|bytes| Cow::Borrowed(bytes.as_slice()))
+    }
+}
+
+fn encode_chunk_batch(
+    chunks: &(impl ChunkRecords + ?Sized),
+    indices: &[u32],
+) -> Result<Vec<u8>, TransferError> {
     if indices.is_empty()
         || indices.len() > 16
         || indices
@@ -1298,7 +1320,7 @@ fn encode_chunk_batch(chunks: &[Vec<u8>], indices: &[u32]) -> Result<Vec<u8>, Tr
     bytes.extend_from_slice(b"MGB1");
     bytes.extend_from_slice(&(indices.len() as u32).to_be_bytes());
     for index in indices {
-        let chunk = chunks.get(*index as usize).ok_or_else(|| {
+        let chunk = chunks.record(*index as usize).ok_or_else(|| {
             TransferError::new(
                 "national_chunk_not_found",
                 "batch chunk is outside presentation",
@@ -1311,7 +1333,7 @@ fn encode_chunk_batch(chunks: &[Vec<u8>], indices: &[u32]) -> Result<Vec<u8>, Tr
             ));
         }
         bytes.extend_from_slice(&(chunk.len() as u32).to_be_bytes());
-        bytes.extend_from_slice(chunk);
+        bytes.extend_from_slice(&chunk);
     }
     Ok(bytes)
 }
@@ -1363,7 +1385,7 @@ pub async fn lookup_national_history_point(
 }
 
 fn lookup_retained_point(
-    frame: &PackedGridFrame,
+    frame: &RetainedPackedGrid,
     generation: u64,
     observation_time_unix_ms: i64,
     content_sha256: String,
@@ -1421,14 +1443,11 @@ fn lookup_retained_point(
     }
     let local_x = (column - descriptor.halo_x) as usize;
     let local_y = (row - descriptor.halo_y) as usize;
-    let offset = crate::packed_grid::PACKED_GRID_HEADER_BYTES
-        + (local_y * usize::from(descriptor.halo_width) + local_x) * 2;
-    let bytes = frame.chunks.get(chunk_index).ok_or_else(|| {
-        TransferError::new("national_point_invalid", "retained chunk payload is absent")
-    })?;
-    let raw_code = bytes
-        .get(offset..offset + 2)
-        .map(|pair| u16::from_be_bytes([pair[0], pair[1]]))
+    let raw_code = frame
+        .raw_code(
+            chunk_index,
+            local_y * usize::from(descriptor.halo_width) + local_x,
+        )
         .ok_or_else(|| {
             TransferError::new(
                 "national_point_invalid",
@@ -1581,8 +1600,9 @@ async fn acquire_overview(
                 TransferError::new("national_level_generation_failed", error.to_string())
             })?,
         );
-        let overview =
-            PackedGridFrame::encode(generation, &pyramid, OVERVIEW_FACTOR).map_err(|error| {
+        let overview = PackedGridFrame::encode(generation, &pyramid, OVERVIEW_FACTOR)
+            .and_then(RetainedPackedGrid::retain)
+            .map_err(|error| {
                 TransferError::new("national_packed_grid_failed", error.to_string())
             })?;
         Ok::<_, TransferError>((evidence, overview, retain_exact_pyramid.then_some(pyramid)))
@@ -1650,7 +1670,7 @@ fn history_frame_bytes<T>(
     observation_time_unix_ms: i64,
     content_sha256: &str,
     presentation_factor: u16,
-    read: impl FnOnce(&PackedGridFrame) -> T,
+    read: impl FnOnce(&RetainedPackedGrid) -> T,
 ) -> Result<T, TransferError> {
     let store = lock_store(state)?;
     let retained = store.find(generation, observation_time_unix_ms, content_sha256, true)?;
@@ -1923,18 +1943,18 @@ mod tests {
     fn chunk_batch_envelope_preserves_order_and_bounded_payloads() {
         let chunks = vec![vec![1, 2], vec![3]];
         assert_eq!(
-            encode_chunk_batch(&chunks, &[1, 0]).unwrap(),
+            encode_chunk_batch(chunks.as_slice(), &[1, 0]).unwrap(),
             vec![
                 b'M', b'G', b'B', b'1', 0, 0, 0, 2, 0, 0, 0, 1, 3, 0, 0, 0, 2, 1, 2,
             ]
         );
         for indices in [vec![], vec![0, 0], vec![2], (0..17).collect()] {
-            assert!(encode_chunk_batch(&chunks, &indices).is_err());
+            assert!(encode_chunk_batch(chunks.as_slice(), &indices).is_err());
         }
-        assert!(encode_chunk_batch(&[vec![]], &[0]).is_err());
+        assert!(encode_chunk_batch(&[vec![]][..], &[0]).is_err());
         assert!(
             encode_chunk_batch(
-                &[vec![0; crate::packed_grid::PACKED_GRID_CHUNK_LIMIT + 1]],
+                &[vec![0; crate::packed_grid::PACKED_GRID_CHUNK_LIMIT + 1]][..],
                 &[0]
             )
             .is_err()
@@ -2390,11 +2410,14 @@ mod tests {
                 grib_sha256: "aa".repeat(32),
                 normalized_sha256: "bb".repeat(32),
             },
-            overview: Arc::new(PackedGridFrame {
-                manifest: vec![1],
-                chunks: Vec::new(),
-                summary,
-            }),
+            overview: Arc::new(
+                RetainedPackedGrid::retain(PackedGridFrame {
+                    manifest: vec![1],
+                    chunks: Vec::new(),
+                    summary,
+                })
+                .unwrap(),
+            ),
             exact_pyramid: Arc::new(Mutex::new(None)),
         })
     }
