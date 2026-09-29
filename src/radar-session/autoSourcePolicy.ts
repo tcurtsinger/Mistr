@@ -95,6 +95,17 @@ export function decideAutoSource(
   return { target: NATIONAL, ...spent };
 }
 
+/**
+ * The source a launch opens for the restored camera. Nothing is shown yet,
+ * so the thresholds for entering a Site apply, as they do from National.
+ */
+export function launchAutoSource(
+  camera: { readonly zoom: number; readonly center: LngLatPoint },
+  sites: readonly RadarSiteOption[],
+): AutoSource {
+  return decideAutoSource({ ...camera, visible: NATIONAL }, sites).target;
+}
+
 export function autoSourceOf(source: RadarSourceKey): AutoSource {
   return source.kind === "national" ? NATIONAL : { kind: "site", siteIcao: source.siteIcao };
 }

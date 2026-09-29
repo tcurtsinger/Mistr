@@ -3,6 +3,7 @@ import { RADAR_SITES } from "../data/radarSites";
 import {
   autoSourceOf,
   decideAutoSource,
+  launchAutoSource,
   nationalCovers,
   pickedNextSource,
   sameAutoSource,
@@ -135,6 +136,24 @@ describe("pickedNextSource", () => {
   it("goes to National when National is picked", () => {
     expect(pickedNextSource(undefined, ktlx)).toEqual(national);
     expect(pickedNextSource(undefined, national)).toEqual(national);
+  });
+});
+
+describe("launchAutoSource", () => {
+  it("opens the source the restored camera calls for", () => {
+    const conus = { longitude: -98.5, latitude: 39.5 };
+    expect(launchAutoSource({ zoom: 4.5, center: conus }, RADAR_SITES)).toEqual(national);
+    expect(launchAutoSource({ zoom: 9.5, center: KTLX }, RADAR_SITES)).toEqual(ktlx);
+    // Between the exit and enter zooms a launch has no Site to keep.
+    expect(launchAutoSource({ zoom: 8.7, center: KTLX }, RADAR_SITES)).toEqual(national);
+    expect(launchAutoSource({ zoom: 11, center: GULF }, RADAR_SITES)).toEqual(national);
+  });
+
+  it("opens a Site at regional zooms outside the National grid", () => {
+    const pahg = RADAR_SITES.find((site) => site.id === "PAHG")!;
+    const center = { longitude: pahg.longitude, latitude: pahg.latitude };
+    expect(launchAutoSource({ zoom: 6.5, center }, RADAR_SITES))
+      .toEqual({ kind: "site", siteIcao: "PAHG" });
   });
 });
 

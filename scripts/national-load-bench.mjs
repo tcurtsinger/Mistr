@@ -76,9 +76,13 @@ function summarizeProfile(profile) {
   };
 }
 
+// A launch opens the source its restored camera calls for; a country view
+// opens National.
+const nationalCamera = `localStorage.setItem("mistr.camera", JSON.stringify({ longitude: -98.5, latitude: 39.5, zoom: 4.5 }))`;
+
 if (label === "--prime") {
-  // Stores National as the start source so the next launch is measurable.
-  await evaluate(`localStorage.setItem("mistr.radarSource", "national"); true`);
+  // Stores a country view so the next launch opens National and is measurable.
+  await evaluate(`${nationalCamera}; true`);
   cdp.close();
   process.exit(0);
 }
@@ -87,8 +91,8 @@ try {
   await cdp.call("Page.enable");
   await cdp.call("Profiler.enable");
   await cdp.call("Profiler.setSamplingInterval", { interval: 500 });
-  // The app was just launched on National (the source is stored for the next launch).
-  await evaluate(`localStorage.setItem("mistr.radarSource", "national"); true`);
+  // The app was just launched on National; keep the next launch there too.
+  await evaluate(`${nationalCamera}; true`);
   await evaluate(`(() => {
     globalThis.__bench = { longTasks: [], frames: {} };
     new PerformanceObserver((list) => { for (const entry of list.getEntries()) __bench.longTasks.push(Math.round(entry.duration)); })

@@ -134,6 +134,7 @@ import { fadeOpacity } from "./radar-renderer/fade";
 import {
   autoSourceOf,
   decideAutoSource,
+  launchAutoSource,
   pickedNextSource,
   sameAutoSource,
   type AutoSource,
@@ -214,7 +215,7 @@ export function App() {
   const radarLayerRef = useRef<RadarCustomLayer | null>(null);
   const nationalLayerRef = useRef<NationalGridLayer | null>(null);
   const nationalWorkingSetRef = useRef<NationalHistoryWorkingSetController | null>(null);
-  const startupSourceRef = useRef(restoreRadarSource());
+  const startupSourceRef = useRef(restoreStartupSource());
   const radarSessionCoordinatorRef = useRef<RadarSessionCoordinator | null>(null);
   if (!radarSessionCoordinatorRef.current) {
     radarSessionCoordinatorRef.current = new RadarSessionCoordinator({
@@ -3707,8 +3708,8 @@ export function App() {
         sourceState: () => radarSessionCoordinatorRef.current?.snapshot() ?? null,
       };
       // The packaged archive is a safe first paint, not a permanent demo mode.
-      // Every launch proceeds to the stored painted source; a fresh profile
-      // starts with KTLX Site.
+      // Every launch proceeds to the source the restored camera calls for; a
+      // fresh profile starts with KTLX Site.
       const startupSource = startupSourceRef.current;
       if (!siteLevel2Session || !nationalMrmsSession) {
         throw new Error("radar source sessions are unavailable");
@@ -4251,7 +4252,7 @@ function restoreCamera(): { center: [number, number]; zoom: number } | null {
       && Number.isFinite(value.zoom) && value.zoom >= 0 && value.zoom <= 22
     ) return { center: [value.longitude, value.latitude], zoom: value.zoom };
   } catch {
-    // A missing or malformed camera falls back to the startup source.
+    // A missing or malformed camera falls back to the stored source.
   }
   return null;
 }
@@ -4418,6 +4419,21 @@ function storeLastSite(site: string): void {
   } catch {
     // Storage failure must not block radar selection.
   }
+}
+
+/**
+ * A launch opens the source the restored camera calls for, not whatever
+ * source was last shown: zoom decides the source. Without a stored camera
+ * (a fresh profile) the stored source, or KTLX, sets both.
+ */
+function restoreStartupSource(): RadarSourceKey {
+  const camera = restoreCamera();
+  if (!camera) return restoreRadarSource();
+  const [longitude, latitude] = camera.center;
+  const target = launchAutoSource({ zoom: camera.zoom, center: { longitude, latitude } }, RADAR_SITES);
+  return target.kind === "national"
+    ? { kind: "national", domain: "conus" }
+    : siteRadarSource(target.siteIcao);
 }
 
 function restoreRadarSource(): RadarSourceKey {

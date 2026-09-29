@@ -83,7 +83,7 @@ Only camera moves the operator makes are evaluated (MapLibre events with an `ori
 
 ### Camera
 
-Automatic switches never move the camera. The picker flies to a Site at zoom 9.5 (preloading during the flight when National is shown) and makes it preferred, so the landing switches to it from National or from another Site; picking National always zooms out to the country, even when National is already shown; recenter uses the same targets. The camera is stored on every move and restored at launch.
+Automatic switches never move the camera. The picker flies to a Site at zoom 9.5 (preloading during the flight when National is shown) and makes it preferred, so the landing switches to it from National or from another Site; picking National always zooms out to the country, even when National is already shown; recenter uses the same targets. The camera is stored on every move and restored at launch, and the launch opens the source that camera calls for under the same thresholds as switching from National (`launchAutoSource`); until 2026-09-28 it reopened the last-shown source wherever the camera pointed. Without a stored camera, a fresh profile opens KTLX.
 
 ### Known limits
 
