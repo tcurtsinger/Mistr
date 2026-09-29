@@ -389,6 +389,8 @@ export function App() {
     let unsubscribeAutoSourceFlush: (() => void) | null = null;
     let autoSiteRetryTimer: ReturnType<typeof globalThis.setTimeout> | null = null;
     let latestReport: Phase4Report | null = null;
+    // The bundled first paint: painted, or why it was skipped.
+    let startupFallback: { painted: boolean; elapsedMs: number; error?: string } | null = null;
     let activeScenario: Promise<Phase4ScenarioReport> | null = null;
     let startupAcquisition: Promise<void> | null = null;
     let prepareArchiveForDiagnostics: (() => Promise<RadarPaintReceipt>) | null = null;
@@ -680,10 +682,63 @@ export function App() {
       // archives before the first paint made development startup take roughly
       // a minute and delayed live radar for work the normal product path does
       // not need. The full loop is hydrated only for its packaged diagnostics.
+      // The scan is only a bridge: when it is missing or will not decode or
+      // paint, startup goes straight on to current radar.
       setPhase4({ kind: "running", stage: "LOADING NEWEST SAFE SCAN" });
-      const newestArchiveModel = await decodeArchiveFixture(fixtureIds[fixtureIds.length - 1]);
-      archiveModels.push(newestArchiveModel);
-      modelsById.set(newestArchiveModel.observationId, newestArchiveModel);
+      const fallbackStarted = performance.now();
+      let fallbackPainted: { model: RadarSweepCpuModel; receipt: RadarPaintReceipt } | null = null;
+      try {
+        const newestArchiveModel = await decodeArchiveFixture(fixtureIds[fixtureIds.length - 1]);
+        archiveModels.push(newestArchiveModel);
+        modelsById.set(newestArchiveModel.observationId, newestArchiveModel);
+        const diagnosticModel = newestArchiveModel;
+        radarModelRef.current = diagnosticModel;
+        setTimelineFrames([timelineFrame(diagnosticModel)]);
+        const alignment = createAlignmentReport(diagnosticModel);
+        latestReport = {
+          frames: summarizeFrames([diagnosticModel]),
+          alignment,
+          coexistence: emptyLayerCoexistenceReport(),
+        };
+        layer = new RadarCustomLayer([diagnosticModel], {
+          displayMode,
+          recoveryBeforeLayerId: ANCHOR_LAYER_ID,
+          onSnapshot(renderer) {
+            handleSiteRendererSnapshot(renderer, controller);
+          },
+        });
+        radarLayerRef.current = layer;
+        const beforeId = radarContextAnchorLayerId(instance.getStyle().layers ?? []);
+        installDiagnosticLayers(instance, diagnosticModel, alignment, layer, beforeId);
+        publish({ coexistence: currentLayerCoexistenceReport(instance) });
+        controller = new ResidentPlaybackController(layer, [diagnosticModel], {
+          onState(playback) {
+            publish({ playback, renderer: layer?.getSnapshot() });
+          },
+        });
+        playbackControllerRef.current = controller;
+        const receipt = await controller.establishInitialPaint();
+        const model = modelsById.get(receipt.observationId);
+        if (!model) throw new Error("newest painted archive frame is unknown");
+        fallbackPainted = { model, receipt };
+      } catch (error) {
+        if (cancelled) throw error;
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`Mistr skipped the bundled startup scan: ${message}`);
+        startupFallback = { painted: false, elapsedMs: performance.now() - fallbackStarted, error: message };
+        controller?.dispose();
+        removeDiagnosticLayers(instance, layer);
+        if (playbackControllerRef.current === controller) playbackControllerRef.current = null;
+        if (radarLayerRef.current === layer) radarLayerRef.current = null;
+        controller = null;
+        layer = null;
+        latestReport = null;
+        radarModelRef.current = null;
+        archiveModels.length = 0;
+        modelsById.clear();
+        setTimelineFrames([]);
+        setPhase4({ kind: "running", stage: "LOADING CURRENT RADAR" });
+      }
 
       const hydrateArchiveLoop = async () => {
         if (archiveModels.length === PHASE4_FRAME_COUNT) return archiveModels;
@@ -711,49 +766,23 @@ export function App() {
         }
         return archiveModels;
       };
-      const diagnosticModel = newestArchiveModel;
-      radarModelRef.current = diagnosticModel;
-      setTimelineFrames([timelineFrame(diagnosticModel)]);
-      const alignment = createAlignmentReport(diagnosticModel);
-      latestReport = {
-        frames: summarizeFrames([diagnosticModel]),
-        alignment,
-        coexistence: emptyLayerCoexistenceReport(),
-      };
-      layer = new RadarCustomLayer([diagnosticModel], {
-        displayMode,
-        recoveryBeforeLayerId: ANCHOR_LAYER_ID,
-        onSnapshot(renderer) {
-          handleSiteRendererSnapshot(renderer, controller);
-        },
-      });
-      radarLayerRef.current = layer;
-      const beforeId = radarContextAnchorLayerId(instance.getStyle().layers ?? []);
-      installDiagnosticLayers(instance, diagnosticModel, alignment, layer, beforeId);
-      publish({ coexistence: currentLayerCoexistenceReport(instance) });
-      controller = new ResidentPlaybackController(layer, [diagnosticModel], {
-        onState(playback) {
-          publish({ playback, renderer: layer?.getSnapshot() });
-        },
-      });
-      playbackControllerRef.current = controller;
-      const initialReceipt = await controller.establishInitialPaint();
-      const newestReceipt = initialReceipt;
-      const initialModel = modelsById.get(newestReceipt.observationId);
-      if (!initialModel) throw new Error("newest painted archive frame is unknown");
-      radarModelRef.current = initialModel;
-      setPaintedSourceKind(initialModel.sourceKind);
-      radarSessionCoordinatorRef.current!.establishPaintedSource(
-        radarPaintIdentity(initialModel, newestReceipt),
-      );
-      liveDisplay = initialLiveDisplay(frameTruth(initialModel, newestReceipt));
-      publishPhase5({ display: liveDisplay });
-      const activityAtResidency = await client.phase4ActivitySnapshot();
-      publish({
-        renderer: layer.getSnapshot(),
-        playback: controller.snapshot(),
-        activityAtResidency,
-      });
+      if (fallbackPainted && layer && controller) {
+        const { model: initialModel, receipt: newestReceipt } = fallbackPainted;
+        startupFallback = { painted: true, elapsedMs: performance.now() - fallbackStarted };
+        radarModelRef.current = initialModel;
+        setPaintedSourceKind(initialModel.sourceKind);
+        radarSessionCoordinatorRef.current!.establishPaintedSource(
+          radarPaintIdentity(initialModel, newestReceipt),
+        );
+        liveDisplay = initialLiveDisplay(frameTruth(initialModel, newestReceipt));
+        publishPhase5({ display: liveDisplay });
+        const activityAtResidency = await client.phase4ActivitySnapshot();
+        publish({
+          renderer: layer.getSnapshot(),
+          playback: controller.snapshot(),
+          activityAtResidency,
+        });
+      }
       clickHandler = (event) => {
         setDismissPanelsSignal((value) => value + 1);
         const point = {
@@ -802,6 +831,7 @@ export function App() {
       setInterrogation(null);
       setInspectionState("idle");
       globalThis.__MISTR_PHASE4__ = {
+        startupFallback: () => startupFallback,
         report: () => ({
           ...latestReport!,
           renderer: layer?.getSnapshot(),
@@ -820,7 +850,8 @@ export function App() {
         recenter() {
           const selectedId = layer?.getSnapshot().selectedObservationId;
           const selectedModel = selectedId ? modelsById.get(selectedId) : undefined;
-          focusRadar(instance, selectedModel ?? diagnosticModel);
+          const focused = selectedModel ?? radarModelRef.current;
+          if (focused) focusRadar(instance, focused);
         },
         setDisplayMode(mode) {
           layer?.setDisplayMode(mode);
@@ -1242,6 +1273,12 @@ export function App() {
           }
           modelsById.clear();
           modelsById.set(model.observationId, model);
+          // Without a startup fallback scan this is the first Site report.
+          latestReport ??= {
+            frames: summarizeFrames([model]),
+            alignment: createAlignmentReport(model),
+            coexistence: emptyLayerCoexistenceReport(),
+          };
           createdLayer = new RadarCustomLayer([model], {
             displayMode: displayModeRef.current,
             recoveryBeforeLayerId: ANCHOR_LAYER_ID,
@@ -1710,7 +1747,6 @@ export function App() {
         });
       };
 
-      if (!layer) throw new Error("selected-site renderer is unavailable");
       siteLevel2Session = new SiteLevel2Session({
         coordinator: radarSessionCoordinatorRef.current!,
         nextGeneration: () => nextSiteGeneration(),
@@ -1718,7 +1754,10 @@ export function App() {
           // A National layer may exist only as partial staging while Site is
           // still the authoritative paint. Reuse that painted Site renderer
           // until a complete National receipt has actually been accepted.
-          const report = isPaintedNationalSource(radarSessionCoordinatorRef.current!.snapshot())
+          // With no Site painted (National shown, or no startup fallback
+          // scan), the Site builds its own layer and fades it in.
+          const painted = radarSessionCoordinatorRef.current!.snapshot().painted;
+          const report = painted?.source.kind !== "site"
             ? await startSiteFromNational(siteIcao, generation)
             : await startLiveSession(siteIcao, generation);
           if (!report.receipt) {
@@ -4984,6 +5023,7 @@ function formatMs(milliseconds: number) {
 
 declare global {
   var __MISTR_PHASE4__: undefined | {
+    startupFallback(): { painted: boolean; elapsedMs: number; error?: string } | null;
     report(): Phase4Report;
     runScenario(transitionCount?: number): Promise<Phase4ScenarioReport>;
     prepareArchive(): Promise<RadarPaintReceipt>;

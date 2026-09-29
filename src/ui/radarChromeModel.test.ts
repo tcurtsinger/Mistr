@@ -155,6 +155,7 @@ describe("radar chrome model", () => {
   it("turns internal startup stages into visible product-language progress", () => {
     expect(radarInitializationLabel("OPENING RESIDENT LOOP")).toBe("OPENING RADAR HISTORY");
     expect(radarInitializationLabel("LOADING NEWEST SAFE SCAN")).toBe("LOADING SAFE RADAR");
+    expect(radarInitializationLabel("LOADING CURRENT RADAR")).toBe("LOADING CURRENT RADAR");
     expect(radarInitializationLabel("DECODING OBSERVATION 12/20"))
       .toBe("LOADING HISTORY 12/20");
     expect(radarInitializationLabel(undefined)).toBe("READYING DISPLAY");
