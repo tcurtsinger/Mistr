@@ -215,6 +215,16 @@ aborted.
 GPU staging, about 260 to 310 ms per frame, is now the whole per-frame
 cost. It is not the upload budget; the next step is finding what paces it.
 
+The load bench also records every animation-frame interval while history
+loads (`loadFramePacing`); set `MISTR_BENCH_NO_PROFILE=1` so the sampling
+profiler does not skew it. It attaches as soon as the page exists, about
+0.3 s after navigation and before the first frame, and reports that start as
+`fromMs`. A missed refresh is an interval over one and a half refresh
+intervals, estimated from the samples or set with `MISTR_BENCH_REFRESH_HZ`.
+`longAnimationFrames` counts every frame of 50 ms or more from navigation
+start, before attachment included, and frame times come from the app's load
+trace.
+
 ### Chunks that draw nothing are skipped (2026-09-29)
 
 Timing each part of staging from outside the app (wrapping `fetch` and the
@@ -248,15 +258,49 @@ bit per cell: about 8 KiB at most instead of about 127 KiB. Its record is
 rebuilt byte for byte if anything requests it. For 60 frames on the same
 day, the backend's retained frame bytes fell from 3,138 MB to 1,252 MB, and
 its process memory from 3,081 MB to 1,322 MB.
-The load bench also records every animation-frame interval while history
-loads (`loadFramePacing`); set `MISTR_BENCH_NO_PROFILE=1` so the sampling
-profiler does not skew it. It attaches as soon as the page exists, about
-0.3 s after navigation and before the first frame, and reports that start as
-`fromMs`. A missed refresh is an interval over one and a half refresh
-intervals, estimated from the samples or set with `MISTR_BENCH_REFRESH_HZ`.
-`longAnimationFrames` counts every frame of 50 ms or more from navigation
-start, before attachment included, and frame times come from the app's load
-trace.
+
+## Site loading (2026-09-29)
+
+Timing a KTLX launch at zoom 9.5 showed the first scan at 3.4 s and all 60
+history frames at 87 s. Each history frame took about 1.3 s, almost all
+network: the backend listed the volume's chunks, downloaded about seven one
+at a time, decoding after each, and only began the next frame once the page
+had shown this one. The first scan also spent about 20 sequential listings
+finding the newest volume in the 999-slot ring.
+
+- **Concurrent discovery.** The newest volume is found in two rounds of up
+  to 32 concurrent listings (at most 64 in all): evenly spread slots first,
+  then every slot between the newest value and the next, older, one. An
+  empty slot falls back to the previous sequential search.
+- **Concurrent chunk downloads.** A volume's chunks download eight at a time
+  and are ingested in sequence, with the same safe-sweep attempt after each
+  contiguous advance, so the earliest safe boundary is unchanged.
+- **Predecessor prefetch.** After serving a volume, the backend acquires the
+  four before it in the background. The page begins a new Site generation for
+  every request, so prefetches belong to the transfer session and site, run
+  under their own token, and are held decoded; each is encoded for the
+  request that uses it, and only if it is the exact volume that request's
+  cursor selects. A request waiting on a prefetch still watches its own
+  generation, so a cancelled one releases its credit as promptly as before,
+  and stops the prefetch it took. A request for another session or site
+  cancels the old site's prefetches before it acquires anything.
+- **Newest complete scan first.** A volume's lowest sweep takes the radar
+  tens of seconds to record, and the first request waited for it when a Site
+  opened just as a volume began. If the newest volume's listed chunks hold no
+  safe sweep yet, the previous volume is shown instead; polling for newer
+  scans publishes the newest one as soon as it completes. The previous
+  volume gets 5 s in all, download and decode included, so a stalled one
+  leaves the request its time to wait on the newest.
+
+| KTLX, zoom 9.5 | Before | After |
+|---|---:|---:|
+| First scan | 3.4 s | 2.1 to 2.4 s (2.9 s when the newest volume was still recording) |
+| Each history frame (median) | 1,320 ms | 67 to 133 ms |
+| 60 frames | 87 s | 12.5 to 16 s |
+
+Decode attempts are still sequential. The successful one takes about
+130 ms, and all seven about 460 ms, which is most of what remains in the
+first scan.
 
 Diagnostics: `__MISTR_NATIONAL_PHASE4__.loadTrace()` records each prepare's
 discovery, download, and decode times, and the first frame's steps

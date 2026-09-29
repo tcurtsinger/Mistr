@@ -15,6 +15,7 @@ use tauri::{Manager, webview::PageLoadEvent};
 pub fn run() {
     tauri::Builder::default()
         .manage(phase2_ipc::TransferBroker::default())
+        .manage(phase2_ipc::SiteHistoryPrefetch::default())
         .manage(national_history::NationalHistoryState::default())
         .manage(national_phase2::NationalPhase2State::default())
         .setup(|app| {
