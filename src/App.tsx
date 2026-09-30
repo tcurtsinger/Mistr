@@ -17,6 +17,7 @@ import fixtureManifest from "../fixtures/manifest.json";
 import openFreeMapDarkStyle from "./data/openFreeMapDarkStyle.json";
 import { radarContextAnchorLayerId } from "./data/radarMapContext";
 import { configureMapLibreWorker } from "./mapWorker";
+import { releaseStylesOnContextLoss } from "./mapContextLoss";
 import { mapReadinessError, updateMapReadiness, type MapReadiness } from "./mapReadiness";
 import { assertChunkMatchesManifest } from "./packed-grid/packedGrid";
 import {
@@ -295,6 +296,7 @@ export function App() {
   useEffect(() => {
     if (!mapContainer.current || map.current) return;
     let instance: MapLibreMap | undefined;
+    let stopReleasingLostStyles = () => {};
     try {
       instance = new maplibregl.Map({
         container: mapContainer.current,
@@ -313,6 +315,7 @@ export function App() {
         canvasContextAttributes: { antialias: false },
       });
       instance.addControl(new maplibregl.AttributionControl({ compact: true }), "top-right");
+      stopReleasingLostStyles = releaseStylesOnContextLoss(instance);
       const created = instance;
       created.on("moveend", () => storeCamera(created));
       instance.once("style.load", () => {
@@ -332,6 +335,7 @@ export function App() {
       return;
     }
     return () => {
+      stopReleasingLostStyles();
       instance.remove();
       map.current = null;
     };
