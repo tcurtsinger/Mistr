@@ -1,93 +1,541 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-08-03T01:28:19Z",
+  "generatedAt": "2026-09-30T05:05:58Z",
   "title": "Design System: Mistr",
   "extensions": {
     "colorMeta": {
-      "night": { "role": "neutral", "displayName": "Night", "canonical": "#050506", "tonalRamp": ["#020203", "#050506", "#0B0B0E"] },
-      "stage-black": { "role": "neutral", "displayName": "Stage Black", "canonical": "#080B12", "tonalRamp": ["#04060A", "#080B12", "#101725"] },
-      "cobalt-horizon": { "role": "primary", "displayName": "Cobalt Horizon", "canonical": "#0A2BFF", "tonalRamp": ["#06116A", "#0A2BFF", "#7183FF"] },
-      "rose-gather": { "role": "secondary", "displayName": "Rose Gather", "canonical": "#D24BFF", "tonalRamp": ["#66207F", "#D24BFF", "#E6A2FF"] },
-      "rose-light": { "role": "secondary", "displayName": "Rose Light", "canonical": "#FF7BAE", "tonalRamp": ["#8F3659", "#FF7BAE", "#FFB8D1"] },
-      "dawn-wash": { "role": "secondary", "displayName": "Dawn Wash", "canonical": "#FFD7E6", "tonalRamp": ["#8C747D", "#FFD7E6", "#FFF0F5"] },
-      "recent-live": { "role": "tertiary", "displayName": "Recent Live Age", "canonical": "#73E6B2", "tonalRamp": ["#2A7557", "#73E6B2", "#B8F5D8"] },
-      "scan-cyan": { "role": "tertiary", "displayName": "Scan Cyan", "canonical": "#4BDCFF", "tonalRamp": ["#0A5F78", "#4BDCFF", "#BCEFFF"] }
+      "map": {
+        "role": "neutral",
+        "displayName": "Map Black",
+        "canonical": "#0c0c0c",
+        "tonalRamp": [
+          "#0c0c0c",
+          "#16181b",
+          "#202327",
+          "#2a2e33",
+          "#3a3f46",
+          "#858d96",
+          "#a7aeb6",
+          "#eef1f4"
+        ]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Instrument Black",
+        "canonical": "#16181b",
+        "tonalRamp": [
+          "#0c0c0c",
+          "#16181b",
+          "#202327",
+          "#2a2e33",
+          "#3a3f46",
+          "#858d96",
+          "#a7aeb6",
+          "#eef1f4"
+        ]
+      },
+      "raise": {
+        "role": "neutral",
+        "displayName": "Raised",
+        "canonical": "#202327",
+        "tonalRamp": [
+          "#0c0c0c",
+          "#16181b",
+          "#202327",
+          "#2a2e33",
+          "#3a3f46",
+          "#858d96",
+          "#a7aeb6",
+          "#eef1f4"
+        ]
+      },
+      "raise-hover": {
+        "role": "neutral",
+        "displayName": "Raised Hover",
+        "canonical": "#2a2e33",
+        "tonalRamp": [
+          "#0c0c0c",
+          "#16181b",
+          "#202327",
+          "#2a2e33",
+          "#3a3f46",
+          "#858d96",
+          "#a7aeb6",
+          "#eef1f4"
+        ]
+      },
+      "raise-2": {
+        "role": "neutral",
+        "displayName": "Raised High",
+        "canonical": "#3a3f46",
+        "tonalRamp": [
+          "#0c0c0c",
+          "#16181b",
+          "#202327",
+          "#2a2e33",
+          "#3a3f46",
+          "#858d96",
+          "#a7aeb6",
+          "#eef1f4"
+        ]
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "canonical": "rgba(255, 255, 255, 0.08)",
+        "tonalRamp": [
+          "rgba(255,255,255,0.04)",
+          "rgba(255,255,255,0.06)",
+          "rgba(255,255,255,0.08)",
+          "rgba(255,255,255,0.09)",
+          "rgba(255,255,255,0.15)",
+          "rgba(255,255,255,0.24)",
+          "rgba(255,255,255,0.34)",
+          "rgba(255,255,255,0.5)"
+        ]
+      },
+      "line-strong": {
+        "role": "neutral",
+        "displayName": "Strong Hairline",
+        "canonical": "rgba(255, 255, 255, 0.15)",
+        "tonalRamp": [
+          "rgba(255,255,255,0.04)",
+          "rgba(255,255,255,0.06)",
+          "rgba(255,255,255,0.08)",
+          "rgba(255,255,255,0.09)",
+          "rgba(255,255,255,0.15)",
+          "rgba(255,255,255,0.24)",
+          "rgba(255,255,255,0.34)",
+          "rgba(255,255,255,0.5)"
+        ]
+      },
+      "text": {
+        "role": "neutral",
+        "displayName": "Primary Text",
+        "canonical": "#eef1f4",
+        "tonalRamp": [
+          "#0c0c0c",
+          "#16181b",
+          "#202327",
+          "#2a2e33",
+          "#3a3f46",
+          "#858d96",
+          "#a7aeb6",
+          "#eef1f4"
+        ]
+      },
+      "text-2": {
+        "role": "neutral",
+        "displayName": "Secondary Text",
+        "canonical": "#a7aeb6",
+        "tonalRamp": [
+          "#0c0c0c",
+          "#16181b",
+          "#202327",
+          "#2a2e33",
+          "#3a3f46",
+          "#858d96",
+          "#a7aeb6",
+          "#eef1f4"
+        ]
+      },
+      "text-3": {
+        "role": "neutral",
+        "displayName": "Tertiary Text",
+        "canonical": "#858d96",
+        "tonalRamp": [
+          "#0c0c0c",
+          "#16181b",
+          "#202327",
+          "#2a2e33",
+          "#3a3f46",
+          "#858d96",
+          "#a7aeb6",
+          "#eef1f4"
+        ]
+      },
+      "accent": {
+        "role": "primary",
+        "displayName": "System Blue",
+        "canonical": "#0a84ff",
+        "tonalRamp": [
+          "#04224a",
+          "#063b7d",
+          "#0857b3",
+          "#0a84ff",
+          "#3b9dff",
+          "#5eaaff",
+          "#99c9ff",
+          "#d6e9ff"
+        ]
+      },
+      "accent-ink": {
+        "role": "primary",
+        "displayName": "Blue Ink",
+        "canonical": "#5eaaff",
+        "tonalRamp": [
+          "#04224a",
+          "#063b7d",
+          "#0857b3",
+          "#0a84ff",
+          "#3b9dff",
+          "#5eaaff",
+          "#99c9ff",
+          "#d6e9ff"
+        ]
+      },
+      "accent-wash": {
+        "role": "primary",
+        "displayName": "Blue Wash",
+        "canonical": "rgba(10, 132, 255, 0.16)",
+        "tonalRamp": [
+          "#04224a",
+          "#063b7d",
+          "#0857b3",
+          "#0a84ff",
+          "#3b9dff",
+          "#5eaaff",
+          "#99c9ff",
+          "#d6e9ff"
+        ]
+      },
+      "on-accent": {
+        "role": "primary",
+        "displayName": "On Blue",
+        "canonical": "#ffffff",
+        "tonalRamp": [
+          "#0c0c0c",
+          "#16181b",
+          "#202327",
+          "#2a2e33",
+          "#3a3f46",
+          "#858d96",
+          "#a7aeb6",
+          "#eef1f4"
+        ]
+      },
+      "recent-live": {
+        "role": "tertiary",
+        "displayName": "Recent Live Green",
+        "canonical": "#6fdca6",
+        "tonalRamp": [
+          "#0f3d27",
+          "#1a6040",
+          "#278559",
+          "#3fae78",
+          "#6fdca6",
+          "#98e7c0",
+          "#c2f1d9",
+          "#e8faf1"
+        ]
+      },
+      "warn-ink": {
+        "role": "tertiary",
+        "displayName": "Caution Amber",
+        "canonical": "#ffcf7a",
+        "tonalRamp": [
+          "#4a3100",
+          "#7a5200",
+          "#a87200",
+          "#d69a2e",
+          "#ffcf7a",
+          "#ffdc9c",
+          "#ffe9c2",
+          "#fff6e6"
+        ]
+      },
+      "bad": {
+        "role": "tertiary",
+        "displayName": "Failure Coral",
+        "canonical": "#ff7a70",
+        "tonalRamp": [
+          "#4d0f0a",
+          "#801a12",
+          "#b3261b",
+          "#e04a3e",
+          "#ff7a70",
+          "#ff9e96",
+          "#ffc4bf",
+          "#ffe9e7"
+        ]
+      }
     },
     "typographyMeta": {
-      "display": { "displayName": "Instrument Display", "purpose": "Mistr identity and concise panel titles without novelty letterforms." },
-      "body": { "displayName": "Operational Body", "purpose": "Readable interface and recovery copy." },
-      "label": { "displayName": "Cue Label", "purpose": "Short uppercase equipment labels." },
-      "numeric": { "displayName": "Measured Readout", "purpose": "Tabular displayed time, numeric frame age, and dBZ values." }
+      "title": {
+        "displayName": "Sheet Title",
+        "purpose": "The site sheet's Radar heading; the chrome's only heading."
+      },
+      "clock": {
+        "displayName": "Scan Clock",
+        "purpose": "The displayed scan time, anchor of the playback row."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Root size and the search field."
+      },
+      "strong": {
+        "displayName": "Strong",
+        "purpose": "Site IDs, National, first-load title."
+      },
+      "readout": {
+        "displayName": "dBZ Readout",
+        "purpose": "The inspected value in its fixed cell."
+      },
+      "caption": {
+        "displayName": "Caption",
+        "purpose": "Dates, neutral ages, place names, view captions, first-load detail."
+      },
+      "label": {
+        "displayName": "Lane Label",
+        "purpose": "Timeline hover time, status words, source tag."
+      },
+      "tick": {
+        "displayName": "Scale Tick",
+        "purpose": "Colour-strip dBZ ticks."
+      }
     },
     "shadows": [
-      { "name": "instrument", "value": "0 12px 36px rgba(0, 0, 0, 0.44)", "purpose": "Separates the compact control instruments from the map." },
-      { "name": "panel", "value": "0 20px 50px rgba(0, 0, 0, 0.52)", "purpose": "Separates the one open transient panel without creating a card hierarchy." }
+      {
+        "name": "float",
+        "value": "0 10px 30px rgba(0, 0, 0, 0.42), 0 1px 3px rgba(0, 0, 0, 0.36)",
+        "purpose": "The one shadow every persistent instrument, tooltip, and panel shares (--shadow)."
+      },
+      {
+        "name": "contact",
+        "value": "0 1px 2px rgba(0, 0, 0, 0.35)",
+        "purpose": "The selected segment in the view popover only."
+      },
+      {
+        "name": "thumb",
+        "value": "0 1px 4px rgba(0, 0, 0, 0.5), 0 0 0 4px rgba(10, 132, 255, 0.3)",
+        "purpose": "The scrubber thumb; the ring turns solid System Blue on focus."
+      },
+      {
+        "name": "search-focus",
+        "value": "0 0 0 3px rgba(10, 132, 255, 0.16)",
+        "purpose": "Focus ring on the site search field, with a System Blue border."
+      },
+      {
+        "name": "reticle",
+        "value": "drop-shadow(0 1px 2px rgba(0, 0, 0, 0.95))",
+        "purpose": "Filter that keeps the white inspection reticle legible over any radar colour."
+      }
     ],
     "motion": [
-      { "name": "instrument-state", "value": "180ms cubic-bezier(0.22, 1, 0.36, 1)", "purpose": "Focus and selection changes." },
-      { "name": "panel-reveal", "value": "220ms cubic-bezier(0.22, 1, 0.36, 1)", "purpose": "Compact toolbar-panel entrance and exit." }
+      {
+        "name": "ease",
+        "value": "cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "Panel entrance and play-circle press (--ease)."
+      },
+      {
+        "name": "state",
+        "value": "150ms",
+        "purpose": "Background and colour changes on rail, icon, and segmented buttons."
+      },
+      {
+        "name": "press",
+        "value": "120ms cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "Play circle scales to 0.94 while pressed."
+      },
+      {
+        "name": "pop-in",
+        "value": "160ms cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "Sheet and popover rise 6px while fading in."
+      },
+      {
+        "name": "spin",
+        "value": "900ms linear infinite",
+        "purpose": "Rail acquisition ring, lane spinner, first-load spinner; static under reduced motion."
+      },
+      {
+        "name": "tooltip-delay",
+        "value": "400ms",
+        "purpose": "Mouse hover delay before a rail tooltip; keyboard focus shows it at once."
+      }
     ],
     "breakpoints": [
-      { "name": "compact-desktop", "value": "1100px" },
-      { "name": "standard-desktop", "value": "1440px" }
+      {
+        "name": "min-window",
+        "value": "720px x 540px"
+      },
+      {
+        "name": "hide-date",
+        "value": "860px"
+      },
+      {
+        "name": "hide-zone",
+        "value": "1000px"
+      },
+      {
+        "name": "compact-desktop",
+        "value": "1100px"
+      },
+      {
+        "name": "standard-desktop",
+        "value": "1440px"
+      }
     ]
   },
   "components": [
     {
-      "name": "Radar Toolbar",
-      "kind": "custom",
-      "refersTo": "context-bar",
-      "description": "The icon-led top-center sequence Mistr, radar site, recenter, and radar view.",
-      "html": "<nav class=\"ds-toolbar\" aria-label=\"Radar tools\"><strong>Mistr</strong><button aria-label=\"Choose radar site. KTLX is displayed.\"><svg aria-hidden=\"true\"></svg></button><button aria-label=\"Recenter radar on KTLX\"><svg aria-hidden=\"true\"></svg></button><button aria-label=\"Radar view. Smooth selected.\" aria-describedby=\"radar-view-tip\"><svg aria-hidden=\"true\"></svg></button><span role=\"tooltip\" id=\"radar-view-tip\">Radar View</span></nav>",
-      "css": ".ds-toolbar{min-height:44px;padding:1px 5px;border-radius:12px;background:rgba(8,11,18,.88);color:#F4F7FA;border:1px solid rgba(255,255,255,.16);box-shadow:0 10px 28px rgba(0,0,0,.44);backdrop-filter:blur(14px);display:flex;align-items:center}.ds-toolbar strong{font:600 14px 'Barlow Semi Condensed',sans-serif;letter-spacing:.08em;padding:0 10px}.ds-toolbar button{width:40px;height:40px;border:0;border-left:1px solid rgba(255,255,255,.1);background:transparent;color:#F4F7FA}.ds-toolbar button:hover,.ds-toolbar button:focus-visible{background:rgba(255,255,255,.055);outline:2px solid #FFD7E6;outline-offset:-3px}.ds-toolbar [role=tooltip]{position:absolute;transform:translateY(34px);padding:5px 8px;border-radius:6px;background:#080B12;color:#F4F7FA;font:500 12px 'Barlow Semi Condensed',sans-serif}"
-    },
-    {
-      "name": "Radar Site Browser",
-      "kind": "custom",
-      "description": "The single searchable browser for all 155 provider-qualified operational WSR-88D sites.",
-      "html": "<aside class=\"ds-site-browser\" role=\"dialog\" aria-label=\"Choose radar site\"><header><strong>Radar sites</strong><small>155 WSR-88D STATIONS</small></header><input type=\"search\" aria-label=\"Search radar sites\" placeholder=\"Search ID or place\"><button aria-current=\"true\">KTLX <small>Oklahoma City, OK</small></button></aside>",
-      "css": ".ds-site-browser{width:360px;max-height:calc(100vh - 154px);overflow:auto;padding:14px;border-radius:14px;background:rgba(8,11,18,.98);color:#F4F7FA;border:1px solid rgba(255,255,255,.14);box-shadow:0 18px 44px rgba(0,0,0,.54)}.ds-site-browser header{display:grid;gap:4px}.ds-site-browser input{height:36px;margin:12px 0 8px;padding:0 12px;border:1px solid rgba(255,255,255,.14);border-radius:9px;background:#050506;color:#F4F7FA}.ds-site-browser button{width:100%;min-height:50px;border:0;border-top:1px solid rgba(255,255,255,.08);background:transparent;color:#F4F7FA;text-align:left}"
-    },
-    {
-      "name": "Radar View Menu",
-      "kind": "custom",
-      "description": "The eye control's compact radio menu with only the two real spatial presentation modes.",
-      "html": "<div class=\"ds-view-menu\" role=\"menu\" aria-label=\"Radar view\"><button role=\"menuitemradio\" aria-checked=\"true\">Smooth</button><button role=\"menuitemradio\" aria-checked=\"false\">Native</button></div>",
-      "css": ".ds-view-menu{width:132px;padding:6px;border-radius:10px;background:#080B12;color:#F4F7FA;border:1px solid rgba(255,255,255,.14);box-shadow:0 20px 50px rgba(0,0,0,.52)}.ds-view-menu button{width:100%;min-height:36px;border:0;border-radius:6px;background:transparent;color:inherit;text-align:left;padding:0 10px;font:600 13px 'Barlow Semi Condensed',sans-serif}.ds-view-menu button:hover,.ds-view-menu button:focus-visible{background:rgba(255,255,255,.055);outline:2px solid #FFD7E6}"
-    },
-    {
-      "name": "Playback Bar",
+      "name": "Playback Row",
       "kind": "custom",
       "refersTo": "playback-bar",
-      "description": "The stable bottom-center control for observation time and playback truth.",
-      "html": "<section class=\"ds-playback\"><output aria-label=\"Displayed scan August 2, 2026 at 12:29:26 CDT\">12:29:26 CDT</output><button aria-label=\"Play radar loop\">&#9654;</button><input aria-label=\"Displayed scan\" type=\"range\"><output class=\"ds-age ds-age--recent\" aria-label=\"Latest live scan, observed 41 seconds ago\">00:41</output><output>32.5 dBZ</output></section>",
-      "css": ".ds-playback{width:min(820px,calc(100vw - 64px));min-height:44px;padding:4px 9px;border-radius:14px;background:rgba(8,11,18,.88);color:#F4F7FA;border:1px solid rgba(255,255,255,.16);box-shadow:0 10px 28px rgba(0,0,0,.44);backdrop-filter:blur(14px);display:flex;align-items:center;gap:10px}.ds-playback:before{content:'';position:absolute;inset:0;border-radius:inherit;padding:1px;background:linear-gradient(90deg,#0A2BFF,#D24BFF,#FFD7E6);opacity:.48;pointer-events:none}.ds-playback input{flex:1;accent-color:#D24BFF}.ds-playback button{background:rgba(6,25,36,.82);color:#4BDCFF;border:1px solid rgba(71,211,255,.46);border-radius:50%;width:34px;height:34px}.ds-playback button:focus-visible{outline:2px solid #FFD7E6;outline-offset:2px}.ds-age{color:#F4F7FA}.ds-age--recent{color:#73E6B2}"
+      "description": "The thin single-row timeline: play, clock and age, source tag, 3px track with clock ticks, dBZ cell.",
+      "html": "<section class=\"ds-bar\" aria-label=\"Radar playback\"><button class=\"ds-play\" aria-label=\"Play radar loop\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M8 5.5v13a.8.8 0 0 0 1.2.7l10.4-6.5a.8.8 0 0 0 0-1.4L9.2 4.8A.8.8 0 0 0 8 5.5z\" fill=\"currentColor\" stroke=\"none\"/></svg></button><span class=\"ds-clock\">12:00:34 AM <small>CDT</small></span><span class=\"ds-age\">1m 02s ago</span><span class=\"ds-tag\">KAMA</span><span class=\"ds-track\"><i style=\"left:30%\"></i><i style=\"left:60%\"></i><input type=\"range\" min=\"0\" max=\"10\" value=\"10\" aria-label=\"Displayed radar scan\"></span><span class=\"ds-div\"></span><output class=\"ds-dbz\"><span class=\"ds-sw\"></span>33.5 dBZ</output></section>",
+      "css": ".ds-bar{width:800px;height:44px;display:flex;align-items:center;gap:10px;padding:0 14px 0 6px;border:1px solid var(--line);background:var(--surface);box-shadow:var(--shadow);border-radius:22px;color:var(--text);font:14px/1.4 var(--font)}.ds-play{flex:none;width:32px;height:32px;display:grid;place-items:center;padding:0;border:0;border-radius:50%;background:var(--accent);color:var(--on-accent);transition:transform 120ms var(--ease),filter 150ms}.ds-play svg{width:16px;height:16px}.ds-play:hover{filter:brightness(1.12)}.ds-play:active{transform:scale(.94)}.ds-play:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.ds-clock{font:600 15px/1 var(--font-display);letter-spacing:-.005em;font-variant-numeric:tabular-nums}.ds-clock small{color:var(--text-3);font:400 12px var(--font)}.ds-age{color:var(--recent-live);font-size:12.5px;font-weight:600;font-variant-numeric:tabular-nums}.ds-tag{display:inline-flex;padding:1px 8px;border-radius:999px;background:rgba(255,255,255,.09);font-size:11.5px;font-weight:600;line-height:1.45}.ds-track{position:relative;flex:1;align-self:stretch}.ds-track::before{content:\"\";position:absolute;top:50%;left:0;right:0;height:3px;margin-top:-1.5px;border-radius:2px;background:rgba(255,255,255,.24)}.ds-track i{position:absolute;top:50%;width:1px;height:9px;margin-top:-4.5px;background:rgba(255,255,255,.34)}.ds-track input{position:absolute;inset:0;width:100%;height:100%;margin:0;appearance:none;-webkit-appearance:none;background:transparent}.ds-track input::-webkit-slider-thumb{appearance:none;-webkit-appearance:none;width:12px;height:12px;border-radius:50%;background:var(--on-accent);box-shadow:0 1px 4px rgba(0,0,0,.5),0 0 0 4px rgba(10,132,255,.3)}.ds-track input:focus-visible{outline:none}.ds-track input:focus-visible::-webkit-slider-thumb{box-shadow:0 1px 4px rgba(0,0,0,.5),0 0 0 4px var(--accent)}.ds-div{flex:none;width:1px;height:20px;background:var(--line)}.ds-dbz{width:104px;display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;line-height:1;font-variant-numeric:tabular-nums}.ds-sw{width:10px;height:10px;border-radius:3px;background:rgb(111,161,0);box-shadow:inset 0 0 0 1px rgba(255,255,255,.16)}"
     },
     {
-      "name": "Measured Readout",
-      "kind": "custom",
-      "description": "Displayed scan timestamp and numeric frame age without normal-state status words.",
-      "html": "<output class=\"ds-readout\"><strong>12:29:26 CDT</strong><small aria-label=\"Latest live scan, observed 41 seconds ago\">00:41</small></output>",
-      "css": ".ds-readout{display:flex;align-items:center;gap:10px;color:#F4F7FA;font:500 13px Recursive,'Cascadia Mono',monospace}.ds-readout small{color:#73E6B2;font:500 12px Recursive,'Cascadia Mono',monospace}.ds-readout--historical small{color:#F4F7FA}"
+      "name": "Source Tag",
+      "kind": "chip",
+      "refersTo": "source-tag",
+      "description": "Names the painted radar; blue-washed with an arrow while a switch is pending. Fixed 66px minimum.",
+      "html": "<span class=\"ds-tag\">National</span> <span class=\"ds-tag ds-tag--pending\">KTLX<span class=\"ds-arrow\">→</span>KFWS</span>",
+      "css": ".ds-tag{min-width:66px;display:inline-flex;align-items:center;justify-content:center;gap:4px;padding:1px 8px;border-radius:999px;background:rgba(255,255,255,.09);color:var(--text);font:600 11.5px/1.45 var(--font);white-space:nowrap}.ds-tag--pending{background:var(--accent-wash);color:var(--accent-ink)}.ds-arrow{color:var(--text-2);font-weight:500}"
     },
     {
-      "name": "Inspection Reticle",
+      "name": "Tool Rail",
+      "kind": "nav",
+      "refersTo": "rail-group",
+      "description": "44px icon buttons in solid groups on the right edge: Radar and Recenter, then View.",
+      "html": "<div class=\"ds-rail\" role=\"toolbar\" aria-label=\"Radar tools\" aria-orientation=\"vertical\"><div class=\"ds-group\"><button class=\"ds-rb\" aria-label=\"Choose radar source\" aria-expanded=\"true\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"8.25\"/><path d=\"M12 12 17.3 6.7\"/><path d=\"M12 7.5a4.5 4.5 0 1 0 4.5 4.5\"/><circle cx=\"12\" cy=\"12\" fill=\"currentColor\" r=\"1.1\" stroke=\"none\"/></svg></button><button class=\"ds-rb\" aria-label=\"Recenter\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M4.5 9V6a1.5 1.5 0 0 1 1.5-1.5h3M15 4.5h3A1.5 1.5 0 0 1 19.5 6v3M19.5 15v3a1.5 1.5 0 0 1-1.5 1.5h-3M9 19.5H6A1.5 1.5 0 0 1 4.5 18v-3\"/><circle cx=\"12\" cy=\"12\" r=\"2.25\"/></svg></button></div><div class=\"ds-group\"><button class=\"ds-rb\" aria-label=\"Radar view. Smooth selected.\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M2.75 12S6.1 6.25 12 6.25 21.25 12 21.25 12 17.9 17.75 12 17.75 2.75 12 2.75 12z\"/><circle cx=\"12\" cy=\"12\" r=\"2.75\"/></svg></button></div></div>",
+      "css": ".ds-rail{display:inline-flex;flex-direction:column;gap:10px}.ds-group{display:flex;flex-direction:column;border:1px solid var(--line);background:var(--surface);box-shadow:var(--shadow);border-radius:12px}.ds-rb{width:44px;height:44px;display:grid;place-items:center;padding:0;border:0;background:transparent;color:var(--text);transition:background 150ms,color 150ms}.ds-rb+.ds-rb{border-top:1px solid var(--line)}.ds-rb:first-child{border-radius:11px 11px 0 0}.ds-rb:last-child{border-radius:0 0 11px 11px}.ds-rb:only-child{border-radius:11px}.ds-rb svg{width:20px;height:20px}.ds-rb:hover{background:var(--raise-hover)}.ds-rb[aria-expanded=\"true\"]{background:var(--accent-wash);color:var(--accent-ink)}.ds-rb:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}"
+    },
+    {
+      "name": "Chrome Tooltip",
       "kind": "custom",
-      "description": "A map crosshair paired with a playback-bar dBZ readout rather than a floating tooltip.",
-      "html": "<span class=\"ds-reticle\" aria-label=\"Selected radar sample\"></span>",
-      "css": ".ds-reticle{display:block;width:14px;height:14px;border:1px solid #F4F7FA;border-radius:50%;position:relative;filter:drop-shadow(0 1px 2px rgba(0,0,0,.95))}.ds-reticle:before,.ds-reticle:after{content:'';position:absolute;background:#F4F7FA}.ds-reticle:before{width:22px;height:1px;left:-5px;top:6px}.ds-reticle:after{width:1px;height:22px;left:6px;top:-5px}"
+      "refersTo": "chrome-tooltip",
+      "description": "Solid tooltip left of the rail (400ms hover, immediate on keyboard focus) and above status words.",
+      "html": "<span class=\"ds-tip\" role=\"tooltip\">Radar · KAMA</span>",
+      "css": ".ds-tip{display:inline-block;padding:5px 10px;border:1px solid var(--line);background:var(--surface);box-shadow:var(--shadow);border-radius:8px;color:var(--text);font:500 12.5px/1.35 var(--font);white-space:nowrap}"
+    },
+    {
+      "name": "Site Search Field",
+      "kind": "input",
+      "refersTo": "site-search",
+      "description": "Combobox search at the top of the site sheet; arrows move, Enter picks.",
+      "html": "<label class=\"ds-search\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><circle cx=\"11\" cy=\"11\" r=\"6.25\"/><path d=\"m20 20-4.5-4.5\"/></svg><input type=\"search\" role=\"combobox\" aria-label=\"Search radar sites\" placeholder=\"Search site ID or city\"></label>",
+      "css": ".ds-search{position:relative;display:block;width:312px}.ds-search svg{position:absolute;top:50%;left:11px;width:18px;height:18px;color:var(--text-3);transform:translateY(-50%);pointer-events:none}.ds-search input{width:100%;height:38px;padding:0 40px 0 36px;border:1px solid var(--line-strong);border-radius:10px;outline:none;background:var(--raise);color:var(--text);font:14px var(--font);caret-color:var(--accent)}.ds-search input::placeholder{color:var(--text-3)}.ds-search input:focus-visible{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-wash)}"
+    },
+    {
+      "name": "Site Sheet List",
+      "kind": "card",
+      "refersTo": "site-sheet",
+      "description": "National row, Recent, All sites; active row raised, painted source in blue with a check.",
+      "html": "<aside class=\"ds-sheet\" role=\"dialog\" aria-label=\"Choose radar source\"><h2>Radar</h2><div role=\"listbox\" aria-label=\"Radar sources\"><button class=\"ds-opt\" role=\"option\"><strong>National</strong><small>CONUS mosaic</small></button><p class=\"ds-glabel\">Recent</p><button class=\"ds-opt\" role=\"option\" aria-selected=\"true\" aria-current=\"true\"><strong>KAMA</strong><small>Amarillo, TX</small><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"m5.5 12.5 4 4 9-9\"/></svg></button><button class=\"ds-opt\" role=\"option\"><strong>KTLX</strong><small>Oklahoma City, OK</small></button></div></aside>",
+      "css": ".ds-sheet{width:340px;padding:10px 8px;border:1px solid var(--line);background:var(--surface);box-shadow:var(--shadow);border-radius:18px;color:var(--text);font:14px/1.4 var(--font)}.ds-sheet h2{margin:0 0 6px 10px;font:600 17px/1.25 var(--font-display)}.ds-glabel{margin:6px 0 0;padding:8px 10px 4px;border-top:1px solid var(--line);color:var(--text-2);font-size:13px;font-weight:600}.ds-opt{width:100%;min-height:40px;display:flex;align-items:baseline;gap:12px;padding:6px 10px;border:0;border-radius:10px;background:transparent;color:var(--text);text-align:left}.ds-opt strong{min-width:42px;font-size:13.5px;font-weight:600}.ds-opt small{flex:1;color:var(--text-2);font-size:13px}.ds-opt svg{width:18px;height:18px;align-self:center;color:var(--accent-ink)}.ds-opt:hover,.ds-opt[aria-selected=\"true\"]{background:var(--raise)}.ds-opt[aria-current=\"true\"] strong{color:var(--accent-ink)}.ds-opt:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}"
+    },
+    {
+      "name": "View Segmented Control",
+      "kind": "custom",
+      "refersTo": "segmented",
+      "description": "The view popover: exactly Smooth and Native, with a one-line caption.",
+      "html": "<div class=\"ds-pop\" role=\"menu\" aria-label=\"Radar view\"><div class=\"ds-seg\"><button role=\"menuitemradio\" aria-checked=\"true\">Smooth</button><button role=\"menuitemradio\" aria-checked=\"false\">Native</button></div><p>Softer gate edges, same values.</p></div>",
+      "css": ".ds-pop{width:232px;padding:10px;border:1px solid var(--line);background:var(--surface);box-shadow:var(--shadow);border-radius:16px;font-family:var(--font)}.ds-seg{display:grid;grid-template-columns:1fr 1fr;height:36px;padding:3px;border-radius:10px;background:var(--raise)}.ds-seg button{border:0;border-radius:8px;background:transparent;color:var(--text-2);font:600 13px var(--font);transition:background 150ms,color 150ms}.ds-seg button:hover{color:var(--text)}.ds-seg button[aria-checked=\"true\"]{background:var(--raise-2);box-shadow:0 1px 2px rgba(0,0,0,.35);color:var(--text)}.ds-seg button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}.ds-pop p{margin:8px 2px 0;color:var(--text-2);font-size:12px;line-height:1.35}"
+    },
+    {
+      "name": "Colour-Scale Strip",
+      "kind": "custom",
+      "refersTo": "color-scale",
+      "description": "Top-centre pill; in the app the ramp is generated from the renderer's reflectivity palette (approximated here), the only radar colour in the chrome besides the dBZ swatch.",
+      "html": "<div class=\"ds-scale\" role=\"img\" aria-label=\"Reflectivity color scale, 5 to 70 dBZ\"><span>Light</span><span class=\"ds-ramp\"><b></b><em><i style=\"left:7.7%\">10</i><i style=\"left:23.1%\">20</i><i style=\"left:38.5%\">30</i><i style=\"left:53.8%\">40</i><i style=\"left:69.2%\">50</i><i style=\"left:84.6%\">60</i></em></span><span>Heavy · dBZ</span></div>",
+      "css": ".ds-scale{display:inline-flex;align-items:center;gap:10px;padding:6px 14px 5px;border:1px solid var(--line);background:var(--surface);box-shadow:var(--shadow);border-radius:999px;color:var(--text-2);font:11px/1.2 var(--font)}.ds-ramp{width:200px}.ds-ramp b{display:block;height:6px;border-radius:3px;background:linear-gradient(90deg,rgba(64,96,128,.2),#4fb0c6 12%,#16c11c 25%,#0a8f12 40%,#f6e300 50%,#f28a00 62%,#e3001b 72%,#b4003f 82%,#e04bff 92%,#f6f6f6);box-shadow:inset 0 0 0 1px var(--line)}.ds-ramp em{position:relative;display:block;height:12px;margin-top:2px;color:var(--text-3);font:normal 10px var(--font);font-variant-numeric:tabular-nums}.ds-ramp i{position:absolute;font-style:normal;transform:translateX(-50%)}"
+    },
+    {
+      "name": "Inspection Readout",
+      "kind": "custom",
+      "refersTo": "playback-bar",
+      "description": "The fixed 104px dBZ cell: Inspect hint, pending, true-colour value, settled status.",
+      "html": "<div class=\"ds-cells\"><output class=\"ds-ro ds-ro--hint\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"4.5\"/><path d=\"M12 3v3.5M12 17.5V21M3 12h3.5M17.5 12H21\"/></svg>Inspect</output><output class=\"ds-ro ds-ro--pending\">--.- dBZ</output><output class=\"ds-ro\"><span class=\"ds-sw\"></span>33.5 dBZ</output><output class=\"ds-ro ds-ro--status\">No coverage</output></div>",
+      "css": ".ds-cells{display:flex;gap:14px;padding:12px 14px;border:1px solid var(--line);background:var(--surface);box-shadow:var(--shadow);border-radius:22px;font-family:var(--font)}.ds-ro{width:104px;display:flex;align-items:center;gap:6px;overflow:hidden;color:var(--text);font-size:13px;font-weight:600;line-height:1;white-space:nowrap;font-variant-numeric:tabular-nums}.ds-ro svg{width:15px;height:15px}.ds-ro--hint{color:var(--text-3);font-weight:500}.ds-ro--pending{color:var(--text-3)}.ds-ro--status{color:var(--text-2);font-weight:500}.ds-sw{width:10px;height:10px;flex:none;border-radius:3px;background:rgb(111,161,0);box-shadow:inset 0 0 0 1px rgba(255,255,255,.16)}"
     }
   ],
   "narrative": {
-    "northStar": "Stormlight Cyclorama",
-    "overview": "The radar is the stage. Two disciplined control zones frame it: an icon-led radar toolbar at the top and observation time at the bottom.",
-    "keyCharacteristics": ["full-screen radar", "compact icon-led top toolbar", "no side application menu", "stable bottom playback bar", "bounded spectral light"],
-    "rules": [
-      { "name": "The Weather Separation Rule", "body": "Cyclorama color never overlays radar pixels or imitates weather severity.", "section": "colors" },
-      { "name": "The One Panel Rule", "body": "Only one toolbar panel may be open and it never resizes the map.", "section": "elevation" },
-      { "name": "The Instrument Type Rule", "body": "Typography earns character through proportion, weight, and spacing rather than novelty letterforms.", "section": "typography" }
+    "northStar": "The Radar Owns the Room",
+    "overview": "Mistr is a full-bleed radar with a few solid, dark instruments parked where radar users expect them. It adapts the owner's MistrRadar system, the standard dark radar-app arrangement found in CARROT Weather and Zoom Earth, but uses neutral near-black instead of teal charcoal and a thin single-row timeline instead of a tall timeline card. The radar is the only large, bright, colourful thing on screen. The chrome is opaque, quiet, and small. It uses one blue for play, selection, and focus. Everything else is neutral grey or a semantic ink that carries a specific state.\n\nAt rest the screen has four instruments: a thin dBZ colour-scale strip at top centre, the folded map credits at top right, a 44px tool rail vertically centred on the right edge, and one 44px playback row 22px above the bottom edge. Only one temporary surface opens at a time, the site sheet or the view popover. It opens from its rail control and never resizes or recentres the map. Status never arrives as a banner. Loading, retrying, switching, and failure are a few words in the timeline row, and the full account is available on hover, on focus, and to assistive technology.\n\nThe system rejects frosted or translucent floating cards, glow, decorative gradients, and the retired \"Stormlight Cyclorama\" glass with its cobalt-to-rose edge light. Radar colours appear in the chrome only as data.",
+    "keyCharacteristics": [
+      "Full-bleed radar over a quiet matte-charcoal basemap. Chrome takes up very little of the screen.",
+      "Solid near-black surfaces, 1px 8% white hairlines, and one soft float shadow. No blur.",
+      "One system blue (`#0a84ff` family). Green, amber, and coral appear only as state inks.",
+      "Windows system UI type, sentence case, and tabular numerals wherever a number changes.",
+      "Fixed geometry. Changing values never move the track or resize the row.",
+      "Pills and gently rounded rectangles. Circles only for transport and status marks."
     ],
-    "dos": ["Keep the top toolbar responsible for site, recenter, and radar view.", "Keep the playback bar stationary.", "Keep the canonical site browser searchable.", "Keep site and view panels anchored and mutually exclusive."],
-    "donts": ["Do not build a permanent sidebar or left application menu.", "Do not duplicate the site picker.", "Do not present fixed product or tilt facts as controls.", "Do not add speculative toolbar icons.", "Do not show alerts before alerts exist.", "Do not add normal-state Fresh, Stale, Playing, Paused, or Newest text.", "Do not wash radar with decorative color."]
+    "rules": [
+      {
+        "name": "The One Blue Rule",
+        "body": "Blue means play, selection, or focus, and nothing else. No second accent hue is allowed in the chrome.",
+        "section": "colors"
+      },
+      {
+        "name": "The Data Colour Rule",
+        "body": "Radar reflectivity colours appear in the chrome only as data: the colour-scale strip, which is drawn from the renderer's own palette with weak returns faded as they are on the map, and the opaque dBZ swatch beside an inspected value. Chrome colour is never blended over radar pixels, never recolours the basemap, and never imitates radar or warning severity.",
+        "section": "colors"
+      },
+      {
+        "name": "The Earned Green Rule",
+        "body": "Green age is reserved for the recent newest painted scan of the active source, even when the newest National mosaic is older than a prior Site scan. The number and its accessible label carry the same truth, so colour never carries it alone.",
+        "section": "colors"
+      },
+      {
+        "name": "The Operational Context Rule",
+        "body": "Land and water are the base plane beneath radar, in close matte charcoal tones. Local streets, paths, buildings, railways, water names, local road names, towns, and secondary places also stay below radar. Only country and state boundaries, motorways, trunk and primary routes, major route identifiers, states, countries, and important city labels sit above it. They use cool neutral contrast strong enough to survive changing radar colours. Split water polygons are never outlined. Motorway, trunk, and primary segments share one continuous zoom treatment instead of swapping layers at fixed zooms. At far regional zoom only the coherent interstate and U.S.-highway networks remain, and state and unnetworked routes fade in with the detailed road graph. Global radar opacity is never the readability fix, and context never becomes a luminous wireframe.",
+        "section": "colors"
+      },
+      {
+        "name": "The Tabular Rule",
+        "body": "Every number that changes (clock, age, dBZ, strip ticks, hover time, loading counts) uses tabular numerals, so a changing digit never nudges its neighbours.",
+        "section": "typography"
+      },
+      {
+        "name": "The Sentence Case Rule",
+        "body": "Labels, status words, and inspection states are written the way they are said: `Out of range`, `No coverage`, `Loading 2/60`, `Retrying KTLX`. Uppercase is used only for station IDs.",
+        "section": "typography"
+      },
+      {
+        "name": "The Fixed Slot Rule",
+        "body": "Time, age, tag, and readout each hold a fixed minimum width. A changing second, hour, age, source, or dBZ value never moves the track or resizes the row.",
+        "section": "layout"
+      },
+      {
+        "name": "The No Banner Rule",
+        "body": "No notification appears above the playback row. Exceptional states are short words in the timeline's label lane. The row itself changes only before the first paint (the first-load row) and on first-load failure.",
+        "section": "layout"
+      },
+      {
+        "name": "The One Panel Rule",
+        "body": "At most one sheet or popover is open. It overlays the map without resizing or recentring it, and the playback row never moves when a panel opens.",
+        "section": "layout"
+      },
+      {
+        "name": "The Solid Chrome Rule",
+        "body": "Chrome is opaque. There is no backdrop blur, no glass, no glow, and no decorative gradient.",
+        "section": "elevation"
+      },
+      {
+        "name": "The One Float Rule",
+        "body": "All instruments share one shadow and one height. Nothing is lifted above its peers.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "**Do** let radar stay the largest, brightest, and most information-dense element. Chrome is Instrument Black with a hairline and the Float shadow.",
+      "**Do** keep blue for play, selection, and focus only, and give every state ink one job: green for the recent newest age, amber for survivable failure, coral for failure.",
+      "**Do** give every changing value a fixed slot and tabular numerals: the time, age, and tag group at least 292px, the dBZ cell 104px.",
+      "**Do** put exceptional states in the timeline label lane as a few sentence-case words, with the full message on hover, focus, and to assistive technology.",
+      "**Do** anchor the sheet and popover to their rail controls, keep them mutually exclusive, open them focused (search field or selected mode), and return focus on close.",
+      "**Do** show radar colour in the chrome only as data: the colour strip from the renderer palette and the opaque dBZ swatch.",
+      "**Do** keep Space, arrow-key steps, `/`, Escape, visible focus, forced-colours outlines, and reduced-motion fallbacks working on every new control."
+    ],
+    "donts": [
+      "**Don't** use backdrop blur, translucency, glow, or decorative gradients on any chrome surface.",
+      "**Don't** add a banner, toast, or card above the playback row for any state.",
+      "**Don't** add visible `Fresh`, `Stale`, `Playing`, `Paused`, or `Newest` labels, or step buttons, to the playback row.",
+      "**Don't** add rail tools, a toolbar, a wordmark, a left menu, or an About panel for capabilities that don't exist yet.",
+      "**Don't** introduce a second accent hue or tint the basemap or radar with chrome colour.",
+      "**Don't** let a value change move the track, or resize or recentre the map when a panel opens. Panels are never draggable.",
+      "**Don't** set interface copy in tracked uppercase or a condensed or novelty face.",
+      "**Don't** expose prototype phases, benchmarks, fixture controls, or engineering diagnostics in the normal surface."
+    ]
   }
 }

@@ -11,11 +11,12 @@ import {
   normalizeRadarDisplayMode,
   paintedFrameIndex,
   playbackErrorAfterRendererStatus,
+  playbackAnnouncement,
   playbackPresentation,
   radarDisplayModeLabel,
   radarInitializationLabel,
   rendererFailureMessage,
-  timelinePosition,
+  timelineFill,
 } from "./radarChromeModel";
 
 const interrogation = (
@@ -61,23 +62,25 @@ describe("radar chrome model", () => {
     });
     expect(inspectionReadoutPresentation("outside", null)).toMatchObject({
       kind: "status",
-      label: "OUT OF RANGE",
+      label: "Out of range",
     });
     expect(inspectionReadoutPresentation("unavailable", null)).toMatchObject({
       kind: "status",
-      label: "UNAVAILABLE",
+      label: "Unavailable",
     });
+    expect(inspectionReadoutPresentation("idle", null)).toMatchObject({ kind: "hint", label: "Inspect" });
   });
 
   it("separates exact values and source-native statuses from UI request state", () => {
     expect(inspectionReadoutPresentation("settled", interrogation("valid", 11.5)))
-      .toMatchObject({ kind: "value", label: "11.5 dBZ" });
+      .toMatchObject({ kind: "value", label: "11.5 dBZ", valueDbz: 11.5 });
     expect(inspectionReadoutPresentation("settled", interrogation("no_coverage")))
-      .toMatchObject({ kind: "status", label: "NO COVERAGE" });
+      .toMatchObject({ kind: "status", label: "No coverage" });
     expect(inspectionReadoutPresentation("settled", interrogation("missing")))
-      .toMatchObject({ kind: "status", label: "DATA MISSING" });
+      .toMatchObject({ kind: "status", label: "No data" });
     expect(inspectionReadoutPresentation("settled", null))
-      .toMatchObject({ kind: "status", label: "UNAVAILABLE" });
+      .toMatchObject({ kind: "status", label: "Unavailable" });
+    expect(inspectionReadoutPresentation("settled", interrogation("no_coverage")).valueDbz).toBeUndefined();
   });
 
   it("follows the last painted observation rather than the requested selection", () => {
@@ -153,34 +156,41 @@ describe("radar chrome model", () => {
   });
 
   it("turns internal startup stages into visible product-language progress", () => {
-    expect(radarInitializationLabel("OPENING RESIDENT LOOP")).toBe("OPENING RADAR HISTORY");
-    expect(radarInitializationLabel("LOADING CURRENT RADAR")).toBe("LOADING CURRENT RADAR");
+    expect(radarInitializationLabel("OPENING RESIDENT LOOP")).toBe("Opening radar history");
+    expect(radarInitializationLabel("LOADING CURRENT RADAR")).toBe("Loading current scan");
     expect(radarInitializationLabel("DECODING OBSERVATION 12/20"))
-      .toBe("LOADING HISTORY 12/20");
-    expect(radarInitializationLabel(undefined)).toBe("READYING DISPLAY");
+      .toBe("Loading history 12/20");
+    expect(radarInitializationLabel(undefined)).toBe("Preparing the display");
+  });
+
+  it("says playback states aloud in sentence case", () => {
+    expect(playbackAnnouncement("PLAYING")).toBe("Playing");
+    expect(playbackAnnouncement("PAUSED · NEWEST")).toBe("Paused on the newest scan");
+    expect(playbackAnnouncement("RECOVERING")).toBe("Restoring the radar display");
+    expect(playbackAnnouncement("SOMETHING NEW")).toBe("SOMETHING NEW");
   });
 
   it("highlights only a recent latest live scan", () => {
     expect(frameAgePresentation(60_000, 100_000, true)).toEqual({
       accessibleLabel: "Latest live scan, observed 40 seconds ago.",
       kind: "current",
-      label: "00:40",
+      label: "40s ago",
     });
     expect(frameAgePresentation(60_000, 100_000, false)).toEqual({
       accessibleLabel: "Historical scan, observed 40 seconds ago.",
       kind: "historical",
-      label: "00:40",
+      label: "40s ago",
     });
   });
 
   it("keeps an old latest scan and archive or scrubbed scans neutral", () => {
     expect(frameAgePresentation(0, 600_000, true).kind).toBe("historical");
-    expect(frameAgePresentation(0, 600_000, true).label).toBe("10:00");
+    expect(frameAgePresentation(0, 600_000, true).label).toBe("10m 00s ago");
     expect(frameAgePresentation(90_000, 100_000, false).kind).toBe("historical");
     expect(frameAgePresentation(undefined, 100_000, false)).toEqual({
       accessibleLabel: "Displayed scan age unavailable.",
       kind: "historical",
-      label: "--:--",
+      label: "--",
     });
   });
 
@@ -193,11 +203,11 @@ describe("radar chrome model", () => {
       true,
       "Newest National observation",
     );
-    expect(site).toMatchObject({ kind: "current", label: "00:30" });
+    expect(site).toMatchObject({ kind: "current", label: "30s ago" });
     expect(national).toEqual({
       accessibleLabel: "Newest National observation, observed 3 minutes 30 seconds ago.",
       kind: "current",
-      label: "03:30",
+      label: "3m 30s ago",
     });
   });
 
@@ -207,13 +217,13 @@ describe("radar chrome model", () => {
       frameAgePresentation(60_000, 100_000, false),
       frameAgePresentation(0, 700_000, true),
     ]) {
-      expect(presentation.label).not.toMatch(/FRESH|STALE|PAUSED|NEWEST|PLAYING/);
+      expect(presentation.label).not.toMatch(/fresh|stale|paused|newest|playing/i);
     }
   });
 
   it("distinguishes a retrying live refresh from an unavailable first acquisition", () => {
-    expect(liveFailureLabel("KTLX", true)).toBe("RETRYING KTLX");
-    expect(liveFailureLabel("KINX", false)).toBe("KINX UNAVAILABLE");
+    expect(liveFailureLabel("KTLX", true)).toBe("Retrying KTLX");
+    expect(liveFailureLabel("KINX", false)).toBe("KINX unavailable");
     expect(() => liveFailureLabel("KOUN", false)).toThrow("supported NEXRAD site");
     expect(() => liveFailureLabel("bad", true)).toThrow("supported NEXRAD site");
   });
@@ -229,23 +239,28 @@ describe("radar chrome model", () => {
     expect(() => userFacingRadarError("live_unavailable", "bad")).toThrow("supported NEXRAD site");
   });
 
-  it("makes live history loading and partial availability explicit", () => {
-    expect(timelinePosition(0, 1, 20, "loading"))
-      .toBe("1 / 1 · LOADING RECENT 1/20");
-    expect(timelinePosition(4, 5, 20, "partial"))
-      .toBe("5 / 5 · RECENT 5/20");
-    expect(timelinePosition(4, 20, 20, "full")).toBe("5 / 20");
-    expect(timelinePosition(4, 20, 20, "loading")).toBe("5 / 20");
+  it("grows a loading history back in time across the whole track", () => {
+    expect(timelineFill(12, 60, "loading")).toEqual({
+      slots: 60,
+      loadedShare: 0.2,
+      loadingLabel: "Loading 12/60",
+    });
+    // A finished or stopped history spans the track with what it has.
+    expect(timelineFill(12, 60, "partial")).toEqual({ slots: 12, loadedShare: 1 });
+    expect(timelineFill(60, 60, "loading")).toEqual({ slots: 60, loadedShare: 1 });
   });
 
   it("does not attach live-history language to archive or empty timelines", () => {
-    expect(timelinePosition(0, 1, 20)).toBe("1 / 1");
-    expect(timelinePosition(0, 1)).toBe("1 / 1");
-    expect(timelinePosition(0, 0, 20, "loading")).toBe("0 / 0");
+    expect(timelineFill(20, undefined, undefined)).toEqual({ slots: 20, loadedShare: 1 });
+    expect(timelineFill(1, 60, undefined)).toEqual({ slots: 1, loadedShare: 1 });
+    expect(timelineFill(0, 60, "loading")).toEqual({ slots: 1, loadedShare: 1 });
   });
 
   it("formats longer ages without pretending they are minute-second values", () => {
-    expect(formatAge(59)).toBe("00:59");
+    expect(formatAge(9)).toBe("9s");
+    expect(formatAge(59)).toBe("59s");
+    expect(formatAge(61)).toBe("1m 01s");
+    expect(formatAge(3_599)).toBe("59m 59s");
     expect(formatAge(3_661)).toBe("1h 01m");
     expect(formatAge(172_800)).toBe("2d");
     expect(formatAccessibleAge(1)).toBe("1 second");
@@ -255,7 +270,7 @@ describe("radar chrome model", () => {
   });
 
   it("clamps future-clock skew to zero age", () => {
-    expect(frameAgePresentation(101_000, 100_000, true).label).toBe("00:00");
+    expect(frameAgePresentation(101_000, 100_000, true).label).toBe("0s ago");
   });
 
   it("reports National history as loading only while backfill is running", () => {

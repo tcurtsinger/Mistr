@@ -358,7 +358,7 @@ function validReport() {
       telemetryMaxRectDelta: 0,
       sampleReadoutMaxRectDelta: 0,
       distinctSampleTexts: ["--.- dBZ", "11.5 dBZ"],
-      distinctAnnouncements: ["PLAYING"],
+      distinctAnnouncements: ["Playing"],
     },
     partialHistoryControls: {
       partialSampleCount: 240,

@@ -67,9 +67,9 @@ export function validateNationalPhase3Acceptance(report) {
 
   const sourceUi = report.sourceUi;
   if (sourceUi?.paintedSource !== "national" || sourceUi?.requestedSource !== null || !/National CONUS/.test(sourceUi?.accessibleName ?? "")) failures.push("National painted source UI truth");
-  if (sourceUi?.nationalChecked !== "true" || sourceUi?.siteChecked !== "false" || sourceUi?.supportingCopy !== "NATIONAL COVERS CONUS") failures.push("explicit National and Site choices");
+  if (sourceUi?.nationalCurrent !== "true" || sourceUi?.nationalFirst !== true) failures.push("National leads the source list as the current source");
   if (sourceUi?.overflow !== false || sourceUi?.panelWithinViewport !== true) failures.push("compact source panel overflow");
-  if (sourceUi?.reducedMotion !== true || sourceUi?.forcedColors !== true || sourceUi?.focusedChoice !== "National") failures.push("source panel accessibility media and focus");
+  if (sourceUi?.reducedMotion !== true || sourceUi?.forcedColors !== true || sourceUi?.focusedControl !== "Search radar sites") failures.push("source panel accessibility media and focus");
 
   const credits = report.transferSnapshot;
   if (credits?.creditLimit !== 2 || credits?.heldCredits !== 0 || credits?.inFlightCredits !== 0) failures.push("shared two-credit broker release");

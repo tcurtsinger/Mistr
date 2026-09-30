@@ -34,11 +34,11 @@ export function validateAlphaReadiness(report) {
   requireGate(failures, keyboard?.contextFocusVisible === true, "site action lacks visible keyboard focus");
   requireGate(failures, keyboard?.contextOpenPanelCount === 1, "site picker violates the one-panel rule");
   requireGate(failures, keyboard?.contextEscapeClosed === true, "Escape does not close the site panel");
-  requireGate(failures, keyboard?.contextEscapeReturn === "Choose radar site. KTLX is displayed.", "site panel close does not restore selector focus");
+  requireGate(failures, keyboard?.contextEscapeReturn === "Choose radar source. KTLX Site is displayed.", "site panel close does not restore selector focus");
   requireGate(failures, keyboard?.toolbarRecenterFocus === "Recenter radar on KTLX", "toolbar arrow key did not move to recenter");
   requireGate(failures, keyboard?.toolbarViewFocus === "Radar view. Smooth selected.", "toolbar arrow key did not move to radar view");
-  requireGate(failures, keyboard?.toolbarHomeFocus === "Choose radar site. KTLX is displayed.", "toolbar Home did not return to radar sites");
-  requireGate(failures, keyboard?.viewTooltip === "Radar View", "radar view tooltip is missing or mislabeled");
+  requireGate(failures, keyboard?.toolbarHomeFocus === "Choose radar source. KTLX Site is displayed.", "toolbar Home did not return to radar sites");
+  requireGate(failures, keyboard?.viewTooltip === "Radar view · Smooth", "radar view tooltip is missing or mislabeled");
   requireGate(failures, keyboard?.viewInitialFocus === "Smooth", "view menu does not focus the selected Smooth option");
   requireGate(failures, keyboard?.viewFocusVisible === true, "view option lacks visible keyboard focus");
   requireGate(failures, keyboard?.viewOpenPanelCount === 1, "view menu violates the one-panel rule");
@@ -57,7 +57,7 @@ export function validateAlphaReadiness(report) {
   requireGate(failures, Boolean(report?.accessibility?.mapAccessibleName), "map has no accessible name");
   requireGate(failures, report?.accessibility?.toolbarRole === "toolbar", "radar tools do not expose their toolbar relationship");
   requireGate(failures, report?.accessibility?.contextHasPopup === "dialog", "site selector does not expose its dialog relationship");
-  requireGate(failures, report?.accessibility?.contextAccessibleName === "Choose radar site. KTLX is displayed.", "site selector does not name painted site truth");
+  requireGate(failures, report?.accessibility?.contextAccessibleName === "Choose radar source. KTLX Site is displayed.", "site selector does not name painted site truth");
   requireGate(failures, report?.accessibility?.displayedSite === "KTLX", "site selector data does not follow painted site truth");
   requireGate(failures, report?.accessibility?.recenterAccessibleName === "Recenter radar on KTLX", "recenter control does not name the painted site");
   requireGate(failures, report?.accessibility?.viewHasPopup === "menu", "view selector does not expose its menu relationship");
@@ -88,7 +88,7 @@ export function validateAlphaReadiness(report) {
   requireGate(failures, report?.contrast?.inactiveSample >= 4.5, "inactive inspection instruction fails text contrast");
   requireGate(failures, report?.frameAge?.kind === "historical", "archive frame age is not presented as historical");
   requireGate(failures, report?.frameAge?.accessibleName?.startsWith("Historical scan,"), "frame age lacks non-color historical semantics");
-  requireGate(failures, /^(?:\d{2}:\d{2}|\d+h \d{2}m|\d+d)$/.test(report?.frameAge?.text ?? ""), "frame age is not a concise elapsed timer");
+  requireGate(failures, /^(?:\d+s|\d+m \d{2}s|\d+h \d{2}m|\d+d) ago$/.test(report?.frameAge?.text ?? ""), "frame age is not a concise elapsed timer");
   requireGate(failures, report?.visibleStatusNoise?.length === 0, "playback bar exposes Fresh, Stale, Paused, or Newest noise");
   requireGate(failures, report?.visiblePrototypeTerms?.length === 0, "normal UI exposes engineering terminology");
   return failures;

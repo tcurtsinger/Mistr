@@ -108,20 +108,19 @@ async function sourceUiEvidence() {
   const evidence = await evaluate(`(()=>{
     const source=document.querySelector('[data-role="radar-source"]');
     const panel=document.querySelector('[aria-label="Choose radar source"]');
-    const choices=[...document.querySelectorAll('.source-choices [role="radio"]')];
+    const national=panel?.querySelector('[data-source-option="national"]');
     const rect=panel?.getBoundingClientRect();
     return {
       paintedSource:source?.dataset.paintedSource,
       requestedSource:source?.dataset.requestedSource??null,
       accessibleName:source?.getAttribute('aria-label'),
-      nationalChecked:choices.find(e=>e.querySelector('strong')?.textContent==='National')?.getAttribute('aria-checked'),
-      siteChecked:choices.find(e=>e.querySelector('strong')?.textContent==='Site')?.getAttribute('aria-checked'),
-      supportingCopy:panel?.querySelector('.panel-header p')?.textContent?.trim(),
+      nationalCurrent:national?.getAttribute('aria-current')??null,
+      nationalFirst:panel?.querySelector('[data-source-option]')===national,
       overflow:document.documentElement.scrollWidth>window.innerWidth || document.documentElement.scrollHeight>window.innerHeight,
       panelWithinViewport:Boolean(rect&&rect.left>=0&&rect.top>=0&&rect.right<=window.innerWidth&&rect.bottom<=window.innerHeight),
       reducedMotion:matchMedia('(prefers-reduced-motion: reduce)').matches,
       forcedColors:matchMedia('(forced-colors: active)').matches,
-      focusedChoice:document.activeElement?.querySelector?.('strong')?.textContent??null
+      focusedControl:document.activeElement?.getAttribute('aria-label')??null
     };
   })()`);
   await evaluate("document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))");

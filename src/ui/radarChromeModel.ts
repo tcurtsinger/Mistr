@@ -34,6 +34,8 @@ export interface InspectionReadoutPresentation {
   busy: boolean;
   kind: "hint" | "pending" | "status" | "value";
   label: string;
+  /** The measured reflectivity a value readout shows, for its color swatch. */
+  valueDbz?: number;
 }
 
 export type LiveHistoryStatus = "loading" | "partial" | "full";
@@ -66,10 +68,10 @@ export function inspectionReadoutPresentation(
 ): InspectionReadoutPresentation {
   if (state === "idle") {
     return {
-      accessibleLabel: "No radar point selected.",
+      accessibleLabel: "No radar point selected. Click the map to inspect a point.",
       busy: false,
       kind: "hint",
-      label: "CLICK TO INSPECT",
+      label: "Inspect",
     };
   }
   if (state === "pending") {
@@ -85,7 +87,7 @@ export function inspectionReadoutPresentation(
       accessibleLabel: "Selected point is outside radar coverage.",
       busy: false,
       kind: "status",
-      label: "OUT OF RANGE",
+      label: "Out of range",
     };
   }
   if (state === "unavailable" || !interrogation) {
@@ -93,7 +95,7 @@ export function inspectionReadoutPresentation(
       accessibleLabel: "Radar sample is temporarily unavailable.",
       busy: false,
       kind: "status",
-      label: "UNAVAILABLE",
+      label: "Unavailable",
     };
   }
   if (interrogation.status === "valid" && interrogation.value !== null) {
@@ -102,6 +104,7 @@ export function inspectionReadoutPresentation(
       busy: false,
       kind: "value",
       label: `${interrogation.value.toFixed(1)} ${interrogation.units}`,
+      ...(interrogation.units === "dBZ" ? { valueDbz: interrogation.value } : {}),
     };
   }
   if (interrogation.status === "valid") {
@@ -109,14 +112,14 @@ export function inspectionReadoutPresentation(
       accessibleLabel: "Radar sample is temporarily unavailable.",
       busy: false,
       kind: "status",
-      label: "UNAVAILABLE",
+      label: "Unavailable",
     };
   }
   const status = ({
-    below_threshold: ["BELOW THRESHOLD", "Radar value is below the reporting threshold."],
-    range_folded: ["RANGE FOLDED", "Radar value is range folded."],
-    missing: ["DATA MISSING", "Radar data is missing at the selected point."],
-    no_coverage: ["NO COVERAGE", "No radar coverage exists at the selected point."],
+    below_threshold: ["Below threshold", "Radar value is below the reporting threshold."],
+    range_folded: ["Range folded", "Radar value is range folded."],
+    missing: ["No data", "Radar data is missing at the selected point."],
+    no_coverage: ["No coverage", "No radar coverage exists at the selected point."],
   } as const)[interrogation.status];
   return {
     accessibleLabel: status[1],
@@ -171,30 +174,60 @@ export function playbackPresentation(
   return "PAUSED";
 }
 
-export function radarInitializationLabel(stage: string | undefined): string {
-  if (stage === "LOADING CURRENT RADAR") return "LOADING CURRENT RADAR";
-  const progress = stage?.match(/^DECODING OBSERVATION (\d+)\/(\d+)$/);
-  if (progress) return `LOADING HISTORY ${progress[1]}/${progress[2]}`;
-  if (stage === "OPENING RESIDENT LOOP") return "OPENING RADAR HISTORY";
-  return "READYING DISPLAY";
+/** What the playback status says aloud: the same state in plain sentence case. */
+export function playbackAnnouncement(status: string): string {
+  return ({
+    PLAYING: "Playing",
+    "PAUSED · NEWEST": "Paused on the newest scan",
+    PAUSED: "Paused",
+    "LOADING RECENT": "Loading recent scans",
+    "WAITING FOR NEXT SCAN": "Waiting for the next scan",
+    RECOVERING: "Restoring the radar display",
+    "LOADING SCAN": "Loading scan",
+    "PREPARING PLAYBACK": "Preparing playback",
+    "RADAR UNAVAILABLE": "Radar unavailable",
+  } as Record<string, string>)[status] ?? status;
 }
 
-export function timelinePosition(
-  frameIndex: number,
+export function radarInitializationLabel(stage: string | undefined): string {
+  if (stage === "LOADING CURRENT RADAR") return "Loading current scan";
+  const progress = stage?.match(/^DECODING OBSERVATION (\d+)\/(\d+)$/);
+  if (progress) return `Loading history ${progress[1]}/${progress[2]}`;
+  if (stage === "OPENING RESIDENT LOOP") return "Opening radar history";
+  return "Preparing the display";
+}
+
+export interface TimelineFill {
+  /** Track slots: the full history while it loads, otherwise the frames. */
+  slots: number;
+  /** The loaded frames' share of the track, newest at the right. */
+  loadedShare: number;
+  loadingLabel?: string;
+}
+
+/**
+ * While recent history loads, the track spans the whole history and the
+ * loaded scans fill it from the newest end, so the loop visibly grows back in
+ * time instead of rescaling under the operator.
+ */
+export function timelineFill(
   frameCount: number,
   historyCapacity?: number,
   liveHistoryStatus?: LiveHistoryStatus,
-): string {
-  const position = frameCount > 0 ? `${Math.min(frameIndex + 1, frameCount)} / ${frameCount}` : "0 / 0";
+): TimelineFill {
   if (
-    historyCapacity === undefined
-    || frameCount < 1
-    || frameCount >= historyCapacity
-    || liveHistoryStatus === undefined
-    || liveHistoryStatus === "full"
-  ) return position;
-  const historyLabel = liveHistoryStatus === "loading" ? "LOADING RECENT" : "RECENT";
-  return `${position} · ${historyLabel} ${frameCount}/${historyCapacity}`;
+    liveHistoryStatus === "loading"
+    && historyCapacity !== undefined
+    && frameCount >= 1
+    && frameCount < historyCapacity
+  ) {
+    return {
+      slots: historyCapacity,
+      loadedShare: frameCount / historyCapacity,
+      loadingLabel: `Loading ${frameCount}/${historyCapacity}`,
+    };
+  }
+  return { slots: Math.max(1, frameCount), loadedShare: 1 };
 }
 
 export function frameAgePresentation(
@@ -207,7 +240,7 @@ export function frameAgePresentation(
     return {
       accessibleLabel: "Displayed scan age unavailable.",
       kind: "historical",
-      label: "--:--",
+      label: "--",
     };
   }
 
@@ -217,7 +250,7 @@ export function frameAgePresentation(
   return {
     accessibleLabel: `${latestDescription}, observed ${formatAccessibleAge(ageSeconds)} ago.`,
     kind: latestLiveScan && ageSeconds < 600 ? "current" : "historical",
-    label: formatAge(ageSeconds),
+    label: `${formatAge(ageSeconds)} ago`,
   };
 }
 
@@ -225,7 +258,7 @@ export function liveFailureLabel(site: string, retrying: boolean): string {
   if (!isSupportedRadarSite(site)) {
     throw new Error("failure label requires a supported NEXRAD site");
   }
-  return retrying ? `RETRYING ${site}` : `${site} UNAVAILABLE`;
+  return retrying ? `Retrying ${site}` : `${site} unavailable`;
 }
 
 export function userFacingRadarError(
@@ -257,10 +290,11 @@ export function userFacingRadarError(
 
 export function formatAge(totalSeconds: number): string {
   const safeSeconds = Math.max(0, Math.floor(totalSeconds));
+  if (safeSeconds < 60) return `${safeSeconds}s`;
   if (safeSeconds < 3_600) {
     const minutes = Math.floor(safeSeconds / 60);
     const seconds = safeSeconds % 60;
-    return `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
+    return `${minutes}m ${seconds.toString().padStart(2, "0")}s`;
   }
   if (safeSeconds < 86_400) {
     const hours = Math.floor(safeSeconds / 3_600);

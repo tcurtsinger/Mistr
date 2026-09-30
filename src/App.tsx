@@ -1,11 +1,4 @@
-/**
- * THESIS: Radar is the stage; a compact tool strip and measured-time instrument keep it sovereign.
- * OWN-WORLD: Matte night, bounded smoked glass, sparse cue type, and one cobalt-to-rose-to-dawn edge light.
- * STORY: Choose what radar to inspect at the top, inspect the map directly, and control measured time at the bottom.
- * FIRST VIEWPORT: Full-screen radar, one icon-led top tool strip, and a stable bottom playback bar.
- * FORM: Stormlight Cyclorama catalog challenger; splice-strip scan staging; seed d88dac67. The generated comps guide hierarchy, not literal pixels.
- */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as maplibregl from "maplibre-gl";
 import type {
   AddLayerObject,
@@ -130,7 +123,7 @@ import {
   snapshotProvesNationalHistoryRollback,
 } from "./national-radar/NationalRollbackLoop";
 import { colorForReflectivity } from "./radar-renderer/palette";
-import { RadarChrome } from "./ui/RadarChrome";
+import { RadarChrome, type RadarNotice } from "./ui/RadarChrome";
 import { fadeOpacity } from "./radar-renderer/fade";
 import {
   autoSourceOf,
@@ -142,6 +135,7 @@ import {
 } from "./radar-session/autoSourcePolicy";
 import {
   frameAgePresentation,
+  liveFailureLabel,
   nationalHistoryStatus,
   userFacingRadarError,
   normalizeRadarDisplayMode,
@@ -315,6 +309,17 @@ export function App() {
         canvasContextAttributes: { antialias: false },
       });
       instance.addControl(new maplibregl.AttributionControl({ compact: true }), "top-right");
+      // MapLibre opens compact credits until the first drag; they start
+      // folded behind the (i), which still opens them.
+      const credits = instance.getContainer().querySelector(".maplibregl-ctrl-attrib");
+      if (credits) {
+        const fold = new MutationObserver(() => {
+          if (!credits.classList.contains("maplibregl-compact-show")) return;
+          credits.classList.remove("maplibregl-compact-show");
+          fold.disconnect();
+        });
+        fold.observe(credits, { attributes: true, attributeFilter: ["class"] });
+      }
       stopReleasingLostStyles = releaseStylesOnContextLoss(instance);
       const created = instance;
       created.on("moveend", () => storeCamera(created));
@@ -3915,6 +3920,7 @@ export function App() {
       : nationalPlayback ?? undefined
     : sitePlayback;
   const frameIndex = paintedFrameIndex(timelineFrames, playback);
+  const frameTimes = useMemo(() => timelineFrames.map((frame) => frame.observedAtUnixMs), [timelineFrames]);
   const displayedAtUnixMs = playback?.playheadObservedAtUnixMs
     ?? (nationalActive
       ? nationalPhase3?.workingSet.receipt.observationTimeUnixMs
@@ -3950,29 +3956,51 @@ export function App() {
   const liveRetrying = phase5.display.kind === "degraded"
     && phase5.display.lastComplete?.source === "nexrad_level2_chunks"
     && phase5.display.lastComplete.site === liveFailureSite;
-  const userFacingError = initializationError
-    ? userFacingRadarError("initialization")
+  // The full message is the account of record; `short` is the few words the
+  // timeline row shows, and a caution is a failure the painted radar survives.
+  const failure: Pick<RadarNotice, "message" | "short" | "tone"> | null = initializationError
+    ? { message: userFacingRadarError("initialization"), short: "Radar unavailable", tone: "error" }
     : rendererError
-      ? userFacingRadarError("renderer")
+      ? { message: userFacingRadarError("renderer"), short: "Display failed", tone: "error" }
       : playbackError
-        ? userFacingRadarError("playback")
+        ? { message: userFacingRadarError("playback"), short: "Scan change failed", tone: "caution" }
         : nationalRequestError
-          ? "National radar is unavailable. The last completed radar remains displayed; choose National again to retry."
+          ? {
+              message: "National radar is unavailable. The last completed radar remains displayed; choose National again to retry.",
+              short: "National unavailable",
+              tone: "caution",
+            }
         : liveFailureSite
-          ? userFacingRadarError(liveRetrying ? "live_retrying" : "live_unavailable", liveFailureSite)
+          ? {
+              message: userFacingRadarError(liveRetrying ? "live_retrying" : "live_unavailable", liveFailureSite),
+              short: liveFailureLabel(liveFailureSite, liveRetrying),
+              tone: liveRetrying ? "caution" : "error",
+            }
           : siteRequestError
             ? siteRequestError === RADAR_ENGINE_PREPARING_ERROR
-              ? userFacingRadarError("initialization")
-              : userFacingRadarError("live_unavailable", selectedSite)
+              ? { message: userFacingRadarError("initialization"), short: "Radar unavailable", tone: "error" }
+              : {
+                  message: userFacingRadarError("live_unavailable", selectedSite),
+                  short: liveFailureLabel(selectedSite, false),
+                  tone: "error",
+                }
             : autoSiteError
-              ? userFacingRadarError("auto_unavailable", autoSiteError)
+              ? {
+                  message: userFacingRadarError("auto_unavailable", autoSiteError),
+                  short: liveFailureLabel(autoSiteError, false),
+                  tone: "caution",
+                }
               : null;
+  const userFacingError = failure?.message ?? null;
   const preparingFailed = displayedAtUnixMs === undefined && Boolean(radarUnavailableError);
   const preparingLabel = displayedAtUnixMs === undefined
     ? preparingFailed
-      ? "NO RADAR SCAN DISPLAYED"
+      ? userFacingError ?? "No radar scan is displayed."
       : radarInitializationLabel(phase4.kind === "running" ? phase4.stage : undefined)
     : undefined;
+  const historyCapacity = nationalActive
+    ? nationalHistory?.historyLimit
+    : MAX_LIVE_HISTORY_FRAMES;
   const pendingSite = requestedSourceKind === "site"
     ? requestedSite ?? (phase5.display.kind === "acquiring" ? phase5.display.requestedSite : undefined)
     : undefined;
@@ -3980,30 +4008,34 @@ export function App() {
   const displayedSource = nationalActive
     ? "National radar"
     : paintedSourceKind === "nexrad_level2_chunks" ? "live radar" : "archive radar";
-  const playbackNotice = playbackStatus === "RECOVERING"
+  const playbackNotice: RadarNotice | undefined = playbackStatus === "RECOVERING"
     ? {
         kind: "info" as const,
         message: "Restoring the radar display. The last completed scan remains selected.",
+        short: "Restoring display",
       }
     : playbackStatus === "LOADING SCAN"
       ? {
           kind: "info" as const,
           message: "Loading the selected radar scan.",
+          short: "Loading scan",
         }
       : playbackStatus === "PREPARING PLAYBACK"
         ? {
             kind: "info" as const,
             message: "Preparing sharp National playback for this map view.",
+            short: "Preparing playback",
           }
       : undefined;
-  const radarNotice = userFacingError
-    ? { kind: "error" as const, message: userFacingError }
+  const radarNotice: RadarNotice | undefined = failure
+    ? { kind: "error" as const, ...failure }
     : !paintedRadarSource && (requestedSourceKind === "national" || pendingSite)
       ? {
           kind: "info" as const,
           message: requestedSourceKind === "national"
             ? "Loading National CONUS radar."
             : `Loading ${pendingSite} live radar.`,
+          short: requestedSourceKind === "national" ? "Loading National" : `Loading ${pendingSite}`,
         }
     : requestedSourceKind === "national"
       ? {
@@ -4019,6 +4051,8 @@ export function App() {
         ? {
             kind: "info" as const,
             message: "Basemap unavailable. Radar remains available.",
+            short: "Basemap unavailable",
+            tone: "caution" as const,
           }
         : liveHistoryStatus === "loading"
           && (nationalActive || paintedSourceKind === "nexrad_level2_chunks")
@@ -4027,8 +4061,22 @@ export function App() {
               message: nationalActive
                 ? "Current National radar is ready. Loading recent observations."
                 : `Current ${displayedSite} radar is ready. Loading recent scans.`,
+              short: historyCapacity && timelineFrames.length < historyCapacity
+                ? `Loading ${timelineFrames.length}/${historyCapacity}`
+                : "Loading history",
             }
           : undefined);
+
+  const clearInspection = () => {
+    inspectionMarkerRef.current?.remove();
+    inspectionMarkerRef.current = null;
+    inspectionPointRef.current = null;
+    interrogationObservationRef.current = null;
+    // A lookup still in flight must not restore the cleared value.
+    inspectionRequestRef.current = null;
+    setInterrogation(null);
+    setInspectionState("idle");
+  };
 
   const togglePlayback = () => {
     playheadCarryRef.current = null;
@@ -4200,6 +4248,7 @@ export function App() {
     <main className="app-shell">
       <div ref={mapContainer} className="map-surface" aria-label="Mistr map" />
       <RadarChrome
+        ageCaution={liveRetrying}
         displayedAtUnixMs={displayedAtUnixMs}
         displayMode={displayMode}
         displayModeReady={nationalActive
@@ -4209,8 +4258,12 @@ export function App() {
         frameAge={frameAge}
         frameCount={timelineFrames.length}
         frameIndex={frameIndex}
+        frameTimes={frameTimes}
+        historyCapacity={historyCapacity}
         interrogation={interrogation}
         inspectionState={inspectionState}
+        liveHistoryStatus={liveHistoryStatus}
+        onClearInspection={clearInspection}
         onRecenter={recenterRadar}
         onSelectNational={selectNational}
         onSelectDisplayMode={selectDisplayMode}

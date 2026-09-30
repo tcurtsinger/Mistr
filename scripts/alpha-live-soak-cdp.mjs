@@ -217,7 +217,7 @@ function snapshotFinal() {
       sliderMaximum:Number(slider?.max ?? -1),
       sliderValue:Number(slider?.value ?? -1),
       sliderValueText:slider?.getAttribute('aria-valuetext') ?? null,
-      timelineText:document.querySelector('.timeline-meta')?.textContent?.replace(/\\s+/g,' ').trim(),
+      timelineText:(slider=>slider?(Number(slider.value)+1)+' / '+(Number(slider.max)+1):null)(document.querySelector('.timeline input')),
       bodyText:document.body.innerText
     };
   })()`);
