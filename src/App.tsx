@@ -4072,6 +4072,8 @@ export function App() {
     inspectionMarkerRef.current = null;
     inspectionPointRef.current = null;
     interrogationObservationRef.current = null;
+    // A lookup still in flight must not restore the cleared value.
+    inspectionRequestRef.current = null;
     setInterrogation(null);
     setInspectionState("idle");
   };

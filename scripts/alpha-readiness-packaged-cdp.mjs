@@ -297,9 +297,9 @@ async function captureContrast() {
     const luminance=rgb=>rgb.map(value=>value/255).map(value=>value<=0.04045?value/12.92:((value+0.055)/1.055)**2.4)
       .reduce((sum,value,index)=>sum+value*[0.2126,0.7152,0.0722][index],0);
     const ratio=(left,right)=>{const a=luminance(left),b=luminance(right);return (Math.max(a,b)+0.05)/(Math.min(a,b)+0.05)};
-    const root=getComputedStyle(document.documentElement);
+    // The sample reads against the playback row it sits on, not the map.
     const foreground=parse(getComputedStyle(document.querySelector('.sample-readout')).color);
-    const background=parse(root.getPropertyValue('--stage-black'));
+    const background=parse(getComputedStyle(document.querySelector('.playback-bar')).backgroundColor);
     return {inactiveSample:ratio(foreground,background)};
   })()`);
 }
