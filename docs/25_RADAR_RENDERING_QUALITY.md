@@ -115,6 +115,15 @@ A map inspection always reports the native underlying gate, status, and dBZ for 
 
 The application never reverse-engineers a dBZ value from a filtered screen color. A visually blended pixel may sit between native colors, but that intermediate appearance is not labeled as an intermediate measurement. A visually transparent non-positive valid gate may still report its exact native negative dBZ when deliberately inspected. Below-threshold, range-folded, missing, and out-of-coverage inspection results remain explicit.
 
+### Painted position
+
+A pixel is painted at the gate or cell inspection reports for it. The shaders therefore avoid GPU `asin` and `atan` on the position path, because WebGL guarantees neither's precision. On the owner's RTX 4080 through ANGLE/D3D11, `asin` returned about 6.8e-5 rad high for small inputs, which drew every Site echo about 860 m short of its gate near the radar (590 m at 120 km). The `atan` behind Mercator latitude moved points by up to 150 m and turned Site bearings by 1.2° at 2 km. The CPU inspection path is double precision, so the readout and the color under the cursor disagreed.
+
+- **Site:** sin and cos of latitude come straight from Mercator through `tanh` and `cosh`. Ground range is the chord between unit vectors and a series arcsine. Bearing comes from the tangent-plane axes of the radar's unit vector, computed on the CPU in double precision (`SITE_GEOMETRY_GLSL` and `radarUnitFrame` in `RadarCustomLayer.ts`).
+- **National:** latitude takes one Newton step on sin(latitude) = tanh(t) after `atan` (`MERCATOR_LATITUDE_GLSL` in `NationalGridLayer.ts`).
+
+The packaged Phase 4 gate runs these shipped snippets on the packaged GPU (`probeRadarGeometry`) against double-precision truth: 480 Site points from 2 km to 460 km around five radars at 25° to 65° N, and ten National latitudes. It fails when range, cross-range, or National latitude error passes 10 m. The owner's GPU measured 1.6 m, 4.7 m (at 460 km), and 1.6 m.
+
 ## 8. Ownership and performance
 
 - Spatial filtering remains in the renderer and does not trigger network, disk, decode, IPC, or per-playback-frame acquisition work.
@@ -138,6 +147,7 @@ Source-level evidence must prove:
 7. filtering cannot create data across invalid/status boundaries or the azimuth seam;
 8. the explicit context boundary keeps water and local detail below radar without split-polygon outlines while major-route, boundary, and important-label context remains above it using only the existing map source graph; and
 9. the visible labels and accessible control name expose the active mode without implying a new observation or meteorological clutter classification.
+10. the shipped Site and National position shader code places points within 10 m of double-precision truth on the packaged GPU.
 
 The combined packaged Windows/WebView2 matrix must cover direct scrub, resident playback, site switching, 4K pan/zoom, context loss/restoration, and compact/forced-colors inspection across both modes. Renderer-sensitive playback, recovery, responsive-layout, and accessibility paths exercise both modes directly; mode-independent acquisition ownership remains covered once per live workflow. The existing long-task, hot-path I/O/upload, GPU-memory, and painted-receipt gates do not relax for visual quality.
 

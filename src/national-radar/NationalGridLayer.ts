@@ -43,6 +43,18 @@ void main() {
   gl_Position = u_matrix * vec4(mercator, 0.0, 1.0);
 }`;
 
+// Mercator y to latitude in degrees. GPU atan alone put latitudes up to 146 m
+// off across CONUS on ANGLE/D3D11; one Newton step on sin(latitude) = tanh(t)
+// brings them to about a metre.
+export const MERCATOR_LATITUDE_GLSL = `
+float mercator_latitude(float y) {
+  float t = (0.5 - y) * 6.283185307179586;
+  float latitude = 2.0 * atan(exp(t)) - 1.5707963267948966;
+  latitude -= (sin(latitude) - tanh(t)) / cos(latitude);
+  return degrees(latitude);
+}
+`;
+
 const FRAGMENT_SHADER = `#version 300 es
 precision highp float;
 precision highp usampler2D;
@@ -60,10 +72,7 @@ uniform bool u_exclude_coverage;
 uniform vec4 u_exclusion_bounds;
 out vec4 frag_color;
 
-float mercator_latitude(float y) {
-  return degrees(2.0 * atan(exp((0.5 - y) * 6.283185307179586)) - 1.5707963267948966);
-}
-
+${MERCATOR_LATITUDE_GLSL}
 bool valid_code(uint raw) {
   return raw != u_missing_raw && raw != u_no_coverage_raw;
 }

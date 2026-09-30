@@ -54,6 +54,7 @@ import {
   type RadarSweepCpuModel,
 } from "./radar-renderer/cpuModel";
 import { destinationPoint } from "./radar-renderer/geo";
+import { probeRadarGeometry, type RadarGeometryProbeReport } from "./radar-renderer/geometryProbe";
 import { HIDDEN_DIAGNOSTIC_LAYOUT } from "./radar-renderer/diagnosticLayerStyle";
 import {
   evaluateLayerCoexistence,
@@ -811,6 +812,7 @@ export function App() {
           return prepareArchiveForDiagnostics();
         },
         settleMap: (timeoutMs) => waitForMapIdle(instance, timeoutMs),
+        probeGeometry: () => probeRadarGeometry(),
         layerOrder: () => currentLayerCoexistenceReport(instance).actualDiagnosticOrder,
       };
       const acquireLive = async (
@@ -5098,6 +5100,7 @@ declare global {
     runScenario(transitionCount?: number): Promise<Phase4ScenarioReport>;
     prepareArchive(): Promise<RadarPaintReceipt>;
     settleMap(timeoutMs?: number): Promise<void>;
+    probeGeometry(): RadarGeometryProbeReport;
     play(): void;
     pause(): void;
     step(): Promise<RadarPaintReceipt>;
