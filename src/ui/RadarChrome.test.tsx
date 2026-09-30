@@ -72,6 +72,10 @@ describe("radar chrome", () => {
     expect(html).toContain('class="sample-readout sample-readout--value"');
     expect(html).toContain('class="sample-swatch"');
     expect(html).toMatch(/<\/span>42\.5 dBZ<\/output>/);
+    // The map draws no colour for a non-positive return, so its swatch is empty.
+    const clear = renderToStaticMarkup(<RadarChrome {...props} inspectionState="settled" interrogation={valid(-2)} />);
+    expect(clear).toContain('class="sample-swatch sample-swatch--clear"');
+    expect(clear).toMatch(/-2\.0 dBZ<\/output>/);
     const idle = renderToStaticMarkup(<RadarChrome {...props} />);
     expect(idle).toContain("sample-readout--hint");
     expect(idle).toContain(">Inspect</output>");

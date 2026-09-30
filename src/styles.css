@@ -71,12 +71,11 @@ input { caret-color: var(--accent); }
 }
 .maplibregl-ctrl.maplibregl-ctrl-attrib.maplibregl-compact {
   min-height: 28px;
-  padding: 3px 28px 3px 0;
   border-radius: 999px;
   background: var(--surface);
 }
-.maplibregl-ctrl-attrib.maplibregl-compact:not(.maplibregl-compact-show) { width: 30px; padding: 0; }
-.maplibregl-ctrl-attrib.maplibregl-compact-show { padding: 4px 30px 4px 12px; border-radius: 14px; }
+.maplibregl-ctrl.maplibregl-ctrl-attrib.maplibregl-compact:not(.maplibregl-compact-show) { width: 30px; padding: 0; }
+.maplibregl-ctrl.maplibregl-ctrl-attrib.maplibregl-compact-show { padding: 4px 32px 4px 12px; border-radius: 14px; }
 .maplibregl-ctrl-attrib a { color: var(--text-2); }
 .maplibregl-ctrl-attrib a:hover { color: var(--text); }
 .maplibregl-ctrl-attrib-button {
@@ -154,6 +153,7 @@ input { caret-color: var(--accent); }
   top: 0;
   transform: translateX(-50%);
 }
+.color-scale__ticks .color-scale__unit { right: 0; transform: none; }
 
 /* ---------- right rail ---------- */
 .radar-rail {
@@ -290,10 +290,11 @@ input { caret-color: var(--accent); }
   line-height: 1.35;
 }
 
+/* The sheet grows with its results, down to the gap above the playback row. */
 .tool-panel--site {
   top: calc(var(--gap) + 34px);
   right: calc(var(--gap) * 2 + var(--rail-w));
-  bottom: calc(var(--bar-bottom) + var(--bar-h) + var(--gap));
+  max-height: calc(100% - var(--gap) * 2 - 34px - var(--bar-bottom) - var(--bar-h));
   display: flex;
   flex-direction: column;
   width: min(340px, calc(100vw - var(--rail-w) - var(--gap) * 4));
@@ -460,9 +461,10 @@ input { caret-color: var(--accent); }
 .playback-toggle:active:not(:disabled) { transform: scale(0.94); }
 .playback-toggle:disabled { background: var(--raise-2); color: var(--text-3); }
 
-/* One fixed-width group: time, age, and tag sit together, any spare room
-   falls once before the track, and a changing second, hour, age, date, or
-   source never moves the track. */
+/* One fixed-width group: the reading (time and age) at its start and the
+   tag naming the loop's radar at its end, against the track. Spare room falls
+   between them, and a changing second, hour, age, date, or source never
+   moves the track. */
 .scan-readout {
   flex: none;
   min-width: 292px;
@@ -495,6 +497,7 @@ input { caret-color: var(--accent); }
   line-height: 1.45;
   white-space: nowrap;
 }
+.scan-readout > .tag { margin-left: auto; }
 .tag--pending { background: var(--accent-wash); color: var(--accent-ink); }
 .tag-arrow { color: var(--text-2); font-weight: 500; }
 
@@ -660,6 +663,7 @@ input { caret-color: var(--accent); }
   border-radius: 3px;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
 }
+.sample-swatch--clear { border: 1px solid var(--text-3); box-shadow: none; }
 
 .playback-bar--preparing {
   gap: 10px;
