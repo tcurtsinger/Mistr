@@ -67,10 +67,14 @@ typography:
     lineHeight: 1.2
     fontFeature: "tnum"
 rounded:
+  track: "2px"
   swatch: "3px"
+  focus: "4px"
   control: "8px"
   field: "10px"
+  rail-end: "11px"
   rail: "12px"
+  credits-open: "14px"
   popover: "16px"
   sheet: "18px"
   bar: "22px"
@@ -105,7 +109,6 @@ components:
     typography: "{typography.label}"
     rounded: "{rounded.pill}"
     padding: "1px 8px"
-    width: "66px"
   source-tag-pending:
     backgroundColor: "{colors.accent-wash}"
     textColor: "{colors.accent-ink}"
@@ -252,10 +255,10 @@ The map fills the window, and the chrome floats over it with pointer events limi
 - **Top right:** the map credits, folded behind a 26px (i) button that still opens them. MapLibre's first-drag auto-open is suppressed, so the credits start folded.
 - **Right edge, vertically centred:** the tool rail. The first group holds Site and Recenter, the second holds View, with 10px between groups. Rail tools exist only for real product controls.
 - **Bottom centre:** the playback row, 44px tall and `min(800px, 100vw − 28px)` wide, 22px above the bottom edge.
-- **Site sheet:** opens left of the rail (right inset 14 + 44 + 14px). It starts 34px below the top inset, clearing the credits, and ends 14px above the playback row. It is 340px wide.
+- **Site sheet:** opens left of the rail (right inset 14 + 44 + 14px). It starts 34px below the top inset, clearing the credits, and grows with its results, at most to 14px above the playback row. It is 340px wide.
 - **View popover:** 232px wide, 10px left of the rail, bottom-aligned with the View group.
 
-Inside the playback row, from left to right: play circle, clock with its zone (or, for a scan from another day, its date in the zone's place), age, source tag, flexible timeline, divider, and the dBZ cell. Time, age, and tag sit together in one group that holds a minimum of 292px (244px once the zone hides at 1000px), so a changing second, hour, age, date, or source never moves the track and any spare room falls once before it. The dBZ cell is a fixed 104px with `contain: layout`. The timeline takes all remaining width, with a 140px minimum.
+Inside the playback row, from left to right: play circle, clock with its zone (or, for a scan from another day, its date in the zone's place), age, source tag, flexible timeline, divider, and the dBZ cell. Time, age, and tag share one group that holds a minimum of 292px (244px once the zone hides at 1000px). The reading (time and age) opens it and the tag closes it, right-aligned against the track, so the tag labels the loop it owns. Any spare room falls between the reading and the tag, and a changing second, hour, age, date, or source never moves the track. The dBZ cell is a fixed 104px with `contain: layout`. The timeline takes all remaining width, with a 140px minimum.
 
 Spacing rhythm: 6px tight pairs, 8px inner gaps, 10px between row clusters and rail groups, 12px within list rows, and 14px edges. At 1000px the time zone is hidden and the clock slot narrows to 86px. At 860px the date is hidden. The body minimum is 720 × 540px. A 1100 × 700 window keeps every control.
 
@@ -293,10 +296,10 @@ Circles are reserved for the play circle, the scrubber thumb, the credits (i) bu
 - **Character:** one thin line of truth. Reading left to right tells you time, age, which radar, where you are in the loop, and what you clicked.
 - **Play circle:** 32px System Blue with a white 16px glyph. Hover brightens it 12%, and press scales it to 0.94 over 120ms. When disabled it turns Raised High with a Tertiary glyph. Transport enables only when at least two observations are resident. While National prepares sharp playback it shows pause and acts as cancel.
 - **Clock and age:** `12:00:34 AM` in 12-hour time with seconds, followed by the time-zone abbreviation. A short `Sep 29` date precedes the time only when the scan is not from today. The age follows as `1m 02s ago` (`45s`, `1h 05m`, `2d`) in its state ink.
-- **Source tag:** a pill naming the painted radar, either a station ID or `National`. It is at least 66px wide with centred text, so switching sources never moves the track. While a switch is pending it turns blue-washed and reads `KTLX → KFWS`, with the arrow in Secondary Text. The tag follows what painted, never what was merely requested.
+- **Source tag:** a pill naming the painted radar, either a station ID or `National`. It is right-aligned at the end of the reading group, so a longer name grows toward the reading and never moves the track. While a switch is pending it turns blue-washed and reads `KTLX → KFWS`, with the arrow in Secondary Text. The tag follows what painted, never what was merely requested.
 - **Timeline:** a native range input over a 3px track. Clock ticks mark the finest interval (15, 30, 60, or 120 minutes) that keeps the count to 12 or fewer. The thumb is a 12px white circle with a blue halo. While history loads, the track spans the full history capacity: the loaded span fills from the newest end and the rest is a dashed Strong Hairline, so the loop grows back in time instead of rescaling. There are no step buttons.
 - **Label lane:** the band above the track. Hovering the track shows that scan's short time (`11:42 PM`) above the pointer. When no hover is active, the lane holds the status word. Info words sit at left in Blue Ink with a 9px spinner (`Loading 2/60`, `Loading KFWS`, `Restoring display`, `Preparing playback`). Caution words sit at right in Amber, and error words sit at right in Coral. The status word is focusable, and hover or focus opens the full message in an above-tooltip.
-- **dBZ cell:** a fixed 104px cell after a 1px × 20px divider. At rest it shows the crosshair icon and `Inspect` in Tertiary Text. While pending it shows `--.- dBZ`. A value such as `33.5 dBZ` gets an opaque swatch of its true radar colour. Settled states read `Out of range`, `No coverage`, `No data`, `Below threshold`, `Range folded`, or `Unavailable`.
+- **dBZ cell:** a fixed 104px cell after a 1px × 20px divider. At rest it shows the crosshair icon and `Inspect` in Tertiary Text. While pending it shows `--.- dBZ`. A value such as `33.5 dBZ` gets an opaque swatch of its true radar colour. A value the map draws no colour for (a non-positive return, hidden by the weak-return curve) gets an empty swatch outlined in Tertiary Text. Settled states read `Out of range`, `No coverage`, `No data`, `Below threshold`, `Range folded`, or `Unavailable`.
 - **Never shows** `Fresh`, `Stale`, `Playing`, `Paused`, or `Newest`.
 
 ### First-Load Row
@@ -322,10 +325,10 @@ Circles are reserved for the play circle, the scrubber thumb, the credits (i) bu
 - A 232px menu containing a two-part segmented control. The track is a 36px Raised well with 3px padding. The selected segment is Raised High with Primary Text and a contact shadow. The unselected segment is Secondary Text and brightens on hover. The labels are exactly `Smooth` and `Native`. A 12px caption below describes the current mode: `Softer gate edges, same values.` or `Every measured gate, unsmoothed.`. The popover opens focused on the selected mode, and arrow keys move between modes.
 
 ### Colour-Scale Strip
-- A pill at top centre reading `Light` [200px × 6px ramp] `Heavy · dBZ`. It has 10px ticks at 10 to 60 dBZ below the ramp. The ramp spans 5 to 70 dBZ in the renderer's palette with weak-return alpha applied, and a hairline inset keeps it separate from the pill.
+- A pill at top centre reading `Light` [200px × 6px ramp] `Heavy`, balanced so the ramp sits on the window's centre line. It has 10px ticks at 10 to 60 dBZ below the ramp, and the `dBZ` unit closes the tick row at the ramp's right end. The ramp spans 5 to 70 dBZ in the renderer's palette with weak-return alpha applied, and a hairline inset keeps it separate from the pill.
 
 ### Credits
-- MapLibre's compact attribution, restyled as a 28px Instrument Black pill with a 26px circular (i) button (Secondary Text stroke, Raised Hover on hover). When expanded it has a 14px radius, with links in Secondary Text that brighten to Primary Text.
+- MapLibre's compact attribution, restyled as a 28px Instrument Black pill with a 26px circular (i) button (Secondary Text stroke, Raised Hover on hover). When expanded it has a 14px radius and a 12px text inset, with links in Secondary Text that brighten to Primary Text.
 
 ### Inspection Reticle
 - A deliberate map click places a 16px ring with a 1.5px white stroke and four ticks that stop short of the ring, so the sampled gate itself stays visible. A drop shadow keeps it legible on any colour. The value appears only in the playback row. There is no tooltip island. Escape clears the point.

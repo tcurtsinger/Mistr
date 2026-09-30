@@ -416,11 +416,13 @@ export function RadarChrome({
             >
               {sample.kind === "hint" ? <InspectIcon /> : null}
               {sample.valueDbz !== undefined ? (
-                <span
-                  aria-hidden="true"
-                  className="sample-swatch"
-                  style={{ background: reflectivityCss(sample.valueDbz, true) }}
-                />
+                drawnOnMap(sample.valueDbz) ? (
+                  <span
+                    aria-hidden="true"
+                    className="sample-swatch"
+                    style={{ background: reflectivityCss(sample.valueDbz, true) }}
+                  />
+                ) : <span aria-hidden="true" className="sample-swatch sample-swatch--clear" />
               ) : null}
               {sample.label}
             </output>
@@ -624,6 +626,11 @@ function scaleShare(dbz: number) {
   return (dbz - SCALE_MIN_DBZ) / (SCALE_MAX_DBZ - SCALE_MIN_DBZ);
 }
 
+// The weak-return curve leaves some measured values with no colour on the map.
+function drawnOnMap(dbz: number) {
+  return colorForReflectivity(dbz)[3] > 0;
+}
+
 function reflectivityCss(dbz: number, opaque = false) {
   const [red, green, blue, alpha] = colorForReflectivity(dbz);
   return `rgba(${red}, ${green}, ${blue}, ${opaque ? 1 : (alpha / 255).toFixed(3)})`;
@@ -650,9 +657,10 @@ function ColorScale() {
           {SCALE_TICKS.map((dbz) => (
             <span key={dbz} style={{ left: `${scaleShare(dbz) * 100}%` }}>{dbz}</span>
           ))}
+          <span className="color-scale__unit">dBZ</span>
         </span>
       </span>
-      <span className="color-scale__end">Heavy · dBZ</span>
+      <span className="color-scale__end">Heavy</span>
     </div>
   );
 }

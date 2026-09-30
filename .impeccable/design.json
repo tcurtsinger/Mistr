@@ -391,7 +391,7 @@
       "refersTo": "source-tag",
       "description": "Names the painted radar; blue-washed with an arrow while a switch is pending. Fixed 66px minimum.",
       "html": "<span class=\"ds-tag\">National</span> <span class=\"ds-tag ds-tag--pending\">KTLX<span class=\"ds-arrow\">→</span>KFWS</span>",
-      "css": ".ds-tag{min-width:66px;display:inline-flex;align-items:center;justify-content:center;gap:4px;padding:1px 8px;border-radius:999px;background:rgba(255,255,255,.09);color:var(--text);font:600 11.5px/1.45 var(--font);white-space:nowrap}.ds-tag--pending{background:var(--accent-wash);color:var(--accent-ink)}.ds-arrow{color:var(--text-2);font-weight:500}"
+      "css": ".ds-tag{display:inline-flex;align-items:center;justify-content:center;gap:4px;padding:1px 8px;border-radius:999px;background:rgba(255,255,255,.09);color:var(--text);font:600 11.5px/1.45 var(--font);white-space:nowrap}.ds-tag--pending{background:var(--accent-wash);color:var(--accent-ink)}.ds-arrow{color:var(--text-2);font-weight:500}"
     },
     {
       "name": "Tool Rail",
@@ -438,7 +438,7 @@
       "kind": "custom",
       "refersTo": "color-scale",
       "description": "Top-centre pill; in the app the ramp is generated from the renderer's reflectivity palette (approximated here), the only radar colour in the chrome besides the dBZ swatch.",
-      "html": "<div class=\"ds-scale\" role=\"img\" aria-label=\"Reflectivity color scale, 5 to 70 dBZ\"><span>Light</span><span class=\"ds-ramp\"><b></b><em><i style=\"left:7.7%\">10</i><i style=\"left:23.1%\">20</i><i style=\"left:38.5%\">30</i><i style=\"left:53.8%\">40</i><i style=\"left:69.2%\">50</i><i style=\"left:84.6%\">60</i></em></span><span>Heavy · dBZ</span></div>",
+      "html": "<div class=\"ds-scale\" role=\"img\" aria-label=\"Reflectivity color scale, 5 to 70 dBZ\"><span>Light</span><span class=\"ds-ramp\"><b></b><em><i style=\"left:7.7%\">10</i><i style=\"left:23.1%\">20</i><i style=\"left:38.5%\">30</i><i style=\"left:53.8%\">40</i><i style=\"left:69.2%\">50</i><i style=\"left:84.6%\">60</i><i style=\"right:0;transform:none\">dBZ</i></em></span><span>Heavy</span></div>",
       "css": ".ds-scale{display:inline-flex;align-items:center;gap:10px;padding:6px 14px 5px;border:1px solid var(--line);background:var(--surface);box-shadow:var(--shadow);border-radius:999px;color:var(--text-2);font:11px/1.2 var(--font)}.ds-ramp{width:200px}.ds-ramp b{display:block;height:6px;border-radius:3px;background:linear-gradient(90deg,rgba(64,96,128,.2),#4fb0c6 12%,#16c11c 25%,#0a8f12 40%,#f6e300 50%,#f28a00 62%,#e3001b 72%,#b4003f 82%,#e04bff 92%,#f6f6f6);box-shadow:inset 0 0 0 1px var(--line)}.ds-ramp em{position:relative;display:block;height:12px;margin-top:2px;color:var(--text-3);font:normal 10px var(--font);font-variant-numeric:tabular-nums}.ds-ramp i{position:absolute;font-style:normal;transform:translateX(-50%)}"
     },
     {
