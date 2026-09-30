@@ -95,7 +95,7 @@ async function captureViewport() {
     };
     const inside = value => value.left >= 0 && value.top >= 0
       && value.right <= innerWidth && value.bottom <= innerHeight;
-    const persistent = [...document.querySelectorAll('.context-bar,.playback-bar')].map(rect);
+    const persistent = [...document.querySelectorAll('.radar-rail,.playback-bar')].map(rect);
     const visibleControls = [...document.querySelectorAll('button,input')].filter(element => {
       const style = getComputedStyle(element);
       const value = rect(element);
@@ -112,7 +112,7 @@ async function captureViewport() {
         const value = rect(element);
         return element.type !== 'range' && (value.width < 24 || value.height < 24);
       }).map(element => element.getAttribute('aria-label') || element.textContent.trim()),
-      toolbarTargetSizes:[...document.querySelectorAll('.context-tool')].map(element => {
+      toolbarTargetSizes:[...document.querySelectorAll('.rail-button')].map(element => {
         const value=rect(element);
         return {name:element.getAttribute('aria-label'),width:value.width,height:value.height};
       }),
@@ -146,7 +146,7 @@ async function exerciseKeyboard() {
   await pressKey("ArrowRight", "ArrowRight", 39);
   await delay(20);
   const toolbarViewFocus = await evaluate("document.activeElement?.getAttribute('aria-label')");
-  const viewTooltip = await evaluate("document.querySelector('.context-tooltip[role=tooltip]')?.textContent?.trim() ?? null");
+  const viewTooltip = await evaluate("document.querySelector('.chrome-tooltip[role=tooltip]')?.textContent?.trim() ?? null");
   await pressKey("Home", "Home", 36);
   const toolbarHomeFocus = await evaluate("document.activeElement?.getAttribute('aria-label')");
 
@@ -228,7 +228,7 @@ async function captureAccessibility() {
       unnamedInteractive:${JSON.stringify(unnamedInteractive)},
       mapTabIndex:map?.tabIndex ?? null,
       mapAccessibleName:map?.getAttribute('aria-label') || document.querySelector('.map-surface')?.getAttribute('aria-label'),
-      toolbarRole:document.querySelector('.context-bar')?.getAttribute('role') ?? null,
+      toolbarRole:document.querySelector('.radar-rail')?.getAttribute('role') ?? null,
       contextHasPopup:context?.getAttribute('aria-haspopup') ?? null,
       contextAccessibleName:context?.getAttribute('aria-label') ?? null,
       displayedSite:context?.dataset.displayedSite ?? null,

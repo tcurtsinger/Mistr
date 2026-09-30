@@ -47,3 +47,6 @@ src-tauri/icons/icon.icns
 .DS_Store
 Thumbs.db
 *.log
+
+# Impeccable review captures are local evidence, not repository files.
+.impeccable/review/

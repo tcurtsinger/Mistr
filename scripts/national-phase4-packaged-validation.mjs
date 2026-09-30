@@ -436,7 +436,7 @@ function stablePlaybackChrome(chrome) {
     && stableRect(chrome.telemetryMaxRectDelta)
     && stableRect(chrome.sampleReadoutMaxRectDelta)
     && chrome.distinctAnnouncements?.length === 1
-    && ["", "PLAYING"].includes(chrome.distinctAnnouncements[0]);
+    && ["", "Playing"].includes(chrome.distinctAnnouncements[0]);
 }
 
 function zeroActivity(activity) {

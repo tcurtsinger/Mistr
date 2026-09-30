@@ -68,7 +68,7 @@ function validReport() {
     detail: { workingSet: { manifest: { presentationFactor: 1 }, coverage: { kind: "complete_domain" }, chunkCount: DRAWABLE, receipt: { ...nativeReceipt } }, renderer: { residentChunkCount: DRAWABLE, fallbackChunkCount: 0, coverageComplete: true } },
     modeEvidence: { native: { displayMode: "native", ...identity }, smooth: { displayMode: "smooth", ...identity }, pixels: { changedPixels: 100, changedRatio: 0.01 } },
     contextReset: { before: { contextEpoch: 1 }, receipt: { ...nativeReceipt, contextEpoch: 2 }, after: { status: "painted", fallbackChunkCount: 0, residentChunkCount: DRAWABLE, maximumUploadSliceMs: 1 } },
-    sourceUi: { paintedSource: "national", requestedSource: null, accessibleName: "Choose radar source. National CONUS is displayed.", nationalChecked: "true", siteChecked: "false", supportingCopy: "NATIONAL COVERS CONUS", overflow: false, panelWithinViewport: true, reducedMotion: true, forcedColors: true, focusedChoice: "National" },
+    sourceUi: { paintedSource: "national", requestedSource: null, accessibleName: "Choose radar source. National CONUS is displayed.", nationalCurrent: "true", nationalFirst: true, overflow: false, panelWithinViewport: true, reducedMotion: true, forcedColors: true, focusedControl: "Search radar sites" },
     transferSnapshot: { creditLimit: 2, heldCredits: 0, inFlightCredits: 0 },
     restoredSite: { sourceState: { painted: { source: { kind: "site", siteIcao: "KTLX" } }, transition: null }, ui: { paintedSource: "site", displayedSite: "KTLX" }, display: { lastComplete: { observationId: "site", site: "KTLX" } } },
   };
