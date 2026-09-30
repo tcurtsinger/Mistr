@@ -264,6 +264,12 @@ The packaged Windows prototype now exercises the real `WEBGL_lose_context` path 
 
 Evidence: [`phase-reports/PHASE_6_N0S_AND_CONTEXT_RECOVERY.md`](phase-reports/PHASE_6_N0S_AND_CONTEXT_RECOVERY.md).
 
+### MapLibre style release on context loss (2026-09-29)
+
+MapLibre 6.11.2 (and its `main` at the time) destroys its style when the context is lost and builds a new one from the saved stylesheet when it is restored, but `Style.destroy()` never unsubscribes the style from the global RTL text plugin emitter; only `Style._remove()` does. Every lost context therefore kept the old style alive, with its tiles and the tile loads it had in flight. The Phase 4 gate loses the context once per stability run, and its stabilized heap grew by about 4.7 MB per run at 4K (91.6 to 110.7 MB over five runs), with one more retained style and 15 more unresolved worker requests each time; that sat just under the gate's 5 MiB allowance and occasionally failed it.
+
+`src/mapContextLoss.ts` captures the style as the event reaches the canvas container, before MapLibre's canvas listener destroys it, and once MapLibre reports the loss calls `_remove(false)`, which after `destroy()` only unsubscribes the style and leaves the shared worker pool alone. A test fails if a MapLibre upgrade removes `Style.prototype._remove`; at that point check whether `destroy()` unsubscribes itself. With the release, five 4K runs hold at 87.7 to 90.5 MB, and the retained styles and pending requests stay constant.
+
 ## 13. Resource replacement
 
 For site/product/elevation changes:
