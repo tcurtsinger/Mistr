@@ -151,7 +151,8 @@ const PROBE_VERTEX_SHADER = `#version 300 es
 in vec2 a_position;
 void main() { gl_Position = vec4(a_position, 0.0, 1.0); }`;
 
-// One pixel per output value, carried out as the float's own bits.
+// One pixel per output value, carried out as the float's own bits in an
+// integer target, which is never dithered, blended, or colour-converted.
 const PROBE_FRAGMENT_SHADER = `#version 300 es
 precision highp float;
 precision highp int;
@@ -163,7 +164,7 @@ uniform float u_latitudes[${PROBE_LATITUDES_DEGREES.length}];
 uniform vec3 u_radar_unit;
 uniform vec3 u_radar_east;
 uniform vec3 u_radar_north;
-out vec4 frag_color;
+out uvec4 frag_bits;
 void main() {
   int column = int(gl_FragCoord.x);
   float value;
@@ -175,13 +176,7 @@ void main() {
   } else {
     value = mercator_latitude(u_latitudes[column]);
   }
-  uint bits = floatBitsToUint(value);
-  frag_color = vec4(
-    float(bits & 255u),
-    float((bits >> 8) & 255u),
-    float((bits >> 16) & 255u),
-    float(bits >> 24)
-  ) / 255.0;
+  frag_bits = uvec4(floatBitsToUint(value), 0u, 0u, 1u);
 }`;
 
 function compile(gl: WebGL2RenderingContext, type: number, source: string) {
@@ -204,7 +199,7 @@ export function probeRadarGeometry(
   const canvas = createCanvas();
   canvas.width = width;
   canvas.height = 1;
-  const gl = canvas.getContext("webgl2", { antialias: false, preserveDrawingBuffer: true });
+  const gl = canvas.getContext("webgl2", { antialias: false });
   if (!gl) throw new Error("geometry probe requires WebGL2");
   try {
     const debug = gl.getExtension("WEBGL_debug_renderer_info");
@@ -224,12 +219,23 @@ export function probeRadarGeometry(
     const position = gl.getAttribLocation(program, "a_position");
     gl.enableVertexAttribArray(position);
     gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
+    const target = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, target);
+    gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA32UI, width, 1);
+    const framebuffer = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, target, 0);
+    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+      throw new Error("geometry probe could not attach its integer target");
+    }
     gl.viewport(0, 0, width, 1);
-    const pixels = new Uint8Array(width * 4);
+    const pixels = new Uint32Array(width * 4);
+    const bits = new Uint32Array(width);
     const readValues = (count: number) => {
       gl.drawArrays(gl.TRIANGLES, 0, 6);
-      gl.readPixels(0, 0, width, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
-      return Array.from(new Float32Array(pixels.buffer, 0, count));
+      gl.readPixels(0, 0, width, 1, gl.RGBA_INTEGER, gl.UNSIGNED_INT, pixels);
+      for (let column = 0; column < count; column += 1) bits[column] = pixels[column * 4];
+      return Array.from(new Float32Array(bits.buffer, 0, count));
     };
     const uniform = (name: string) => gl.getUniformLocation(program, name);
 
