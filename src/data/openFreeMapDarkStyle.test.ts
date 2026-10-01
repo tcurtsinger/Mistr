@@ -1,4 +1,4 @@
-import { expression, validateStyleMin } from "@maplibre/maplibre-gl-style-spec";
+import { expression, featureFilter, validateStyleMin } from "@maplibre/maplibre-gl-style-spec";
 import type { StyleSpecification } from "maplibre-gl";
 import { describe, expect, it } from "vitest";
 import { RADAR_CONTEXT_ANCHOR_LAYER_ID } from "./radarMapContext";
@@ -89,7 +89,7 @@ describe("quiet operational radar map context", () => {
       "highway_name_other",
       "highway_name_motorway",
       "highway_ref_us",
-      "highway_ref_state",
+      "highway_ref_other",
       "place_village_context",
       "place_town_context",
       "place_city",
@@ -351,11 +351,11 @@ describe("quiet operational radar map context", () => {
   });
 
   it("labels routes with one normalized identifier", () => {
-    const routeLayers = ["highway_name_motorway", "highway_ref_us", "highway_ref_state"];
+    const routeLayers = ["highway_name_motorway", "highway_ref_us", "highway_ref_other"];
     const fields = routeLayers.map((id) => JSON.stringify(layout(id)["text-field"]));
     expect(new Set(fields).size).toBe(1);
     expect(layer("highway_ref_us").minzoom).toBe(8);
-    expect(layer("highway_ref_state").minzoom).toBe(10);
+    expect(layer("highway_ref_other").minzoom).toBe(10);
 
     const index = layers.findIndex((candidate) => candidate.id === "highway_ref_us");
     const parsed = expression.createExpression(
@@ -374,5 +374,33 @@ describe("quiet operational radar map context", () => {
     expect(label({ ref: "SR 414 Toll;SR 429 Toll", network: "road" })).toBe("SR 414");
     expect(label({ ref: "I 595 EXPR", network: "road" })).toBe("I-595");
     expect(label({ ref: "US 17 Truck;US 92 Truck", network: "road" })).toBe("US 17 Truck");
+  });
+
+  it("gives every trunk, primary, and motorway ref exactly one route layer", () => {
+    const filters = Object.fromEntries(
+      ["highway_name_motorway", "highway_ref_us", "highway_ref_other"].map((id) => [
+        id,
+        featureFilter(
+          filter(id) as never,
+          `layers[${layers.findIndex((candidate) => candidate.id === id)}].filter`,
+        ),
+      ]),
+    );
+    const layersFor = (properties: Record<string, string>) => Object.entries(filters)
+      .filter(([, compiled]) => compiled.filter(
+        { zoom: 12 },
+        { type: 2, properties } as never,
+      ))
+      .map(([id]) => id);
+    expect(layersFor({ class: "trunk", network: "us-highway", ref: "50" })).toEqual(["highway_ref_us"]);
+    expect(layersFor({ class: "primary", network: "us-state", ref: "96" })).toEqual(["highway_ref_other"]);
+    expect(layersFor({ class: "trunk", network: "road", ref: "US 17 Truck;US 92 Truck" }))
+      .toEqual(["highway_ref_other"]);
+    expect(layersFor({ class: "primary", ref: "CR 5" })).toEqual(["highway_ref_other"]);
+    expect(layersFor({ class: "motorway", network: "road", ref: "SR 408 Toll" }))
+      .toEqual(["highway_name_motorway"]);
+    // No ref, or an exit number, gets no route label.
+    expect(layersFor({ class: "trunk", network: "us-highway" })).toEqual([]);
+    expect(layersFor({ class: "motorway", subclass: "junction", ref: "74A" })).toEqual([]);
   });
 });
