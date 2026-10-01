@@ -26,7 +26,7 @@ describe("Radar custom-layer shader contract", () => {
 
   it("matches CPU half-gate, missing-radial, and status semantics", () => {
     const fragment = radarShaderSources.fragment;
-    expect(fragment).toContain("gateCoordinate < -0.5");
+    expect(fragment).toContain("gateCoordinate >= -0.5");
     expect(fragment).toContain("float(u_gate_count) - 0.5");
     expect(fragment).toContain("encodedRadial == uint(0)");
     expect(fragment).toContain("bearingDifference > radialMetadata.g");
@@ -36,18 +36,34 @@ describe("Radar custom-layer shader contract", () => {
     expect(fragment).toContain("status == uint(2)");
   });
 
-  it("smooths only valid reflectivity neighbors without bridging masks or radial gaps", () => {
+  it("paints the nearer of two adjacent radials in both modes and keeps missing radials open", () => {
+    const fragment = radarShaderSources.fragment;
+    expect(fragment).toContain("centerSeparation <= halfWidths * 1.5 + 0.000001");
+    expect(fragment).toContain("if (!safelyAdjacent && bearingDifference > radialMetadata.g) discard");
+    expect(fragment).toContain("if (safelyAdjacent && bearingDifference > 0.5 * centerSeparation)");
+    expect(fragment).not.toContain("u_smooth_display == 0 && bearingDifference");
+    expect(fragment.indexOf("bearingDifference > 0.5 * centerSeparation"))
+      .toBeLessThan(fragment.indexOf("bool smoothDisplay"));
+  });
+
+  it("smooths valid reflectivity neighbors and fades by their coverage", () => {
     const fragment = radarShaderSources.fragment;
     expect(fragment).toContain("uniform int u_smooth_display");
     expect(fragment).toContain("vec4 validGateColor");
     expect(fragment).toContain("status != uint(0)");
-    expect(fragment).toContain("centerSeparation <= coverage * 1.5 + 0.000001");
-    expect(fragment).toContain("if (!safelyAdjacent && bearingDifference > radialMetadata.g) discard");
-    expect(fragment).toContain("float totalWeight = weight00 + weight01 + weight10 + weight11");
-    expect(fragment.indexOf("if (u_smooth_display == 0 && bearingDifference"))
+    // Invalid cells are transparent and the blend is not renormalized, so
+    // the valid share of the footprint is the opacity.
+    expect(fragment).not.toContain("totalWeight");
+    expect(fragment).not.toContain("smoothValidColor");
+    // Range folding stays categorical; a below-threshold center no longer cuts a hole in Smooth.
+    expect(fragment.indexOf("if (status == uint(2) && insideSweep)"))
+      .toBeLessThan(fragment.indexOf("if (smoothDisplay) {"));
+    expect(fragment.indexOf("if (smoothDisplay) {"))
       .toBeLessThan(fragment.indexOf("if (status == uint(1)) discard"));
-    expect(fragment.indexOf("if (status == uint(2))"))
-      .toBeLessThan(fragment.indexOf("if (u_smooth_display == 1)"));
+    // Smooth feathers half a gate past each end of the sweep; Native does not.
+    expect(fragment).toContain("!smoothDisplay");
+    expect(fragment).toContain("gateCoordinate < -1.0");
+    expect(fragment).toContain("gateCoordinate > float(u_gate_count)");
   });
 });
 
@@ -528,6 +544,7 @@ function model(index: number): RadarSweepCpuModel {
     offset: 66,
     center: { longitude: -97.27776, latitude: 35.333363 },
     maxRangeM: 230_000,
+    gateSpacingM: 250,
     generation: 1n,
     observedAtUnixMs: 1_700_000_000_000 + index,
   } as RadarSweepCpuModel;

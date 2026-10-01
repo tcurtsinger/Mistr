@@ -88,28 +88,28 @@ float signedAngleDifference(float value, float reference) {
   return mod(value - reference + PI, TWO_PI) - PI;
 }
 
-vec4 validGateColor(int radialIndex, int gateIndex, out float valid) {
+// The premultiplied palette color of a measured cell. Below-threshold,
+// range-folded, and out-of-sweep cells are not measurements, so they are
+// transparent and Smooth never carries a value across them.
+vec4 validGateColor(int radialIndex, int gateIndex) {
   if (
     radialIndex < 0 || radialIndex >= u_radial_count
     || gateIndex < 0 || gateIndex >= u_gate_count
-  ) {
-    valid = 0.0;
-    return vec4(0.0);
-  }
+  ) return vec4(0.0);
   uint status = texelFetch(u_statuses, ivec2(gateIndex, radialIndex), 0).r;
-  if (status != uint(0)) {
-    // Missing/below-threshold and range-folded cells never contribute to a
-    // smoothed value. The authoritative center cell handles range folding
-    // explicitly before smoothing, so smoothing cannot bridge either mask.
-    valid = 0.0;
-    return vec4(0.0);
-  }
+  if (status != uint(0)) return vec4(0.0);
   uint rawCode = texelFetch(u_raw_codes, ivec2(gateIndex, radialIndex), 0).r;
-  valid = 1.0;
   return texelFetch(u_palette, ivec2(int(rawCode), 0), 0);
 }
 
-vec4 smoothValidColor(
+// Smooth reflectivity blends two gates along each of the two nearest radials.
+// Cells that are not measurements are transparent, so the blend of
+// premultiplied colors is the valid neighbors' color faded by the weight they
+// hold (docs/25 section 6). That weight is 1 inside an echo and falls to 0 at
+// the center of the first cell that is not a measurement, so a below-threshold
+// gate inside a storm is a soft dimple, not a hole, and echo edges and the
+// cone of silence feather instead of cutting off.
+vec4 smoothReflectivityColor(
   int radialIndex,
   int neighborRadialIndex,
   float radialWeight,
@@ -118,30 +118,19 @@ vec4 smoothValidColor(
   int lowerGate = int(floor(gateCoordinate));
   int upperGate = lowerGate + 1;
   float gateWeight = fract(gateCoordinate);
-  float lowerWeight = 1.0 - gateWeight;
-  float upperWeight = gateWeight;
-  float currentWeight = 1.0 - radialWeight;
-
-  float valid00;
-  float valid01;
-  float valid10;
-  float valid11;
-  vec4 color00 = validGateColor(radialIndex, lowerGate, valid00);
-  vec4 color01 = validGateColor(radialIndex, upperGate, valid01);
-  vec4 color10 = validGateColor(neighborRadialIndex, lowerGate, valid10);
-  vec4 color11 = validGateColor(neighborRadialIndex, upperGate, valid11);
-  float weight00 = currentWeight * lowerWeight * valid00;
-  float weight01 = currentWeight * upperWeight * valid01;
-  float weight10 = radialWeight * lowerWeight * valid10;
-  float weight11 = radialWeight * upperWeight * valid11;
-  float totalWeight = weight00 + weight01 + weight10 + weight11;
-  if (totalWeight <= 0.0) return vec4(0.0);
-  return (
-    color00 * weight00
-    + color01 * weight01
-    + color10 * weight10
-    + color11 * weight11
-  ) / totalWeight;
+  return mix(
+    mix(
+      validGateColor(radialIndex, lowerGate),
+      validGateColor(radialIndex, upperGate),
+      gateWeight
+    ),
+    mix(
+      validGateColor(neighborRadialIndex, lowerGate),
+      validGateColor(neighborRadialIndex, upperGate),
+      gateWeight
+    ),
+    radialWeight
+  );
 }
 
 void main() {
@@ -157,9 +146,40 @@ void main() {
   if (encodedRadial == uint(0)) discard;
   int radialIndex = int(encodedRadial - uint(1));
   vec3 radialMetadata = texelFetch(u_radial_metadata, ivec2(radialIndex, 0), 0).rgb;
-  float bearingDifference = abs(bearing - radialMetadata.r);
-  bearingDifference = min(bearingDifference, TWO_PI - bearingDifference);
-  if (u_smooth_display == 0 && bearingDifference > radialMetadata.g) discard;
+  float signedDifference = signedAngleDifference(bearing, radialMetadata.r);
+  float bearingDifference = abs(signedDifference);
+  int neighborRadialIndex = signedDifference >= 0.0
+    ? (radialIndex + 1) % u_radial_count
+    : (radialIndex + u_radial_count - 1) % u_radial_count;
+  vec3 neighborMetadata = texelFetch(
+    u_radial_metadata,
+    ivec2(neighborRadialIndex, 0),
+    0
+  ).rgb;
+  // Measured toward the bearing, so a neighbor reached by wrapping around a
+  // partial sweep, which lies behind the radial, is never adjacent.
+  float neighborOffset = signedAngleDifference(neighborMetadata.r, radialMetadata.r);
+  float centerSeparation = signedDifference >= 0.0 ? neighborOffset : -neighborOffset;
+  // Native beam widths and encoded centers can differ by a few hundredths
+  // of a degree, which would expose false hairline seams between otherwise
+  // consecutive measurements. Close those normal seams in both modes, but
+  // reject a gap large enough to represent a genuinely missing radial.
+  // coveringRadial in geo.ts applies the same rule to inspection.
+  float halfWidths = radialMetadata.g + neighborMetadata.g;
+  bool safelyAdjacent = centerSeparation > 0.0
+    && centerSeparation <= halfWidths * 1.5 + 0.000001;
+  if (!safelyAdjacent && bearingDifference > radialMetadata.g) discard;
+  if (safelyAdjacent && bearingDifference > 0.5 * centerSeparation) {
+    // The neighbor's center is nearer, so the bearing is in its beam.
+    int nearerRadialIndex = neighborRadialIndex;
+    neighborRadialIndex = radialIndex;
+    radialIndex = nearerRadialIndex;
+    vec3 nearerMetadata = neighborMetadata;
+    neighborMetadata = radialMetadata;
+    radialMetadata = nearerMetadata;
+    bearingDifference = abs(centerSeparation - bearingDifference);
+  }
+  bool smoothDisplay = u_smooth_display == 1;
   float elevation = radialMetadata.b;
   float groundAngle = groundRangeM / EFFECTIVE_EARTH_RADIUS_M;
   float beamDenominator = cos(elevation + groundAngle);
@@ -167,41 +187,26 @@ void main() {
   float slantRangeM = EFFECTIVE_EARTH_RADIUS_M * sin(groundAngle)
     / beamDenominator;
   float gateCoordinate = (slantRangeM - u_first_gate_center_m) / u_gate_spacing_m;
-  if (gateCoordinate < -0.5 || gateCoordinate > float(u_gate_count) - 0.5) {
-    discard;
-  }
+  bool insideSweep = gateCoordinate >= -0.5
+    && gateCoordinate <= float(u_gate_count) - 0.5;
+  // Smooth feathers half a gate past each end of the sweep, the same margin
+  // it feathers past any echo edge. Native keeps the measured footprint.
+  if (!insideSweep && (
+    !smoothDisplay
+    || gateCoordinate < -1.0
+    || gateCoordinate > float(u_gate_count)
+  )) discard;
   int gateIndex = clamp(int(floor(gateCoordinate + 0.5)), 0, u_gate_count - 1);
   uint status = texelFetch(u_statuses, ivec2(gateIndex, radialIndex), 0).r;
-  if (status == uint(1)) discard;
-  if (status == uint(2)) {
+  if (status == uint(2) && insideSweep) {
     frag_color = u_range_folded_color * u_opacity;
     return;
   }
-  if (u_smooth_display == 1) {
-    float signedDifference = signedAngleDifference(bearing, radialMetadata.r);
-    int neighborRadialIndex = signedDifference >= 0.0
-      ? (radialIndex + 1) % u_radial_count
-      : (radialIndex + u_radial_count - 1) % u_radial_count;
-    vec3 neighborMetadata = texelFetch(
-      u_radial_metadata,
-      ivec2(neighborRadialIndex, 0),
-      0
-    ).rgb;
-    float centerSeparation = abs(
-      signedAngleDifference(neighborMetadata.r, radialMetadata.r)
-    );
-    // Native beam widths and encoded centers can differ by a few hundredths
-    // of a degree, which would expose false hairline seams between otherwise
-    // consecutive measurements. Close those normal seams, but reject a gap
-    // large enough to represent a genuinely missing radial.
-    float coverage = radialMetadata.g + neighborMetadata.g;
-    bool safelyAdjacent = centerSeparation > 0.0
-      && centerSeparation <= coverage * 1.5 + 0.000001;
-    if (!safelyAdjacent && bearingDifference > radialMetadata.g) discard;
+  if (smoothDisplay) {
     float radialWeight = safelyAdjacent
-      ? clamp(abs(signedDifference) / centerSeparation, 0.0, 1.0)
+      ? clamp(bearingDifference / centerSeparation, 0.0, 1.0)
       : 0.0;
-    frag_color = smoothValidColor(
+    frag_color = smoothReflectivityColor(
       radialIndex,
       neighborRadialIndex,
       radialWeight,
@@ -212,6 +217,7 @@ void main() {
     frag_color *= u_opacity;
     return;
   }
+  if (status == uint(1)) discard;
   uint rawCode = texelFetch(u_raw_codes, ivec2(gateIndex, radialIndex), 0).r;
   frag_color = texelFetch(u_palette, ivec2(int(rawCode), 0), 0);
   if (frag_color.a <= 0.0) discard;
@@ -1711,9 +1717,10 @@ export function validateResidentModels(models: readonly RadarSweepCpuModel[]): v
 
 function mercatorQuadVertices(models: readonly RadarSweepCpuModel[]): Float32Array {
   const primary = models[0];
+  // Smooth feathers up to half a gate past the last gate.
   const bounds = buildMercatorBounds(
     primary.center,
-    Math.max(...models.map((model) => model.maxRangeM)),
+    Math.max(...models.map((model) => model.maxRangeM + model.gateSpacingM)),
   );
   return new Float32Array([
     bounds.west, bounds.north,

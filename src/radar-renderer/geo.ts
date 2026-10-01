@@ -4,6 +4,8 @@ export const EARTH_MEAN_RADIUS_M = 6_371_008.8;
 // Py-ART/Doviak-Zrnic standard-atmosphere beam model uses 4/3 of 6371 km.
 export const EFFECTIVE_EARTH_RADIUS_M = 4 / 3 * 6_371_000;
 export const AZIMUTH_LOOKUP_SIZE = 4_096;
+// The shader's adjacency tolerance, 1e-6 rad, in degrees.
+const RADIAL_ADJACENCY_TOLERANCE_DEGREES = 1e-6 * 180 / Math.PI;
 const MAX_MERCATOR_LATITUDE = 85.051_128_779_806_6;
 
 export interface LngLatPoint {
@@ -150,18 +152,68 @@ export function buildAzimuthLookup(
   }
   const lookup = new Uint16Array(size);
   const halfBin = 180 / size;
+  const azimuths = radials.map((radial) => radial.azimuthDegrees);
+  const beamWidths = radials.map((radial) => radial.beamWidthDegrees);
   for (let bin = 0; bin < size; bin += 1) {
     const azimuth = (bin + 0.5) * 360 / size;
     const radialIndex = nearestRadial(radials, azimuth);
     const radial = radials[radialIndex];
     if (
       angularDistanceDegrees(azimuth, radial.azimuthDegrees)
-      <= radial.beamWidthDegrees / 2 + halfBin
+        <= radial.beamWidthDegrees / 2 + halfBin
+      || coveringRadial(azimuths, beamWidths, radialIndex, azimuth) !== null
     ) {
       lookup[bin] = radialIndex + 1;
     }
   }
   return lookup;
+}
+
+/**
+ * Whether two neighboring radials are consecutive measurements whose beams
+ * should meet. Native beam widths and encoded centers can differ by a few
+ * hundredths of a degree, which leaves hairline seams between beams that are
+ * not missing data. Centers more than 1.5 mean beam widths apart mark a
+ * genuinely missing radial, and that gap stays open.
+ */
+export function radialsAdjacent(
+  separationDegrees: number,
+  beamWidthDegrees: number,
+  neighborBeamWidthDegrees: number,
+): boolean {
+  return separationDegrees > 0
+    && separationDegrees
+      <= (beamWidthDegrees + neighborBeamWidthDegrees) / 2 * 1.5
+        + RADIAL_ADJACENCY_TOLERANCE_DEGREES;
+}
+
+/**
+ * The radial that covers a bearing, or null where none does. Starting from
+ * the lookup's radial, this is the nearer of it and its neighbor on the
+ * bearing's side when the two are adjacent, so a seam between beams belongs
+ * to whichever center is closer; otherwise it is the lookup's radial within
+ * its own beam. RadarCustomLayer's shader paints by the same rule, so
+ * inspection names the gate under the painted pixel.
+ */
+export function coveringRadial(
+  azimuths: ArrayLike<number>,
+  beamWidths: ArrayLike<number>,
+  radialIndex: number,
+  bearingDegrees: number,
+): number | null {
+  const count = azimuths.length;
+  const offset = signedAngleDegrees(bearingDegrees, azimuths[radialIndex]);
+  const neighborIndex = offset >= 0
+    ? (radialIndex + 1) % count
+    : (radialIndex + count - 1) % count;
+  // Measured toward the bearing, so a neighbor reached by wrapping around a
+  // partial sweep, which lies behind the radial, is never adjacent.
+  const neighborOffset = signedAngleDegrees(azimuths[neighborIndex], azimuths[radialIndex]);
+  const separation = offset >= 0 ? neighborOffset : -neighborOffset;
+  if (!radialsAdjacent(separation, beamWidths[radialIndex], beamWidths[neighborIndex])) {
+    return Math.abs(offset) <= beamWidths[radialIndex] / 2 ? radialIndex : null;
+  }
+  return Math.abs(offset) > separation / 2 ? neighborIndex : radialIndex;
 }
 
 export function radialFromLookup(
@@ -235,6 +287,12 @@ export function angularDistanceDegrees(left: number, right: number): number {
 
 export function normalizeBearing(value: number): number {
   return ((value % 360) + 360) % 360;
+}
+
+/** The angle from reference to value, in (-180, 180]. */
+function signedAngleDegrees(value: number, reference: number): number {
+  const difference = normalizeBearing(value - reference);
+  return difference > 180 ? difference - 360 : difference;
 }
 
 export function normalizeLongitude(value: number): number {

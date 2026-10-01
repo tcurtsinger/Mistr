@@ -2,8 +2,8 @@ import type { PackedSweep } from "../packed-sweep/packedSweep";
 import {
   AZIMUTH_LOOKUP_SIZE,
   angularDistanceDegrees,
-  bearingWithinRadial,
   buildAzimuthLookup,
+  coveringRadial,
   destinationPoint,
   gateIndexForRange,
   groundRangeForSlantRange,
@@ -179,15 +179,17 @@ export function interrogateLngLat(
   if (measured.rangeM > model.maxRangeM) {
     return null;
   }
-  const radialIndex = radialFromLookup(model.azimuthLookup, measured.bearingDegrees);
-  if (radialIndex === null) {
+  const lookupRadialIndex = radialFromLookup(model.azimuthLookup, measured.bearingDegrees);
+  if (lookupRadialIndex === null) {
     return null;
   }
-  if (!bearingWithinRadial(
+  const radialIndex = coveringRadial(
+    model.azimuths,
+    model.beamWidths,
+    lookupRadialIndex,
     measured.bearingDegrees,
-    model.azimuths[radialIndex],
-    model.beamWidths[radialIndex],
-  )) {
+  );
+  if (radialIndex === null) {
     return null;
   }
   const radialMaximumGroundRangeM = groundRangeForSlantRange(
