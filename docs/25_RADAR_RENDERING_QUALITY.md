@@ -58,7 +58,12 @@ Palette anchors may interpolate color and alpha for presentation, but each looku
 
 Radar is inserted at the explicit `highway_major_context_casing` boundary in the bundled style rather than below the map's first symbol. That boundary creates two intentional graphs without a second provider or global radar-opacity reduction.
 
-The base plane keeps land, water, parks, and wooded areas within a narrow matte-charcoal range. Water remains recognizable without becoming a large bright field. Mistr deliberately does not outline the `water` source-layer polygons: the [OpenMapTiles water schema](https://openmaptiles.org/schema/#water) explains that these polygons are split for rendering and that their generated boundaries can prevent reliable border styling. Removing the outline prevents Lake Mead, rivers, reservoirs, ocean partitions, and tile-generalized shorelines from becoming bold seams that disappear and return while zooming. Important cities remain the strongest neutral labels; state labels use natural case and quieter contrast so administrative text does not compete with precipitation.
+The base plane keeps land, water, parks, and wooded areas within a narrow matte-charcoal range. Water is a cool navy a step from the land, recognizable without becoming a large bright field.
+
+Only two kinds of water are outlined, both above radar. The [OpenMapTiles water schema](https://openmaptiles.org/schema/#water) warns that its polygons are split for rendering, so an outline of every water polygon would turn rivers, reservoirs, Lake Mead, and tile-generalized shorelines into seams that disappear and return while zooming.
+
+- **The coastline** is the `ocean` class from the full-detail tiles. Inspection of OpenFreeMap tiles from z3 to z11 on the Atlantic, Gulf, Pacific, and New England coasts found no internal split seams in ocean polygons. The only cut edges lie in the tile buffer, which MapLibre clips away. The line therefore follows the water fill exactly at every zoom.
+- **Large-lake shores** are the `lake` class from a second source on the same tiles, capped at z7 (`openmaptiles_lakes`). Lake features carry no size, but the z7 tiles keep only large lakes, so a pond appearing at z10 never gets a ring over the radar. On Lake Michigan, the z7 shore sits a median 70 m from the z12 shore, about 1–2 px at storm zoom. Important cities remain the strongest neutral labels; state labels use natural case and quieter contrast so administrative text does not compete with precipitation.
 
 Below radar:
 
@@ -69,8 +74,8 @@ Below radar:
 Above radar:
 
 - motorways and primary/trunk roads only, filtered together and rendered through one continuous dark-support/neutral-center treatment rather than class-specific zoom bands; far regional zooms retain coherent interstate and U.S.-highway networks, then fade in state and unnetworked routes with the detailed source graph;
-- country and state boundaries; and
-- motorway/major-route identifiers plus important city, state, and country labels.
+- the coastline and large-lake shores, then county, state, and country boundaries, each over a dark casing so it holds over bright echo as well as over the dark map. Counties (`admin_level` 6) start at z9, where the tiles first carry them, and fade in over 0.6 zoom. Maritime limits are excluded from states and from all casings, because state-waters and territorial-sea lines traced a second coast offshore; a country border through a lake stays, faint and uncased; and
+- motorway/major-route identifiers plus important city, state, and country labels, above every line.
 
 The above-radar set is deliberately small. Its lines remain recognizable when sought but cannot become a pale wireframe or fragment the storm into equally salient road geometry. The [OpenMapTiles transportation schema](https://openmaptiles.org/schema/#transportation) can substitute generalized major-highway data at lower zooms and derives both road class and network from source hierarchy. Mistr therefore gives motorway, trunk, and primary segments the same continuously interpolated paint treatment; a route cannot disappear or become suddenly bold merely because its tile classification crosses one of those classes. At far regional zoom, only `us-interstate` and `us-highway` networks are admitted. State and unnetworked routes fade in across the detailed-source transition, preventing short generalized fragments such as the isolated Route 178 segment near Lake Isabella from appearing as white scratches. Local road classes share a gradual below-radar opacity curve rather than a hard layer threshold. Important cities outrank route lines, missing point-icon sprites are not required, and minor context remains useful on the unobscured map beneath the radar.
 
