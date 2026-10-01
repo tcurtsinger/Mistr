@@ -45,13 +45,23 @@ describe("quiet operational radar map context", () => {
   it("remains a valid bundled MapLibre style with unique layers and no new provider", () => {
     expect(validateStyleMin(style)).toEqual([]);
     expect(new Set(layers.map((candidate) => candidate.id)).size).toBe(layers.length);
-    expect(Object.keys(style.sources).sort()).toEqual(["ne2_shaded", "openmaptiles"]);
+    expect(Object.keys(style.sources).sort()).toEqual([
+      "ne2_shaded",
+      "openmaptiles",
+      "openmaptiles_lakes",
+    ]);
+    // Lakes read the same tiles, capped at z7 where only large lakes exist.
+    expect(style.sources.openmaptiles_lakes).toEqual({
+      type: "vector",
+      url: (style.sources.openmaptiles as { url: string }).url,
+      maxzoom: 7,
+    });
   });
 
   it("uses close matte tones for the land-water base plane", () => {
     expect(paint("background")["background-color"]).toBe("rgb(12,12,12)");
-    expect(paint("water")["fill-color"]).toBe("rgb(18,20,24)");
-    expect(paint("waterway")["line-color"]).toBe("rgb(18,20,24)");
+    expect(paint("water")["fill-color"]).toBe("rgb(15,20,28)");
+    expect(paint("waterway")["line-color"]).toBe("rgb(15,20,28)");
     expect(paint("landcover_wood")["fill-color"]).toBe("rgb(20,21,22)");
     expect(paint("landuse_park")["fill-color"]).toBe("rgb(20,21,22)");
   });
@@ -64,11 +74,20 @@ describe("quiet operational radar map context", () => {
     expect(layers.slice(anchorIndex).map((candidate) => candidate.id)).toEqual([
       "highway_major_context_casing",
       "highway_major_context",
+      "water_shoreline_casing",
+      "water_shoreline",
+      "lake_shoreline_casing",
+      "lake_shoreline",
+      "boundary_county_casing",
+      "boundary_county",
+      "boundary_state_casing",
+      "boundary_state",
+      "boundary_country_casing_z0-4",
+      "boundary_country_z0-4",
+      "boundary_country_casing_z5-",
+      "boundary_country_z5-",
       "highway_name_other",
       "highway_name_motorway",
-      "boundary_state",
-      "boundary_country_z0-4",
-      "boundary_country_z5-",
       "place_city",
       "place_city_large",
       "place_state",
@@ -90,14 +109,70 @@ describe("quiet operational radar map context", () => {
     }
   });
 
-  it("never outlines split water polygons as persistent context", () => {
-    expect(layers.filter((candidate) => (
+  it("outlines only the ocean and large lakes, never split inland water", () => {
+    // Ocean polygons carry no internal split seams, so the coast is drawn
+    // from full-detail tiles. Lakes come from the z7-capped source, so ponds,
+    // rivers, and reservoirs that appear at closer zooms never get a ring.
+    const outlines = layers.filter((candidate) => (
       candidate.type === "line"
       && "source-layer" in candidate
       && candidate["source-layer"] === "water"
-    ))).toEqual([]);
+    ));
+    expect(outlines.map((candidate) => [
+      candidate.id,
+      (candidate as { source: string }).source,
+      JSON.stringify(filter(candidate.id)),
+    ])).toEqual([
+      ["water_shoreline_casing", "openmaptiles", expect.stringContaining('["get","class"],"ocean"')],
+      ["water_shoreline", "openmaptiles", expect.stringContaining('["get","class"],"ocean"')],
+      ["lake_shoreline_casing", "openmaptiles_lakes", expect.stringContaining('["get","class"],"lake"')],
+      ["lake_shoreline", "openmaptiles_lakes", expect.stringContaining('["get","class"],"lake"')],
+    ]);
+    // The z7 lake shore drifts off the detailed shore at close zoom, so it
+    // fades out before z12.
+    for (const id of ["lake_shoreline_casing", "lake_shoreline"]) {
+      expect(layer(id).maxzoom).toBe(12);
+      expect(paint(id)["line-opacity"]).toEqual(["interpolate", ["linear"], ["zoom"], 11, 1, 12, 0]);
+    }
     expect(layer(RADAR_CONTEXT_ANCHOR_LAYER_ID).id)
       .toBe("highway_major_context_casing");
+  });
+
+  it("cases every boundary and shoreline so it holds over bright echo", () => {
+    for (const id of [
+      "water_shoreline",
+      "lake_shoreline",
+      "boundary_county",
+      "boundary_state",
+      "boundary_country_z0-4",
+      "boundary_country_z5-",
+    ]) {
+      const casingId = id.startsWith("boundary_country")
+        ? id.replace("boundary_country", "boundary_country_casing")
+        : `${id}_casing`;
+      const index = layers.findIndex((candidate) => candidate.id === id);
+      expect(layers[index - 1].id).toBe(casingId);
+      expect(paint(casingId)["line-color"]).toMatch(/^rgba\(4,5,6,0\.\d+\)$/);
+    }
+    // Counties exist in the tiles only from z9, and fade in there.
+    expect(layer("boundary_county").minzoom).toBe(9);
+    expect(JSON.stringify(filter("boundary_county"))).toContain('["get","admin_level"],6');
+  });
+
+  it("keeps maritime limits from drawing a second coast offshore", () => {
+    const notMaritime = '["!=",["get","maritime"],1]';
+    for (const id of [
+      "boundary_county",
+      "boundary_state",
+      "boundary_state_casing",
+      "boundary_country_casing_z0-4",
+      "boundary_country_casing_z5-",
+    ]) {
+      expect(JSON.stringify(filter(id))).toContain(notMaritime);
+    }
+    // A country border through a lake stays, but faint and uncased.
+    expect(JSON.stringify(paint("boundary_country_z5-")["line-color"]))
+      .toContain('["==",["get","maritime"],1]');
   });
 
   it("uses continuous road treatments instead of hard zoom-band swaps", () => {
