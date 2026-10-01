@@ -134,7 +134,7 @@ Changing modes leaves the selected site, observation identifier, measured time, 
 
 A map inspection always reports the native underlying gate, status, and dBZ for the displayed observation. This is true in both `Smooth` and `Native`.
 
-The application never reverse-engineers a dBZ value from a filtered screen color. A visually blended pixel may sit between native colors, but that intermediate appearance is not labeled as an intermediate measurement. A visually transparent non-positive valid gate may still report its exact native negative dBZ when deliberately inspected. Below-threshold, range-folded, missing, and out-of-coverage inspection results remain explicit.
+The application never reverse-engineers a dBZ value from a filtered screen color. A visually blended pixel may sit between native colors, but that intermediate appearance is not labeled as an intermediate measurement. A visually transparent non-positive valid gate may still report its exact native negative dBZ when deliberately inspected. Below-threshold, range-folded, missing, and out-of-coverage inspection results remain explicit. A below-threshold Site gate and the National mosaic's missing sentinel (raw 9000, -99 dBZ, which the MRMS grid uses for clear sky inside coverage) both read `No echo`, because the radar is working and sees nothing there. Outside the mosaic's coverage, the readout says `No coverage`.
 
 ### Painted position
 

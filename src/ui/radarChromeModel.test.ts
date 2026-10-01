@@ -76,8 +76,11 @@ describe("radar chrome model", () => {
       .toMatchObject({ kind: "value", label: "11.5 dBZ", valueDbz: 11.5 });
     expect(inspectionReadoutPresentation("settled", interrogation("no_coverage")))
       .toMatchObject({ kind: "status", label: "No coverage" });
+    // Clear sky inside coverage is not an outage on either source.
     expect(inspectionReadoutPresentation("settled", interrogation("missing")))
-      .toMatchObject({ kind: "status", label: "No data" });
+      .toMatchObject({ kind: "status", label: "No echo" });
+    expect(inspectionReadoutPresentation("settled", interrogation("below_threshold")))
+      .toMatchObject({ kind: "status", label: "No echo" });
     expect(inspectionReadoutPresentation("settled", null))
       .toMatchObject({ kind: "status", label: "Unavailable" });
     expect(inspectionReadoutPresentation("settled", interrogation("no_coverage")).valueDbz).toBeUndefined();
