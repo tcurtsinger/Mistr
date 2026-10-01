@@ -2,61 +2,41 @@ export const PALETTE_WIDTH = 256;
 
 export type Rgba = readonly [number, number, number, number];
 
-interface PaletteAnchor {
+interface ReflectivityBand {
   dbz: number;
   color: Rgba;
 }
 
-interface OpacityAnchor {
-  dbz: number;
-  alpha: number;
-}
-
-// These anchors pin Mistr to the operational NOAA/NWS SR_BREF
-// `radar_reflectivity` WMS legend captured from the KAMX service on 2026-08-02:
-// https://opengeo.ncep.noaa.gov/geoserver/kamx/wms
-// The legend is a continuous five-dBZ ramp from -25 through 70 dBZ. Mistr keeps
-// those operational RGB thresholds, then applies a separate weak-return
-// visibility curve. Presentation never changes the exact dBZ used by
+// The classic NWS reflectivity color table: one solid color for each 5-dBZ
+// band, starting at the band's lower edge. The RGB values for 5 through 70 dBZ
+// are Py-ART's `NWSRef` (cmweather 0.3.2, in the oracle environment), which
+// follows the WSR-88D operational table; 75 dBZ and above is white. Below
+// 5 dBZ nothing is drawn, as on NWS displays, and every band from 5 dBZ up is
+// fully opaque. Presentation never changes the exact dBZ used by
 // interrogation or playback truth.
-const REFLECTIVITY_ANCHORS: readonly PaletteAnchor[] = [
-  { dbz: -25, color: [145, 137, 105, 255] },
-  { dbz: -20, color: [164, 161, 107, 255] },
-  { dbz: -15, color: [194, 195, 155, 255] },
-  { dbz: -10, color: [193, 197, 180, 255] },
-  { dbz: -5, color: [162, 168, 180, 255] },
-  { dbz: 0, color: [123, 136, 174, 255] },
-  { dbz: 5, color: [83, 106, 163, 255] },
-  { dbz: 10, color: [80, 133, 183, 255] },
-  { dbz: 15, color: [88, 193, 184, 255] },
-  { dbz: 20, color: [48, 214, 91, 255] },
-  { dbz: 25, color: [12, 175, 17, 255] },
-  { dbz: 30, color: [10, 115, 12, 255] },
-  { dbz: 35, color: [132, 160, 4, 255] },
-  { dbz: 40, color: [244, 202, 23, 255] },
-  { dbz: 45, color: [244, 178, 23, 255] },
-  { dbz: 50, color: [208, 8, 8, 255] },
-  { dbz: 55, color: [169, 8, 8, 255] },
-  { dbz: 60, color: [241, 185, 253, 255] },
-  { dbz: 65, color: [241, 116, 253, 255] },
-  { dbz: 70, color: [130, 0, 231, 255] },
+export const REFLECTIVITY_BANDS: readonly ReflectivityBand[] = [
+  { dbz: 5, color: [0, 236, 236, 255] },
+  { dbz: 10, color: [1, 160, 246, 255] },
+  { dbz: 15, color: [0, 0, 246, 255] },
+  { dbz: 20, color: [0, 255, 0, 255] },
+  { dbz: 25, color: [0, 200, 0, 255] },
+  { dbz: 30, color: [0, 144, 0, 255] },
+  { dbz: 35, color: [255, 255, 0, 255] },
+  { dbz: 40, color: [231, 192, 0, 255] },
+  { dbz: 45, color: [255, 144, 0, 255] },
+  { dbz: 50, color: [255, 0, 0, 255] },
+  { dbz: 55, color: [214, 0, 0, 255] },
+  { dbz: 60, color: [192, 0, 0, 255] },
+  { dbz: 65, color: [255, 0, 255, 255] },
+  { dbz: 70, color: [153, 85, 201, 255] },
+  { dbz: 75, color: [255, 255, 255, 255] },
 ];
+export const REFLECTIVITY_BAND_WIDTH_DBZ = 5;
+export const REFLECTIVITY_MIN_DISPLAY_DBZ = REFLECTIVITY_BANDS[0].dbz;
 
-// Level II marks many weak clear-air, biological, sea, and ground returns as
-// valid measurements. Painting all of them fully opaque makes that background
-// dominate both precipitation and map context. This conservative display-only
-// curve hides non-positive returns, lets weak positive returns emerge
-// progressively, and leaves operational precipitation fully opaque from
-// 20 dBZ upward. It does not classify clutter or mutate a measured value.
-const REFLECTIVITY_OPACITY_ANCHORS: readonly OpacityAnchor[] = [
-  { dbz: 0, alpha: 0 },
-  { dbz: 5, alpha: 56 },
-  { dbz: 10, alpha: 120 },
-  { dbz: 15, alpha: 184 },
-  { dbz: 20, alpha: 255 },
-];
-
-export const RANGE_FOLDED_COLOR: Rgba = [144, 91, 211, 220];
+// Range folding is categorical and must never read as a reflectivity band;
+// the NWS 70 dBZ purple is close to the former range-folded violet.
+export const RANGE_FOLDED_COLOR: Rgba = [119, 0, 125, 220];
 export const TRANSPARENT_COLOR: Rgba = [0, 0, 0, 0];
 
 // Product 56 uses categorical velocity thresholds, not the Level II linear
@@ -136,63 +116,20 @@ export function paletteColor(
 }
 
 export function colorForReflectivity(valueDbz: number): Rgba {
+  const band = reflectivityBandIndex(valueDbz);
+  return band < 0 ? TRANSPARENT_COLOR : REFLECTIVITY_BANDS[band].color;
+}
+
+/** The NWS band holding a dBZ value, or -1 below the first band. */
+export function reflectivityBandIndex(valueDbz: number): number {
   if (!Number.isFinite(valueDbz)) {
     throw new RangeError("reflectivity color requires a finite dBZ value");
   }
-
-  const alpha = reflectivityDisplayAlpha(valueDbz);
-  const first = REFLECTIVITY_ANCHORS[0];
-  if (valueDbz <= first.dbz) {
-    return withAlpha(first.color, alpha);
-  }
-
-  for (let index = 1; index < REFLECTIVITY_ANCHORS.length; index += 1) {
-    const upper = REFLECTIVITY_ANCHORS[index];
-    if (valueDbz <= upper.dbz) {
-      const lower = REFLECTIVITY_ANCHORS[index - 1];
-      const progress = (valueDbz - lower.dbz) / (upper.dbz - lower.dbz);
-      return withAlpha(interpolateRgba(lower.color, upper.color, progress), alpha);
-    }
-  }
-
-  return withAlpha(REFLECTIVITY_ANCHORS[REFLECTIVITY_ANCHORS.length - 1].color, alpha);
-}
-
-export function reflectivityDisplayAlpha(valueDbz: number): number {
-  if (!Number.isFinite(valueDbz)) {
-    throw new RangeError("reflectivity opacity requires a finite dBZ value");
-  }
-
-  const first = REFLECTIVITY_OPACITY_ANCHORS[0];
-  if (valueDbz <= first.dbz) return first.alpha;
-
-  for (let index = 1; index < REFLECTIVITY_OPACITY_ANCHORS.length; index += 1) {
-    const upper = REFLECTIVITY_OPACITY_ANCHORS[index];
-    if (valueDbz <= upper.dbz) {
-      const lower = REFLECTIVITY_OPACITY_ANCHORS[index - 1];
-      const progress = (valueDbz - lower.dbz) / (upper.dbz - lower.dbz);
-      return interpolateChannel(lower.alpha, upper.alpha, progress);
-    }
-  }
-
-  return REFLECTIVITY_OPACITY_ANCHORS[REFLECTIVITY_OPACITY_ANCHORS.length - 1].alpha;
-}
-
-function interpolateRgba(lower: Rgba, upper: Rgba, progress: number): Rgba {
-  return [
-    interpolateChannel(lower[0], upper[0], progress),
-    interpolateChannel(lower[1], upper[1], progress),
-    interpolateChannel(lower[2], upper[2], progress),
-    interpolateChannel(lower[3], upper[3], progress),
-  ];
-}
-
-function interpolateChannel(lower: number, upper: number, progress: number): number {
-  return Math.round(lower + (upper - lower) * progress);
-}
-
-function withAlpha(color: Rgba, alpha: number): Rgba {
-  return [color[0], color[1], color[2], alpha];
+  if (valueDbz < REFLECTIVITY_MIN_DISPLAY_DBZ) return -1;
+  return Math.min(
+    REFLECTIVITY_BANDS.length - 1,
+    Math.floor(valueDbz / REFLECTIVITY_BAND_WIDTH_DBZ) - 1,
+  );
 }
 
 function writePremultiplied(target: Uint8Array, offset: number, color: Rgba) {

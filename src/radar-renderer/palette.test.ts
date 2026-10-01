@@ -4,8 +4,9 @@ import {
   buildStormRelativeVelocityPalette,
   colorForReflectivity,
   paletteColor,
-  reflectivityDisplayAlpha,
   RANGE_FOLDED_COLOR,
+  REFLECTIVITY_BANDS,
+  reflectivityBandIndex,
   TRANSPARENT_COLOR,
 } from "./palette";
 
@@ -54,82 +55,66 @@ describe("reflectivity palette", () => {
     }
   });
 
-  it("applies a monotonic weak-return visibility curve and preserves full operational opacity", () => {
-    const palette = buildReflectivityPalette(2, 66);
+  it("pins the classic NWS table: one solid color per 5-dBZ band", () => {
+    // Py-ART NWSRef (WSR-88D operational table) from 5 to 70 dBZ; white above.
+    expect(REFLECTIVITY_BANDS.map((band) => [band.dbz, ...band.color.slice(0, 3)])).toEqual([
+      [5, 0, 236, 236],
+      [10, 1, 160, 246],
+      [15, 0, 0, 246],
+      [20, 0, 255, 0],
+      [25, 0, 200, 0],
+      [30, 0, 144, 0],
+      [35, 255, 255, 0],
+      [40, 231, 192, 0],
+      [45, 255, 144, 0],
+      [50, 255, 0, 0],
+      [55, 214, 0, 0],
+      [60, 192, 0, 0],
+      [65, 255, 0, 255],
+      [70, 153, 85, 201],
+      [75, 255, 255, 255],
+    ]);
+    // A band starts at its lower edge and holds one color to the next edge.
+    expect(colorForReflectivity(50)).toEqual([255, 0, 0, 255]);
+    expect(colorForReflectivity(54.5)).toEqual([255, 0, 0, 255]);
+    expect(colorForReflectivity(55)).toEqual([214, 0, 0, 255]);
+    expect(colorForReflectivity(74.5)).toEqual([153, 85, 201, 255]);
+    expect(colorForReflectivity(95)).toEqual([255, 255, 255, 255]);
+    expect(reflectivityBandIndex(9.5)).toBe(0);
+    expect(reflectivityBandIndex(10)).toBe(1);
+  });
 
-    expect(reflectivityDisplayAlpha(-25)).toBe(0);
-    expect(reflectivityDisplayAlpha(0)).toBe(0);
-    expect(reflectivityDisplayAlpha(2.5)).toBe(28);
-    expect(reflectivityDisplayAlpha(5)).toBe(56);
-    expect(reflectivityDisplayAlpha(7.5)).toBe(88);
-    expect(reflectivityDisplayAlpha(10)).toBe(120);
-    expect(reflectivityDisplayAlpha(12.5)).toBe(152);
-    expect(reflectivityDisplayAlpha(15)).toBe(184);
-    expect(reflectivityDisplayAlpha(17.5)).toBe(220);
-    expect(reflectivityDisplayAlpha(20)).toBe(255);
-    expect(reflectivityDisplayAlpha(70)).toBe(255);
-
-    let previous = -1;
-    for (let dbz = -32; dbz <= 95; dbz += 0.1) {
-      const alpha = reflectivityDisplayAlpha(dbz);
-      expect(Number.isInteger(alpha)).toBe(true);
-      expect(alpha).toBeGreaterThanOrEqual(0);
-      expect(alpha).toBeLessThanOrEqual(255);
-      expect(alpha).toBeGreaterThanOrEqual(previous);
-      if (dbz <= 0) expect(alpha).toBe(0);
-      if (dbz >= 20) expect(alpha).toBe(255);
-      previous = alpha;
+  it("draws nothing below 5 dBZ and every band from 5 dBZ at full strength", () => {
+    expect(colorForReflectivity(-32)).toEqual(TRANSPARENT_COLOR);
+    expect(colorForReflectivity(0)).toEqual(TRANSPARENT_COLOR);
+    expect(colorForReflectivity(4.5)).toEqual(TRANSPARENT_COLOR);
+    expect(colorForReflectivity(5)).toEqual([0, 236, 236, 255]);
+    for (let dbz = 5; dbz <= 95; dbz += 0.5) {
+      expect(colorForReflectivity(dbz)[3]).toBe(255);
     }
-
-    for (let rawCode = 106; rawCode < 256; rawCode += 1) {
-      expect(palette[rawCode * 4 + 3]).toBe(255); // scale 2, offset 66: >= 20 dBZ
+    const palette = buildReflectivityPalette(2, 66);
+    for (let rawCode = 2; rawCode < 256; rawCode += 1) {
+      const dbz = (rawCode - 66) / 2;
+      expect(palette[rawCode * 4 + 3]).toBe(dbz < 5 ? 0 : 255);
     }
   });
 
-  it("maps the exact unrounded code-to-dBZ value before color interpolation", () => {
+  it("maps the exact unrounded code-to-dBZ value to its band", () => {
     const scale = 4;
     const offset = 62;
-    const rawCode = 72; // 2.5 dBZ, deliberately between palette anchors.
-    const exactDbz = (rawCode - offset) / scale;
-
-    expect(paletteColor("reflectivity", rawCode, 0, scale, offset))
-      .toEqual(colorForReflectivity(exactDbz));
-    expect(paletteColor("reflectivity", rawCode, 0, scale, offset)[3]).toBe(28);
-    expect(colorForReflectivity(exactDbz)).not.toEqual(colorForReflectivity(2));
-    expect(colorForReflectivity(exactDbz)).not.toEqual(colorForReflectivity(3));
+    // 9.75 and 10.0 dBZ sit either side of the 10 dBZ band edge.
+    expect(paletteColor("reflectivity", 101, 0, scale, offset)).toEqual([0, 236, 236, 255]);
+    expect(paletteColor("reflectivity", 102, 0, scale, offset)).toEqual([1, 160, 246, 255]);
   });
 
-  it("pins the NOAA operational SR_BREF anchor colors and interpolates between them", () => {
-    expect(colorForReflectivity(-32)).toEqual([145, 137, 105, 0]);
-    expect(colorForReflectivity(0)).toEqual([123, 136, 174, 0]);
-    expect(colorForReflectivity(5)).toEqual([83, 106, 163, 56]);
-    expect(colorForReflectivity(10)).toEqual([80, 133, 183, 120]);
-    expect(colorForReflectivity(15)).toEqual([88, 193, 184, 184]);
-    expect(colorForReflectivity(20)).toEqual([48, 214, 91, 255]);
-    expect(colorForReflectivity(30)).toEqual([10, 115, 12, 255]);
-    expect(colorForReflectivity(40)).toEqual([244, 202, 23, 255]);
-    expect(colorForReflectivity(50)).toEqual([208, 8, 8, 255]);
-    expect(colorForReflectivity(60)).toEqual([241, 185, 253, 255]);
-    expect(colorForReflectivity(70)).toEqual([130, 0, 231, 255]);
-    expect(colorForReflectivity(80)).toEqual([130, 0, 231, 255]);
-    expect(colorForReflectivity(2.5)).toEqual([103, 121, 169, 28]);
-  });
-
-  it("premultiplies progressive weak-return colors without changing their RGB lookup", () => {
-    const palette = buildReflectivityPalette(2, 66);
-    const cases = [
-      { rawCode: 66, source: [123, 136, 174, 0], uploaded: [0, 0, 0, 0] },
-      { rawCode: 76, source: [83, 106, 163, 56], uploaded: [18, 23, 36, 56] },
-      { rawCode: 86, source: [80, 133, 183, 120], uploaded: [38, 63, 86, 120] },
-      { rawCode: 96, source: [88, 193, 184, 184], uploaded: [63, 139, 133, 184] },
-      { rawCode: 106, source: [48, 214, 91, 255], uploaded: [48, 214, 91, 255] },
-    ];
-
-    for (const testCase of cases) {
-      expect(paletteColor("reflectivity", testCase.rawCode, 0, 2, 66))
-        .toEqual(testCase.source);
-      expect([...palette.slice(testCase.rawCode * 4, testCase.rawCode * 4 + 4)])
-        .toEqual(testCase.uploaded);
+  it("keeps range folding distinct from every reflectivity band", () => {
+    for (const band of REFLECTIVITY_BANDS) {
+      const distance = Math.hypot(
+        band.color[0] - RANGE_FOLDED_COLOR[0],
+        band.color[1] - RANGE_FOLDED_COLOR[1],
+        band.color[2] - RANGE_FOLDED_COLOR[2],
+      );
+      expect(distance).toBeGreaterThan(80);
     }
   });
 
@@ -145,6 +130,6 @@ describe("reflectivity palette", () => {
   it("rejects invalid scale metadata", () => {
     expect(() => buildReflectivityPalette(0, 66)).toThrow("positive scale");
     expect(() => colorForReflectivity(Number.NaN)).toThrow("finite dBZ");
-    expect(() => reflectivityDisplayAlpha(Number.POSITIVE_INFINITY)).toThrow("finite dBZ");
+    expect(() => reflectivityBandIndex(Number.POSITIVE_INFINITY)).toThrow("finite dBZ");
   });
 });
