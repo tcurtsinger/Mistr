@@ -128,6 +128,12 @@ describe("quiet operational radar map context", () => {
       ["lake_shoreline_casing", "openmaptiles_lakes", expect.stringContaining('["get","class"],"lake"')],
       ["lake_shoreline", "openmaptiles_lakes", expect.stringContaining('["get","class"],"lake"')],
     ]);
+    // The z7 lake shore drifts off the detailed shore at close zoom, so it
+    // fades out before z12.
+    for (const id of ["lake_shoreline_casing", "lake_shoreline"]) {
+      expect(layer(id).maxzoom).toBe(12);
+      expect(paint(id)["line-opacity"]).toEqual(["interpolate", ["linear"], ["zoom"], 11, 1, 12, 0]);
+    }
     expect(layer(RADAR_CONTEXT_ANCHOR_LAYER_ID).id)
       .toBe("highway_major_context_casing");
   });
