@@ -17,20 +17,62 @@ void main() {
   gl_Position = u_matrix * vec4(a_mercator, 0.0, 1.0);
 }`;
 
+// Ground range and bearing of a Mercator point from the radar, in float
+// precision. GPU asin and atan are too coarse for this: ANGLE on D3D11
+// returned asin about 7e-5 rad high for small inputs, which drew echoes about
+// 860 m short of their gates, and the atan behind Mercator latitude moved
+// points up to 150 m and turned bearings by degrees near the radar. So sin
+// and cos of latitude come straight from Mercator through tanh and cosh, both
+// measures come from unit vectors, and small arcsines use their series.
+export const SITE_GEOMETRY_GLSL = `
+const float PI = 3.141592653589793;
+const float TWO_PI = 6.283185307179586;
+const float EARTH_RADIUS_M = 6371008.8;
+
+float arcsineSmall(float value) {
+  if (value >= 0.1) return asin(min(1.0, value));
+  float square = value * value;
+  return value * (1.0 + square * (1.0 / 6.0 + square * (3.0 / 40.0 + square * (5.0 / 112.0))));
+}
+
+// radarUnit is the radar's unit vector; radarEast and radarNorth span its
+// tangent plane. All three are computed in double precision on the CPU.
+void siteGeometry(
+  vec2 mercator,
+  vec3 radarUnit,
+  vec3 radarEast,
+  vec3 radarNorth,
+  out float groundRangeM,
+  out float bearing
+) {
+  float longitude = (mercator.x - floor(mercator.x)) * TWO_PI - PI;
+  float mercatorAngle = PI * (1.0 - 2.0 * mercator.y);
+  float cosLatitude = 1.0 / cosh(mercatorAngle);
+  vec3 offset = vec3(
+    cosLatitude * cos(longitude),
+    cosLatitude * sin(longitude),
+    tanh(mercatorAngle)
+  ) - radarUnit;
+  groundRangeM = 2.0 * EARTH_RADIUS_M * arcsineSmall(0.5 * length(offset));
+  bearing = atan(dot(offset, radarEast), dot(offset, radarNorth));
+  if (bearing < 0.0) bearing += TWO_PI;
+}
+`;
+
 const FRAGMENT_SHADER = `#version 300 es
 precision highp float;
 precision highp int;
 precision highp usampler2D;
-const float PI = 3.141592653589793;
-const float TWO_PI = 6.283185307179586;
-const float EARTH_RADIUS_M = 6371008.8;
+${SITE_GEOMETRY_GLSL}
 const float EFFECTIVE_EARTH_RADIUS_M = 8494666.666666666;
 uniform usampler2D u_raw_codes;
 uniform usampler2D u_statuses;
 uniform usampler2D u_azimuth_lookup;
 uniform sampler2D u_palette;
 uniform sampler2D u_radial_metadata;
-uniform vec2 u_radar_lon_lat_radians;
+uniform vec3 u_radar_unit;
+uniform vec3 u_radar_east;
+uniform vec3 u_radar_north;
 uniform float u_first_gate_center_m;
 uniform float u_gate_spacing_m;
 uniform int u_gate_count;
@@ -41,10 +83,6 @@ uniform vec4 u_range_folded_color;
 uniform float u_opacity;
 in vec2 v_mercator;
 out vec4 frag_color;
-
-float wrapLongitude(float value) {
-  return mod(value + PI, TWO_PI) - PI;
-}
 
 float signedAngleDifference(float value, float reference) {
   return mod(value - reference + PI, TWO_PI) - PI;
@@ -107,25 +145,9 @@ vec4 smoothValidColor(
 }
 
 void main() {
-  float wrappedX = v_mercator.x - floor(v_mercator.x);
-  float longitude = wrappedX * TWO_PI - PI;
-  float latitude = atan(sinh(PI * (1.0 - 2.0 * v_mercator.y)));
-  float radarLongitude = u_radar_lon_lat_radians.x;
-  float radarLatitude = u_radar_lon_lat_radians.y;
-  float deltaLatitude = latitude - radarLatitude;
-  float deltaLongitude = wrapLongitude(longitude - radarLongitude);
-  float sinHalfLatitude = sin(deltaLatitude * 0.5);
-  float sinHalfLongitude = sin(deltaLongitude * 0.5);
-  float haversine = sinHalfLatitude * sinHalfLatitude
-    + cos(radarLatitude) * cos(latitude) * sinHalfLongitude * sinHalfLongitude;
-  float groundRangeM = 2.0 * EARTH_RADIUS_M * asin(
-    min(1.0, sqrt(max(0.0, haversine)))
-  );
-  float bearingY = sin(deltaLongitude) * cos(latitude);
-  float bearingX = cos(radarLatitude) * sin(latitude)
-    - sin(radarLatitude) * cos(latitude) * cos(deltaLongitude);
-  float bearing = atan(bearingY, bearingX);
-  if (bearing < 0.0) bearing += TWO_PI;
+  float groundRangeM;
+  float bearing;
+  siteGeometry(v_mercator, u_radar_unit, u_radar_east, u_radar_north, groundRangeM, bearing);
   int lookupIndex = clamp(
     int(floor(bearing / TWO_PI * float(u_azimuth_lookup_size))),
     0,
@@ -317,7 +339,9 @@ interface Uniforms {
   statuses: WebGLUniformLocation;
   azimuthLookup: WebGLUniformLocation;
   palette: WebGLUniformLocation;
-  radarLonLat: WebGLUniformLocation;
+  radarUnit: WebGLUniformLocation;
+  radarEast: WebGLUniformLocation;
+  radarNorth: WebGLUniformLocation;
   firstGateCenter: WebGLUniformLocation;
   gateSpacing: WebGLUniformLocation;
   gateCount: WebGLUniformLocation;
@@ -639,11 +663,10 @@ export class RadarCustomLayer implements CustomLayerInterface {
       gl.uniform1i(this.uniforms.azimuthLookup, 2);
       gl.uniform1i(this.uniforms.palette, 3);
       gl.uniform1i(this.uniforms.radialMetadata, 4);
-      gl.uniform2f(
-        this.uniforms.radarLonLat,
-        degreesToRadians(model.center.longitude),
-        degreesToRadians(model.center.latitude),
-      );
+      const radarFrame = radarUnitFrame(model.center.latitude, model.center.longitude);
+      gl.uniform3f(this.uniforms.radarUnit, ...radarFrame.unit);
+      gl.uniform3f(this.uniforms.radarEast, ...radarFrame.east);
+      gl.uniform3f(this.uniforms.radarNorth, ...radarFrame.north);
       gl.uniform1f(this.uniforms.firstGateCenter, model.firstGateCenterM);
       gl.uniform1f(this.uniforms.gateSpacing, model.gateSpacingM);
       gl.uniform1i(this.uniforms.gateCount, model.gateCount);
@@ -1979,7 +2002,9 @@ function resolveUniforms(gl: WebGL2RenderingContext, program: WebGLProgram): Uni
     statuses: requireUniform(gl, program, "u_statuses"),
     azimuthLookup: requireUniform(gl, program, "u_azimuth_lookup"),
     palette: requireUniform(gl, program, "u_palette"),
-    radarLonLat: requireUniform(gl, program, "u_radar_lon_lat_radians"),
+    radarUnit: requireUniform(gl, program, "u_radar_unit"),
+    radarEast: requireUniform(gl, program, "u_radar_east"),
+    radarNorth: requireUniform(gl, program, "u_radar_north"),
     firstGateCenter: requireUniform(gl, program, "u_first_gate_center_m"),
     gateSpacing: requireUniform(gl, program, "u_gate_spacing_m"),
     gateCount: requireUniform(gl, program, "u_gate_count"),
@@ -2111,6 +2136,26 @@ function percentile(values: number[], fraction: number): number {
 
 function degreesToRadians(value: number): number {
   return value * Math.PI / 180;
+}
+
+type Vector3 = readonly [number, number, number];
+
+/** The radar's unit vector and the east and north axes of its tangent plane. */
+export function radarUnitFrame(
+  latitudeDegrees: number,
+  longitudeDegrees: number,
+): { unit: Vector3; east: Vector3; north: Vector3 } {
+  const latitude = degreesToRadians(latitudeDegrees);
+  const longitude = degreesToRadians(longitudeDegrees);
+  const sinLatitude = Math.sin(latitude);
+  const cosLatitude = Math.cos(latitude);
+  const sinLongitude = Math.sin(longitude);
+  const cosLongitude = Math.cos(longitude);
+  return {
+    unit: [cosLatitude * cosLongitude, cosLatitude * sinLongitude, sinLatitude],
+    east: [-sinLongitude, cosLongitude, 0],
+    north: [-sinLatitude * cosLongitude, -sinLatitude * sinLongitude, cosLatitude],
+  };
 }
 
 export const radarShaderSources = {

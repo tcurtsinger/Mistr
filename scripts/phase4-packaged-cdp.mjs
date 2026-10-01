@@ -8,6 +8,7 @@ import {
 import {
   parseAcceptanceWorkload,
   phase4ScenarioTimeoutMs,
+  validateGpuGeometry,
   validatePhase4Acceptance,
 } from "./phase4-packaged-validation.mjs";
 import { isRadarSignalPixel } from "./radar-pixel-evidence.mjs";
@@ -31,6 +32,8 @@ try {
   await waitForPhase4Api();
   await evaluate("window.__MISTR_PHASE4__.prepareArchive()", true, 30_000);
   await evaluate("window.__MISTR_PHASE4__.pause()");
+  // The shipped radar geometry shaders, measured on this GPU.
+  const geometryProbe = await evaluate("window.__MISTR_PHASE4__.probeGeometry()");
   const windowInfo = await call("Browser.getWindowForTarget", { targetId: target.id });
   assertProtocolResult(windowInfo, "Browser.getWindowForTarget");
   const windowId = windowInfo.result.windowId;
@@ -118,15 +121,18 @@ try {
   await writeFile(resolve(output, "packaged-native-isolated-4k.png"), Buffer.from(isolatedNativeScreenshot, "base64"));
   await writeFile(resolve(output, "packaged-smooth-isolated-4k.png"), Buffer.from(isolatedSmoothScreenshot, "base64"));
 
-  const failures = validatePhase4Acceptance(
-    report,
-    scenarios,
-    finalBounds.result.bounds,
-    transitions,
-    stabilityRuns,
-    modeEvidence,
-    pixelEvidence,
-  );
+  const failures = [
+    ...validatePhase4Acceptance(
+      report,
+      scenarios,
+      finalBounds.result.bounds,
+      transitions,
+      stabilityRuns,
+      modeEvidence,
+      pixelEvidence,
+    ),
+    ...validateGpuGeometry(geometryProbe),
+  ];
   const summary = {
     status: failures.length === 0 ? "PASS" : "FAIL",
     bounds: finalBounds.result.bounds,
@@ -149,6 +155,7 @@ try {
     renderer: report.renderer?.metrics,
     displayModes: modeEvidence,
     pixelEvidence,
+    geometryProbe,
     failures,
   };
   await writeFile(resolve(output, "packaged-summary-4k.json"), `${JSON.stringify(summary, null, 2)}\n`);

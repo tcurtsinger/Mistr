@@ -2,8 +2,37 @@ import { describe, expect, it } from "vitest";
 import {
   parseAcceptanceWorkload,
   phase4ScenarioTimeoutMs,
+  validateGpuGeometry,
   validatePhase4Acceptance,
 } from "./phase4-packaged-validation.mjs";
+
+describe("GPU radar geometry validation", () => {
+  const probe = {
+    siteSamples: 480,
+    maxSiteRangeErrorM: 1.4,
+    maxSiteBearingErrorDegrees: 0.03,
+    maxSiteCrossRangeErrorM: 4.8,
+    nationalSamples: 10,
+    maxNationalLatitudeErrorM: 1.6,
+  };
+
+  it("accepts geometry within a few metres", () => {
+    expect(validateGpuGeometry(probe)).toEqual([]);
+  });
+
+  it("fails the GPU asin error that drew Site echoes 860 m short", () => {
+    expect(validateGpuGeometry({ ...probe, maxSiteRangeErrorM: 899 })).toEqual(["gpu_site_range"]);
+    // 1.2 degrees at 2 km, as the atan latitude bearing measured.
+    expect(validateGpuGeometry({ ...probe, maxSiteCrossRangeErrorM: 42 })).toEqual(["gpu_site_bearing"]);
+    expect(validateGpuGeometry({ ...probe, maxNationalLatitudeErrorM: 146 })).toEqual(["gpu_national_latitude"]);
+  });
+
+  it("fails a missing, empty, or non-finite probe", () => {
+    expect(validateGpuGeometry(undefined)).toEqual(["gpu_geometry_probe"]);
+    expect(validateGpuGeometry({ ...probe, siteSamples: 0 })).toEqual(["gpu_geometry_probe"]);
+    expect(validateGpuGeometry({ ...probe, maxSiteRangeErrorM: Number.NaN })).toEqual(["gpu_site_range"]);
+  });
+});
 
 describe("Phase 4 packaged acceptance validation", () => {
   it("refuses environment overrides that weaken the documented workload", () => {

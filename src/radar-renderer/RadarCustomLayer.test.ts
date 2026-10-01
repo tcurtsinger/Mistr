@@ -5,6 +5,7 @@ import {
   hasVerifiedHardwareAcceleration,
   RadarCustomLayer,
   radarShaderSources,
+  radarUnitFrame,
   shouldSmoothRadarDisplay,
   validateReplacementGeneration,
   validateResidentModels,
@@ -47,6 +48,29 @@ describe("Radar custom-layer shader contract", () => {
       .toBeLessThan(fragment.indexOf("if (status == uint(1)) discard"));
     expect(fragment.indexOf("if (status == uint(2))"))
       .toBeLessThan(fragment.indexOf("if (u_smooth_display == 1)"));
+  });
+});
+
+describe("Site radar geometry", () => {
+  it("measures range and bearing from unit vectors, not from GPU asin or atan latitude", () => {
+    const fragment = radarShaderSources.fragment;
+    expect(fragment).toContain("siteGeometry(v_mercator, u_radar_unit, u_radar_east, u_radar_north");
+    expect(fragment).toContain("tanh(mercatorAngle)");
+    expect(fragment).not.toContain("atan(sinh(");
+    expect(fragment).not.toContain("u_radar_lon_lat_radians");
+  });
+
+  it("builds an orthonormal radar frame whose axes point east and north", () => {
+    const frame = radarUnitFrame(35.333363, -97.27776);
+    const dot = (a: readonly number[], b: readonly number[]) => a.reduce((sum, value, index) => sum + value * b[index], 0);
+    for (const axis of [frame.unit, frame.east, frame.north]) expect(dot(axis, axis)).toBeCloseTo(1, 12);
+    expect(dot(frame.unit, frame.east)).toBeCloseTo(0, 12);
+    expect(dot(frame.unit, frame.north)).toBeCloseTo(0, 12);
+    expect(dot(frame.east, frame.north)).toBeCloseTo(0, 12);
+    // North has a positive z component; east points along increasing longitude.
+    expect(frame.north[2]).toBeGreaterThan(0);
+    const nudged = radarUnitFrame(35.333363, -97.27776 + 0.001).unit;
+    expect(dot(nudged.map((value, index) => value - frame.unit[index]), frame.east)).toBeGreaterThan(0);
   });
 });
 

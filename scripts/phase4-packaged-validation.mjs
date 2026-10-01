@@ -37,6 +37,28 @@ export function phase4ScenarioTimeoutMs(transitions) {
   return Math.max(60_000, transitions * 60);
 }
 
+// Worst errors, in metres on the map, the shipped radar geometry shaders may
+// carry on the packaged GPU. Gates are 250 m apart and National cells about
+// 1 km; 10 m keeps every echo and cell where it was measured.
+export const GPU_SITE_RANGE_ERROR_CEILING_M = 10;
+export const GPU_SITE_CROSS_RANGE_ERROR_CEILING_M = 10;
+export const GPU_NATIONAL_LATITUDE_ERROR_CEILING_M = 10;
+
+export function validateGpuGeometry(probe) {
+  const failures = [];
+  if (!(probe?.siteSamples > 0) || !(probe?.nationalSamples > 0)) {
+    return ["gpu_geometry_probe"];
+  }
+  if (!(probe.maxSiteRangeErrorM <= GPU_SITE_RANGE_ERROR_CEILING_M)) failures.push("gpu_site_range");
+  if (!(probe.maxSiteCrossRangeErrorM <= GPU_SITE_CROSS_RANGE_ERROR_CEILING_M)) {
+    failures.push("gpu_site_bearing");
+  }
+  if (!(probe.maxNationalLatitudeErrorM <= GPU_NATIONAL_LATITUDE_ERROR_CEILING_M)) {
+    failures.push("gpu_national_latitude");
+  }
+  return failures;
+}
+
 export function validatePhase4Acceptance(
   report,
   scenarios,
