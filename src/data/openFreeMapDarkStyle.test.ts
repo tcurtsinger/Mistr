@@ -1,4 +1,4 @@
-import { validateStyleMin } from "@maplibre/maplibre-gl-style-spec";
+import { expression, featureFilter, validateStyleMin } from "@maplibre/maplibre-gl-style-spec";
 import type { StyleSpecification } from "maplibre-gl";
 import { describe, expect, it } from "vitest";
 import { RADAR_CONTEXT_ANCHOR_LAYER_ID } from "./radarMapContext";
@@ -88,6 +88,10 @@ describe("quiet operational radar map context", () => {
       "boundary_country_z5-",
       "highway_name_other",
       "highway_name_motorway",
+      "highway_ref_us",
+      "highway_ref_other",
+      "place_village_context",
+      "place_town_context",
       "place_city",
       "place_city_large",
       "place_state",
@@ -107,6 +111,12 @@ describe("quiet operational radar map context", () => {
     for (const id of belowRadar) {
       expect(layers.findIndex((candidate) => candidate.id === id)).toBeLessThan(anchorIndex);
     }
+    // Towns rise above radar from z8 and villages from z10; below those
+    // zooms the same places stay beneath it, with no gap or overlap.
+    expect(layer("place_town").maxzoom).toBe(8);
+    expect(layer("place_town_context").minzoom).toBe(8);
+    expect(layer("place_village").maxzoom).toBe(10);
+    expect(layer("place_village_context").minzoom).toBe(10);
   });
 
   it("outlines only the ocean and large lakes, never split inland water", () => {
@@ -303,9 +313,10 @@ describe("quiet operational radar map context", () => {
 
   it("uses title-case city labels without missing sprite dependencies", () => {
     const expected = {
-      place_city_large: ["rgba(226,232,238,0.82)", 14, 1.2],
-      place_city: ["rgba(208,216,224,0.68)", 11, 1],
-      place_town: ["rgba(170,180,190,0.50)", 10, 1],
+      place_city_large: ["rgba(230,236,242,0.86)", 15, 1.3],
+      place_city: ["rgba(214,222,230,0.74)", 12, 1.2],
+      place_town_context: ["rgba(198,206,214,0.66)", 11, 1.2],
+      place_village_context: ["rgba(190,198,206,0.62)", 10.5, 1.2],
     } as const;
 
     for (const [id, [textColor, textSize, haloWidth]] of Object.entries(expected)) {
@@ -323,14 +334,73 @@ describe("quiet operational radar map context", () => {
       expect(layout(id)).not.toHaveProperty("icon-image");
       expect(layout(id)).not.toHaveProperty("text-transform");
     }
+    // Cities stay named at street zoom.
+    expect(layer("place_city").maxzoom).toBe(15);
+    expect(layer("place_city_large").maxzoom).toBe(16);
   });
 
   it("keeps administrative labels natural-case and subordinate to cities", () => {
     expect(layout("place_state")).not.toHaveProperty("text-transform");
-    expect(paint("place_state")["text-color"]).toBe("rgba(182,192,202,0.46)");
+    expect(paint("place_state")["text-color"]).toBe("rgba(198,206,214,0.62)");
 
     for (const id of ["place_country_other", "place_country_minor", "place_country_major"]) {
-      expect(paint(id)["text-color"]).toBe("rgba(180,190,200,0.44)");
+      expect(layout(id)).not.toHaveProperty("text-transform");
+      expect(paint(id)["text-color"]).toBe("rgba(204,212,220,0.66)");
+      expect(paint(id)["text-halo-color"]).toBe("rgba(5,5,6,0.94)");
     }
+  });
+
+  it("labels routes with one normalized identifier", () => {
+    const routeLayers = ["highway_name_motorway", "highway_ref_us", "highway_ref_other"];
+    const fields = routeLayers.map((id) => JSON.stringify(layout(id)["text-field"]));
+    expect(new Set(fields).size).toBe(1);
+    expect(layer("highway_ref_us").minzoom).toBe(8);
+    expect(layer("highway_ref_other").minzoom).toBe(10);
+
+    const index = layers.findIndex((candidate) => candidate.id === "highway_ref_us");
+    const parsed = expression.createExpression(
+      layout("highway_ref_us")["text-field"],
+      `layers[${index}].layout.text-field`,
+    );
+    if (parsed.result !== "success") throw new Error(JSON.stringify(parsed.value));
+    const label = (properties: Record<string, string>) => String(
+      parsed.value.evaluate({ zoom: 10 }, { type: 2, properties } as never),
+    );
+    expect(label({ ref: "70", network: "us-interstate" })).toBe("I-70");
+    expect(label({ ref: "50", network: "us-highway" })).toBe("US 50");
+    expect(label({ ref: "96", network: "us-state", route_1_network: "US:KS" })).toBe("KS 96");
+    expect(label({ ref: "50", network: "us-state" })).toBe("50");
+    // Raw refs keep their first route and drop Toll and express-lane suffixes.
+    expect(label({ ref: "SR 414 Toll;SR 429 Toll", network: "road" })).toBe("SR 414");
+    expect(label({ ref: "I 595 EXPR", network: "road" })).toBe("I-595");
+    expect(label({ ref: "US 17 Truck;US 92 Truck", network: "road" })).toBe("US 17 Truck");
+  });
+
+  it("gives every trunk, primary, and motorway ref exactly one route layer", () => {
+    const filters = Object.fromEntries(
+      ["highway_name_motorway", "highway_ref_us", "highway_ref_other"].map((id) => [
+        id,
+        featureFilter(
+          filter(id) as never,
+          `layers[${layers.findIndex((candidate) => candidate.id === id)}].filter`,
+        ),
+      ]),
+    );
+    const layersFor = (properties: Record<string, string>) => Object.entries(filters)
+      .filter(([, compiled]) => compiled.filter(
+        { zoom: 12 },
+        { type: 2, properties } as never,
+      ))
+      .map(([id]) => id);
+    expect(layersFor({ class: "trunk", network: "us-highway", ref: "50" })).toEqual(["highway_ref_us"]);
+    expect(layersFor({ class: "primary", network: "us-state", ref: "96" })).toEqual(["highway_ref_other"]);
+    expect(layersFor({ class: "trunk", network: "road", ref: "US 17 Truck;US 92 Truck" }))
+      .toEqual(["highway_ref_other"]);
+    expect(layersFor({ class: "primary", ref: "CR 5" })).toEqual(["highway_ref_other"]);
+    expect(layersFor({ class: "motorway", network: "road", ref: "SR 408 Toll" }))
+      .toEqual(["highway_name_motorway"]);
+    // No ref, or an exit number, gets no route label.
+    expect(layersFor({ class: "trunk", network: "us-highway" })).toEqual([]);
+    expect(layersFor({ class: "motorway", subclass: "junction", ref: "74A" })).toEqual([]);
   });
 });
