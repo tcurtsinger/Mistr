@@ -9,14 +9,19 @@ import type {
   PackedGridManifest,
 } from "../packed-grid/packedGrid";
 import type { RadarDisplayMode } from "../radar-renderer/RadarCustomLayer";
-import { colorForReflectivity } from "../radar-renderer/palette";
+import {
+  REFLECTIVITY_BAND_WIDTH_DBZ,
+  REFLECTIVITY_BANDS,
+  REFLECTIVITY_MIN_DISPLAY_DBZ,
+} from "../radar-renderer/palette";
 import {
   assertCoverageMatchesManifest,
   type NationalViewportCoverage,
 } from "./coverage";
 import { nationalObservationIdentity } from "./model";
 
-const PALETTE_WIDTH = 1_024;
+// One texel per NWS reflectivity band.
+const PALETTE_WIDTH = REFLECTIVITY_BANDS.length;
 // Native-residency owner decision (2026-08-04): all retained observations
 // stay GPU-resident at the exact full-resolution grid (up to ~49 MiB per
 // frame, ~2.8 GiB for the 60-frame loop plus one staged replacement; chunks
@@ -25,8 +30,6 @@ const PALETTE_WIDTH = 1_024;
 // a minimal device.
 export const NATIONAL_GPU_TARGET_BYTES = 3328 * 1024 * 1024;
 export const NATIONAL_GPU_HARD_CEILING_BYTES = 3584 * 1024 * 1024;
-const PALETTE_MIN_DBZ = -25;
-const PALETTE_MAX_DBZ = 70;
 const DEFAULT_UPLOAD_BUDGET_MS = 4;
 const PAINT_TIMEOUT_MS = 15_000;
 const RECOVERY_PAINT_TIMEOUT_MS = 30_000;
@@ -77,10 +80,16 @@ bool valid_code(uint raw) {
   return raw != u_missing_raw && raw != u_no_coverage_raw;
 }
 
+// One solid NWS color per 5-dBZ band from its lower edge; nothing below the
+// first band. palette.ts reflectivityBandIndex is the same rule on the CPU.
 vec4 palette_color(float raw) {
   float dbz = (-9990.0 + raw) / 10.0;
-  float unit = clamp((dbz - ${PALETTE_MIN_DBZ.toFixed(1)}) / ${(PALETTE_MAX_DBZ - PALETTE_MIN_DBZ).toFixed(1)}, 0.0, 1.0);
-  return texture(u_palette, vec2(unit, 0.5));
+  if (dbz < ${REFLECTIVITY_MIN_DISPLAY_DBZ.toFixed(1)}) return vec4(0.0);
+  int band = min(
+    int(floor(dbz / ${REFLECTIVITY_BAND_WIDTH_DBZ.toFixed(1)})) - 1,
+    ${REFLECTIVITY_BANDS.length - 1}
+  );
+  return texelFetch(u_palette, ivec2(band, 0), 0);
 }
 
 void main() {
@@ -2057,9 +2066,7 @@ export function clearPriorWebGlErrors(
 function uploadPalette(gl: WebGL2RenderingContext): WebGLTexture {
   const bytes = new Uint8Array(PALETTE_WIDTH * 4);
   for (let index = 0; index < PALETTE_WIDTH; index += 1) {
-    const value = PALETTE_MIN_DBZ
-      + (index / (PALETTE_WIDTH - 1)) * (PALETTE_MAX_DBZ - PALETTE_MIN_DBZ);
-    const color = colorForReflectivity(value);
+    const color = REFLECTIVITY_BANDS[index].color;
     const alpha = color[3] / 255;
     bytes[index * 4] = Math.round(color[0] * alpha);
     bytes[index * 4 + 1] = Math.round(color[1] * alpha);
@@ -2073,8 +2080,8 @@ function uploadPalette(gl: WebGL2RenderingContext): WebGLTexture {
   const previousTexture1 = gl.getParameter(gl.TEXTURE_BINDING_2D) as WebGLTexture | null;
   try {
     gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, PALETTE_WIDTH, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, bytes);

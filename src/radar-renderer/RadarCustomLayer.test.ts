@@ -46,14 +46,18 @@ describe("Radar custom-layer shader contract", () => {
       .toBeLessThan(fragment.indexOf("bool smoothDisplay"));
   });
 
-  it("smooths valid reflectivity neighbors and fades by their coverage", () => {
+  it("smooths measured values of valid reflectivity neighbors and fades by their coverage", () => {
     const fragment = radarShaderSources.fragment;
     expect(fragment).toContain("uniform int u_smooth_display");
-    expect(fragment).toContain("vec4 validGateColor");
+    expect(fragment).toContain("float validGateCode");
     expect(fragment).toContain("status != uint(0)");
-    // Invalid cells are transparent and the blend is not renormalized, so
-    // the valid share of the footprint is the opacity.
-    expect(fragment).not.toContain("totalWeight");
+    // Values blend, never colors, so every pixel is a palette band; the valid
+    // share of the footprint is the opacity.
+    expect(fragment).toContain("reflectivityColor(dot(weights, codes) / coverage) * coverage");
+    // One palette entry per value: no mix of two bands at a band edge.
+    expect(fragment).toContain("int code = int(floor(clamp(rawCode, 2.0, 255.0)));");
+    expect(fragment).not.toContain("mix(lowerColor, upperColor");
+    expect(fragment).not.toContain("validGateColor");
     expect(fragment).not.toContain("smoothValidColor");
     // Range folding stays categorical; a below-threshold center no longer cuts a hole in Smooth.
     expect(fragment.indexOf("if (status == uint(2) && insideSweep)"))

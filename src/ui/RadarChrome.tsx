@@ -15,7 +15,12 @@ import {
 import { filterRadarSites, type RadarSiteOption } from "../data/radarSites";
 import type { GateInterrogation } from "../radar-renderer/cpuModel";
 import type { RadarDisplayMode } from "../radar-renderer/RadarCustomLayer";
-import { colorForReflectivity } from "../radar-renderer/palette";
+import {
+  colorForReflectivity,
+  REFLECTIVITY_BAND_WIDTH_DBZ,
+  REFLECTIVITY_BANDS,
+  REFLECTIVITY_MIN_DISPLAY_DBZ,
+} from "../radar-renderer/palette";
 import {
   inspectionReadoutPresentation,
   playbackAnnouncement,
@@ -617,16 +622,18 @@ function Timeline({
   );
 }
 
-// The radar's own display colours, weak returns faded as on the map.
-const SCALE_MIN_DBZ = 5;
-const SCALE_MAX_DBZ = 70;
+// The radar's own display colours: one solid NWS band per 5 dBZ. The last
+// band, 75 dBZ and above, gets one band's width.
+const SCALE_MIN_DBZ = REFLECTIVITY_MIN_DISPLAY_DBZ;
+const SCALE_TOP_DBZ = REFLECTIVITY_BANDS[REFLECTIVITY_BANDS.length - 1].dbz;
+const SCALE_MAX_DBZ = SCALE_TOP_DBZ + REFLECTIVITY_BAND_WIDTH_DBZ;
 const SCALE_TICKS = [10, 20, 30, 40, 50, 60];
 
 function scaleShare(dbz: number) {
   return (dbz - SCALE_MIN_DBZ) / (SCALE_MAX_DBZ - SCALE_MIN_DBZ);
 }
 
-// The weak-return curve leaves some measured values with no colour on the map.
+// Nothing below the first band is drawn on the map.
 function drawnOnMap(dbz: number) {
   return colorForReflectivity(dbz)[3] > 0;
 }
@@ -638,15 +645,17 @@ function reflectivityCss(dbz: number, opaque = false) {
 
 function ColorScale() {
   const gradient = useMemo(() => {
-    const stops: string[] = [];
-    for (let dbz = SCALE_MIN_DBZ; dbz <= SCALE_MAX_DBZ; dbz += 2.5) {
-      stops.push(`${reflectivityCss(dbz)} ${(scaleShare(dbz) * 100).toFixed(2)}%`);
-    }
+    const stops = REFLECTIVITY_BANDS.flatMap((band) => {
+      const color = reflectivityCss(band.dbz);
+      const start = (scaleShare(band.dbz) * 100).toFixed(2);
+      const end = (scaleShare(band.dbz + REFLECTIVITY_BAND_WIDTH_DBZ) * 100).toFixed(2);
+      return [`${color} ${start}%`, `${color} ${end}%`];
+    });
     return `linear-gradient(90deg, ${stops.join(", ")})`;
   }, []);
   return (
     <div
-      aria-label={`Reflectivity color scale, ${SCALE_MIN_DBZ} to ${SCALE_MAX_DBZ} dBZ`}
+      aria-label={`Reflectivity color scale, ${SCALE_MIN_DBZ} to ${SCALE_TOP_DBZ} dBZ and above`}
       className="color-scale"
       role="img"
     >

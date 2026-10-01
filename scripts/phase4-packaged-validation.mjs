@@ -89,7 +89,7 @@ export function validatePhase4Acceptance(
     || !(pixelEvidence.smoothSignalRatio > 0.01)
     || !(pixelEvidence.changedRatio > 0.01)
     || !(pixelEvidence.commonBackgroundRatio > 0.001)
-    || !(pixelEvidence.smoothSignalPixels > pixelEvidence.nativeSignalPixels)
+    || !smoothCoverageWithinNative(pixelEvidence)
   ) failures.push("display_pixels");
   for (const [index, scenario] of scenarios.entries()) {
     const prefix = `run_${index + 1}`;
@@ -129,4 +129,16 @@ export function validatePhase4Acceptance(
     failures.push("stabilized_heap_growth");
   }
   return failures;
+}
+
+// Smooth draws its own picture of the same observation: neither empty nor
+// flooding. It blends measured values and, as NWS does, draws nothing below
+// 5 dBZ, so isolated weak gates among sub-5 dBZ neighbors can average out and
+// Smooth may cover less than Native.
+export function smoothCoverageWithinNative(evidence) {
+  const native = evidence?.nativeSignalPixels;
+  const smooth = evidence?.smoothSignalPixels;
+  return Number.isFinite(native) && Number.isFinite(smooth) && native > 0
+    && smooth >= native * 0.5
+    && smooth <= native * 2;
 }

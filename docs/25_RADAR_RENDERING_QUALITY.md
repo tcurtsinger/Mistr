@@ -38,21 +38,21 @@ Status remains categorical and authoritative:
 
 ## 4. Reflectivity palette
 
-The Alpha reflectivity ramp is a meteorological data palette, not Stormlight chrome. It is pinned to the official NOAA/NWS [`SR_BREF` `radar_reflectivity` WMS legend](https://opengeo.ncep.noaa.gov/geoserver/kamx/wms?service=WMS&request=GetLegendGraphic&version=1.0.0&format=image%2Fpng&layer=kamx_sr_bref&style=radar_reflectivity) captured from the KAMX service on 2026-08-02. Five-dBZ anchors from -25 through 70 dBZ progress through neutral weak returns, blue/cyan, green, yellow/orange, red, magenta, and purple. The reference URL and capture date are recorded with the constants; the downloaded provider image remains an ignored local diagnostic, never a repository fixture.
+Owner decision (2026-09-30): reflectivity uses the classic NWS colors, drawn exactly as NWS draws them. The reflectivity ramp is a meteorological data palette, not Stormlight chrome.
 
-Mistr keeps the official reference's operational RGB thresholds, then applies a separate display-only weak-return visibility curve to Level II reflectivity:
+Each 5-dBZ band is one solid color, starting at the band's lower edge, so 54.5 dBZ is the 50 dBZ red and 55.0 dBZ is the 55 dBZ red. The RGB values for 5 through 70 dBZ are Py-ART's `NWSRef` color table (cmweather 0.3.2, in the oracle environment), which follows the WSR-88D operational table; 75 dBZ and above is white:
 
-- at or below 0 dBZ: alpha 0;
-- 5 dBZ: alpha 56/255;
-- 10 dBZ: alpha 120/255;
-- 15 dBZ: alpha 184/255; and
-- at or above 20 dBZ: alpha 255.
+| dBZ | 5 | 10 | 15 | 20 | 25 | 30 | 35 | 40 | 45 | 50 | 55 | 60 | 65 | 70 | 75+ |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| color | cyan | light blue | blue | green | mid green | dark green | yellow | gold | orange | red | dark red | deeper red | magenta | purple | white |
 
-Opacity interpolates from the exact unrounded dBZ value between those anchors. The curve stays close to linear while deliberately sitting slightly below a linear fade from 5 through 15 dBZ, reducing long-session shimmer from dense weak positive returns before precipitation becomes fully opaque at 20 dBZ. The broad pale disk formed by negative-dBZ clear-air returns remains absent. This is a presentation cutoff, not meteorological quality control. Negative dBZ can include genuine extremely light drizzle or snow, and 0–20 dBZ can contain either weak precipitation or non-weather return; the native gate/status/dBZ remains available to inspection. See [NOAA JetStream reflectivity guidance](https://www.noaa.gov/jetstream/reflectivity).
+Nothing below 5 dBZ is drawn, as on NWS displays, and every band from 5 dBZ up is fully opaque: light echo shows at full strength, so clear-air, biological, and ground returns of 5 dBZ and more appear as they do on NWS. This replaced the earlier palette, which followed the NOAA/NWS `SR_BREF` WMS legend as a continuous ramp and faded 0–20 dBZ through a display-only weak-return curve. That palette did not look like a standard NWS radar image.
 
-In `Native`, every non-positive valid gate therefore has a transparent palette entry. In `Smooth`, that gate remains a status-valid spatial neighbor, so an adjacent positive return may fade into its footprint within the existing bounded one-gate/one-radial interpolation. This does not bridge a source-invalid status or missing radial and does not change the underlying gate truth.
+`reflectivityBandIndex` in `src/radar-renderer/palette.ts` is the one band rule. The Site palette texture holds the band color for each raw code, the National shader picks the band from its dBZ (`palette_color` in `NationalGridLayer.ts`), and the color strip draws the same bands with hard stops.
 
-Palette anchors may interpolate color and alpha for presentation, but each lookup starts from the exact dBZ computed for that raw code. This color interpolation does not create, replace, or alter a measured value.
+Range folding is categorical and paints a dark purple (119, 0, 125) that no reflectivity band uses. The previous range-folded violet sat almost on the NWS 70 dBZ purple.
+
+Each lookup starts from the exact dBZ computed for that raw code. The bands are presentation only; they never create, replace, or alter a measured value, and inspection reports the exact native dBZ.
 
 ## 5. Operational map context
 
@@ -110,9 +110,7 @@ This means `Smooth` feathers up to **half a cell (~500 m) past the measured foot
 
 #### Site `Smooth` edge behavior
 
-Site reflectivity follows the same edge contract on the polar grid. A sample blends two gates along each of its two nearest radials. Below-threshold, range-folded, and out-of-sweep gates are transparent, so the blend of premultiplied colors is the valid gates' color faded by the weight they hold, and that weight is the fragment's opacity. No value is carried across a gate that is not a measurement.
-
-Site blends palette colors where National blends measured values. On the current palette, 30 dBZ is darker than both 25 and 35 dBZ, so a value blend across the gate-to-gate speckle of Level II drew a dark contour ring around every 25-to-35 dBZ patch. Site moves to value blending with a palette whose lightness rises with intensity.
+Site reflectivity follows the same contract on the polar grid. A sample blends two gates along each of its two nearest radials. Only valid gates contribute, and the blend is of their measured values, never their colors, so every pixel is an NWS band color and band edges follow the smoothed field. The weight the valid gates hold is the fragment's opacity. Below-threshold, range-folded, and out-of-sweep gates contribute no value at any weight.
 
 - A below-threshold gate inside a storm is a soft dimple that reaches the map only at its own center. It used to be a hard black hole the size of the gate.
 - Echo edges, the cone of silence around the radar, and the end of the sweep feather over half a gate past the measured footprint: 125 m for 250 m gates.
@@ -155,15 +153,15 @@ The packaged Phase 4 gate runs these shipped snippets on the packaged GPU (`prob
 - Exactly two cross-IPC transfer credits remain the hard transfer bound.
 - WebGL context recovery restores the visible observation first and preserves or safely falls back from the chosen display mode.
 - The radar layer remains below neutral operational map context, and decorative chrome color never washes over radar pixels.
-- The visibility curve is encoded in the existing 256-entry palette texture. It adds no per-frame upload, resident observation, network path, or shader branch.
+- The band colors live in the existing palette textures: 256 entries per raw code for Site, one texel per band for National. They add no per-frame upload, resident observation, or network path.
 
 ## 9. Acceptance gates
 
 Source-level evidence must prove:
 
 1. every valid reflectivity raw code maps through the exact scale/offset equation;
-2. the pinned five-dBZ RGB colors match the captured NOAA/NWS operational `SR_BREF` reference;
-3. weak-return alpha is integer, bounded, monotonic from 0 through 20 dBZ, transparent at or below 0 dBZ, and fully opaque at or above 20 dBZ;
+2. the fifteen band colors match the NWS table, and each band holds one color from its lower edge to the next;
+3. nothing below 5 dBZ is drawn, every band from 5 dBZ is fully opaque, and range folding is distinct from every band;
 4. below-threshold, range-folded, missing, and unknown statuses remain distinct;
 5. uploaded palette bytes remain correctly premultiplied for WebGL;
 6. `Smooth` and `Native` use the same observation and point interrogation result;

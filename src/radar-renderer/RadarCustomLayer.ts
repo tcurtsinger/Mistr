@@ -88,27 +88,36 @@ float signedAngleDifference(float value, float reference) {
   return mod(value - reference + PI, TWO_PI) - PI;
 }
 
-// The premultiplied palette color of a measured cell. Below-threshold,
-// range-folded, and out-of-sweep cells are not measurements, so they are
-// transparent and Smooth never carries a value across them.
-vec4 validGateColor(int radialIndex, int gateIndex) {
+// The raw code of a measured cell. Below-threshold, range-folded, and
+// out-of-sweep cells are not measurements, so they carry no value and Smooth
+// never blends across them.
+float validGateCode(int radialIndex, int gateIndex, out float valid) {
+  valid = 0.0;
   if (
     radialIndex < 0 || radialIndex >= u_radial_count
     || gateIndex < 0 || gateIndex >= u_gate_count
-  ) return vec4(0.0);
+  ) return 0.0;
   uint status = texelFetch(u_statuses, ivec2(gateIndex, radialIndex), 0).r;
-  if (status != uint(0)) return vec4(0.0);
-  uint rawCode = texelFetch(u_raw_codes, ivec2(gateIndex, radialIndex), 0).r;
-  return texelFetch(u_palette, ivec2(int(rawCode), 0), 0);
+  if (status != uint(0)) return 0.0;
+  valid = 1.0;
+  return float(texelFetch(u_raw_codes, ivec2(gateIndex, radialIndex), 0).r);
 }
 
-// Smooth reflectivity blends two gates along each of the two nearest radials.
-// Cells that are not measurements are transparent, so the blend of
-// premultiplied colors is the valid neighbors' color faded by the weight they
-// hold (docs/25 section 6). That weight is 1 inside an echo and falls to 0 at
-// the center of the first cell that is not a measurement, so a below-threshold
-// gate inside a storm is a soft dimple, not a hole, and echo edges and the
-// cone of silence feather instead of cutting off.
+// The NWS band color of a fractional reflectivity code: the palette entry of
+// the code at or below it, never a mix of two entries, so a band edge stays
+// one solid color either side, as National picks one band per value.
+vec4 reflectivityColor(float rawCode) {
+  int code = int(floor(clamp(rawCode, 2.0, 255.0)));
+  return texelFetch(u_palette, ivec2(code, 0), 0);
+}
+
+// Smooth reflectivity works as National Smooth does (docs/25 section 6): it
+// blends the measured values of the valid neighbors, never their colors, so
+// every pixel is an NWS band color, and fades by the weight those neighbors
+// hold. That weight is 1 inside an echo and falls to 0 at the center of the
+// first cell that is not a measurement, so a below-threshold gate inside a
+// storm is a soft dimple, not a hole, and echo edges and the cone of silence
+// feather instead of cutting off.
 vec4 smoothReflectivityColor(
   int radialIndex,
   int neighborRadialIndex,
@@ -118,19 +127,26 @@ vec4 smoothReflectivityColor(
   int lowerGate = int(floor(gateCoordinate));
   int upperGate = lowerGate + 1;
   float gateWeight = fract(gateCoordinate);
-  return mix(
-    mix(
-      validGateColor(radialIndex, lowerGate),
-      validGateColor(radialIndex, upperGate),
-      gateWeight
-    ),
-    mix(
-      validGateColor(neighborRadialIndex, lowerGate),
-      validGateColor(neighborRadialIndex, upperGate),
-      gateWeight
-    ),
-    radialWeight
+  float valid00;
+  float valid01;
+  float valid10;
+  float valid11;
+  vec4 codes = vec4(
+    validGateCode(radialIndex, lowerGate, valid00),
+    validGateCode(radialIndex, upperGate, valid01),
+    validGateCode(neighborRadialIndex, lowerGate, valid10),
+    validGateCode(neighborRadialIndex, upperGate, valid11)
   );
+  vec4 weights = vec4(
+    (1.0 - radialWeight) * (1.0 - gateWeight),
+    (1.0 - radialWeight) * gateWeight,
+    radialWeight * (1.0 - gateWeight),
+    radialWeight * gateWeight
+  ) * vec4(valid00, valid01, valid10, valid11);
+  float coverage = dot(weights, vec4(1.0));
+  if (coverage < 0.0001) return vec4(0.0);
+  // The palette is premultiplied, so scaling the whole color scales opacity.
+  return reflectivityColor(dot(weights, codes) / coverage) * coverage;
 }
 
 void main() {
