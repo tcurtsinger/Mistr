@@ -46,7 +46,6 @@ describe("quiet operational radar map context", () => {
     expect(validateStyleMin(style)).toEqual([]);
     expect(new Set(layers.map((candidate) => candidate.id)).size).toBe(layers.length);
     expect(Object.keys(style.sources).sort()).toEqual([
-      "ne2_shaded",
       "openmaptiles",
       "openmaptiles_lakes",
     ]);
@@ -63,6 +62,12 @@ describe("quiet operational radar map context", () => {
     expect(paint("water")["fill-color"]).toBe("rgb(15,20,28)");
     expect(paint("waterway")["line-color"]).toBe("rgb(15,20,28)");
     expect(paint("landcover_wood")["fill-color"]).toBe("rgb(20,21,22)");
+    // The sprite sheet has no wood pattern; a pattern would stop the fill drawing.
+    expect(paint("landcover_wood")).not.toHaveProperty("fill-pattern");
+    // Building footprints read as a faint raised fill, with no lighter
+    // outline to trace tile cuts.
+    expect(paint("building")["fill-color"]).toBe("rgb(18,18,20)");
+    expect(paint("building")).not.toHaveProperty("fill-outline-color");
     expect(paint("landuse_park")["fill-color"]).toBe("rgb(20,21,22)");
   });
 
@@ -267,7 +272,7 @@ describe("quiet operational radar map context", () => {
       "interpolate",
       ["linear"],
       ["zoom"],
-      6.75,
+      8,
       [
         "match",
         ["get", "network"],
@@ -275,7 +280,7 @@ describe("quiet operational radar map context", () => {
         1,
         0,
       ],
-      7.25,
+      8.5,
       1,
     ];
 
