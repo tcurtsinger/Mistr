@@ -251,7 +251,8 @@ async function analyzeRadarPixels(nativePng, smoothPng) {
         && evidence.smoothSignalRatio > 0.01
         && evidence.changedRatio > 0.01
         && evidence.commonBackgroundRatio > 0.001
-        && evidence.smoothSignalPixels > evidence.nativeSignalPixels
+        && evidence.smoothSignalPixels >= evidence.nativeSignalPixels * 0.5
+        && evidence.smoothSignalPixels <= evidence.nativeSignalPixels * 2
     };
   })()`, true, 30_000);
 }

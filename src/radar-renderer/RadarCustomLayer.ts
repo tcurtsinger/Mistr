@@ -103,14 +103,12 @@ float validGateCode(int radialIndex, int gateIndex, out float valid) {
   return float(texelFetch(u_raw_codes, ivec2(gateIndex, radialIndex), 0).r);
 }
 
-// The palette color of a fractional reflectivity code. Neighboring codes are
-// one scale step apart, so the mix only softens a band edge over that step.
+// The NWS band color of a fractional reflectivity code: the palette entry of
+// the code at or below it, never a mix of two entries, so a band edge stays
+// one solid color either side, as National picks one band per value.
 vec4 reflectivityColor(float rawCode) {
-  float code = clamp(rawCode, 2.0, 255.0);
-  int lowerCode = int(floor(code));
-  vec4 lowerColor = texelFetch(u_palette, ivec2(lowerCode, 0), 0);
-  vec4 upperColor = texelFetch(u_palette, ivec2(min(lowerCode + 1, 255), 0), 0);
-  return mix(lowerColor, upperColor, code - float(lowerCode));
+  int code = int(floor(clamp(rawCode, 2.0, 255.0)));
+  return texelFetch(u_palette, ivec2(code, 0), 0);
 }
 
 // Smooth reflectivity works as National Smooth does (docs/25 section 6): it

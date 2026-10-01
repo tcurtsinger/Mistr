@@ -54,6 +54,9 @@ describe("Radar custom-layer shader contract", () => {
     // Values blend, never colors, so every pixel is a palette band; the valid
     // share of the footprint is the opacity.
     expect(fragment).toContain("reflectivityColor(dot(weights, codes) / coverage) * coverage");
+    // One palette entry per value: no mix of two bands at a band edge.
+    expect(fragment).toContain("int code = int(floor(clamp(rawCode, 2.0, 255.0)));");
+    expect(fragment).not.toContain("mix(lowerColor, upperColor");
     expect(fragment).not.toContain("validGateColor");
     expect(fragment).not.toContain("smoothValidColor");
     // Range folding stays categorical; a below-threshold center no longer cuts a hole in Smooth.

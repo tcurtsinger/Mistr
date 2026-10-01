@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   parseAcceptanceWorkload,
   phase4ScenarioTimeoutMs,
+  smoothCoverageWithinNative,
   validateGpuGeometry,
   validatePhase4Acceptance,
 } from "./phase4-packaged-validation.mjs";
@@ -114,6 +115,17 @@ describe("Phase 4 packaged acceptance validation", () => {
       passingDisplayModeEvidence(),
       evidence,
     )).toContain("display_pixels");
+  });
+
+  it("accepts Smooth covering less than Native but rejects an empty or flooding Smooth", () => {
+    // The 2026-10-01 clear-air archive: Smooth drops weak specks below 5 dBZ.
+    expect(smoothCoverageWithinNative({ nativeSignalPixels: 266_540, smoothSignalPixels: 230_432 }))
+      .toBe(true);
+    expect(smoothCoverageWithinNative({ nativeSignalPixels: 266_540, smoothSignalPixels: 100_000 }))
+      .toBe(false);
+    expect(smoothCoverageWithinNative({ nativeSignalPixels: 266_540, smoothSignalPixels: 600_000 }))
+      .toBe(false);
+    expect(smoothCoverageWithinNative({ nativeSignalPixels: 0, smoothSignalPixels: 0 })).toBe(false);
   });
 });
 
