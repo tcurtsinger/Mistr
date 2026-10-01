@@ -115,10 +115,13 @@ export function inspectionReadoutPresentation(
       label: "Unavailable",
     };
   }
+  // A below-threshold Site gate and the National mosaic's missing sentinel
+  // both mean the radar is working and sees nothing at this point: clear sky,
+  // not an outage, so they read the same.
   const status = ({
-    below_threshold: ["Below threshold", "Radar value is below the reporting threshold."],
+    below_threshold: ["No echo", "The radar sees no echo at the selected point."],
     range_folded: ["Range folded", "Radar value is range folded."],
-    missing: ["No data", "Radar data is missing at the selected point."],
+    missing: ["No echo", "The radar sees no echo at the selected point."],
     no_coverage: ["No coverage", "No radar coverage exists at the selected point."],
   } as const)[interrogation.status];
   return {
