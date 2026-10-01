@@ -99,12 +99,26 @@ This means `Smooth` feathers up to **half a cell (~500 m) past the measured foot
 
 `src/national-radar/sampling.ts` mirrors this contract outside WebGL so it stays unit-tested; the shader in `src/national-radar/NationalGridLayer.ts` must match it.
 
+#### Site `Smooth` edge behavior
+
+Site reflectivity follows the same edge contract on the polar grid. A sample blends two gates along each of its two nearest radials. Below-threshold, range-folded, and out-of-sweep gates are transparent, so the blend of premultiplied colors is the valid gates' color faded by the weight they hold, and that weight is the fragment's opacity. No value is carried across a gate that is not a measurement.
+
+Site blends palette colors where National blends measured values. On the current palette, 30 dBZ is darker than both 25 and 35 dBZ, so a value blend across the gate-to-gate speckle of Level II drew a dark contour ring around every 25-to-35 dBZ patch. Site moves to value blending with a palette whose lightness rises with intensity.
+
+- A below-threshold gate inside a storm is a soft dimple that reaches the map only at its own center. It used to be a hard black hole the size of the gate.
+- Echo edges, the cone of silence around the radar, and the end of the sweep feather over half a gate past the measured footprint: 125 m for 250 m gates.
+- Range folding stays categorical. A range-folded gate paints its solid color in both modes, and no blend crosses it.
+- Storm-relative velocity is categorical and is never smoothed.
+
+The shader in `src/radar-renderer/RadarCustomLayer.ts` carries this contract.
+
 Neither mode adds resolution. The MRMS CONUS mosaic is a 0.01-degree (roughly 1 km) grid, so beyond about zoom 9 each measured cell covers many screen pixels and remains individually visible. Close-range structural detail is the selected-site Level II product's job, not the national mosaic's.
 
 ### `Native`
 
 - Uses the exact native polar gate selected by nearest sampling.
 - Keeps native bin and radial boundaries visible.
+- Closes the hairline seams between adjacent radials. Native beam widths and encoded centers differ by a few hundredths of a degree, which left 1 px seams and pinholes between consecutive beams. A bearing between two radials whose centers are at most 1.5 mean beam widths apart belongs to the nearer one. A wider gap is a missing radial and stays open. Inspection uses the same rule (`coveringRadial` in `src/radar-renderer/geo.ts`), and so does `Smooth` when it picks the center gate.
 - Is the safe rollback presentation if the filtered path cannot initialize or recover.
 
 Changing modes leaves the selected site, observation identifier, measured time, freshness age, timeline position, playback state, resident-history ownership, and authoritative paint semantics unchanged.

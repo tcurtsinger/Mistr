@@ -8,7 +8,7 @@ import {
   interrogateLngLat,
   RadarModelError,
 } from "./cpuModel";
-import { destinationPoint, groundRangeForSlantRange } from "./geo";
+import { buildAzimuthLookup, destinationPoint, groundRangeForSlantRange } from "./geo";
 
 const GOLDEN_PATH = new URL(
   "../../fixtures/expected/phase-2/packed-sweep-v1.bin",
@@ -102,6 +102,32 @@ describe("RadarSweepCpuModel", () => {
       groundRangeForSlantRange(model.firstGateCenterM, model.elevations[1]),
     );
     expect(interrogateLngLat(model, outsideBeamPoint)).toBeNull();
+  });
+
+  it("names the nearer radial in a seam between adjacent beams", () => {
+    const model = createRadarSweepCpuModel(golden);
+    const seamAzimuths = [10, 10.55];
+    model.azimuths.set(seamAzimuths);
+    model.beamWidths.fill(0.5);
+    model.azimuthLookup.set(buildAzimuthLookup(
+      Array.from({ length: 2 }, (_, index) => ({
+        ...golden.radial(index),
+        azimuthDegrees: seamAzimuths[index],
+        beamWidthDegrees: 0.5,
+      })),
+    ));
+    const pointAt = (bearing: number) => destinationPoint(
+      model.center,
+      bearing,
+      groundRangeForSlantRange(
+        model.firstGateCenterM + 2 * model.gateSpacingM,
+        model.elevations[0],
+      ),
+    );
+    // Radial 0 ends at 10.25 and radial 1 starts at 10.30.
+    expect(interrogateLngLat(model, pointAt(10.27))).toMatchObject({ radialIndex: 0, gateIndex: 2 });
+    expect(interrogateLngLat(model, pointAt(10.28))).toMatchObject({ radialIndex: 1, gateIndex: 2 });
+    expect(interrogateLngLat(model, pointAt(10.9))).toBeNull();
   });
 
   it("rejects unsupported products and invalid statuses", () => {

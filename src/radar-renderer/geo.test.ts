@@ -5,6 +5,7 @@ import {
   bearingWithinRadial,
   buildAzimuthLookup,
   buildMercatorBounds,
+  coveringRadial,
   destinationPoint,
   gateIndexForRange,
   lngLatToMercator,
@@ -73,6 +74,36 @@ describe("native polar indexing", () => {
     expect(radialFromLookup(lookup, 10.54)).toBe(1);
     expect(bearingWithinRadial(10.5, 10, 1)).toBe(true);
     expect(bearingWithinRadial(10.54, 10, 1)).toBe(false);
+  });
+
+  it("closes seams between adjacent beams and keeps a missing radial open", () => {
+    // 0.25 and 0.85 leave a 0.1-degree seam; 1.35 to 2.35 is a missing radial.
+    const radials: PackedRadial[] = [
+      radial(0.25, 0.5),
+      radial(0.85, 0.5),
+      radial(1.35, 0.5),
+      radial(2.35, 0.5),
+    ];
+    const azimuths = radials.map((entry) => entry.azimuthDegrees);
+    const beamWidths = radials.map((entry) => entry.beamWidthDegrees);
+    const lookup = buildAzimuthLookup(radials);
+    const covering = (bearing: number) => {
+      const lookupRadial = radialFromLookup(lookup, bearing);
+      return lookupRadial === null
+        ? null
+        : coveringRadial(azimuths, beamWidths, lookupRadial, bearing);
+    };
+    // The seam belongs to whichever center is nearer.
+    expect(covering(0.53)).toBe(0);
+    expect(covering(0.57)).toBe(1);
+    expect(covering(0.25)).toBe(0);
+    // A gap of two beam widths stays open, and so does the wrap to 0.25.
+    expect(covering(1.58)).toBe(2);
+    expect(covering(1.7)).toBeNull();
+    expect(covering(1.85)).toBeNull();
+    expect(covering(2.62)).toBeNull();
+    // Overlapping beams still paint the nearer center.
+    expect(coveringRadial([10, 10.5], [1, 1], 0, 10.3)).toBe(1);
   });
 
   it("rejects unordered or duplicate radial azimuths", () => {
